@@ -1,0 +1,13 @@
+{
+  "name": "mt5-grpc-client",
+  "version": "1.0.0",
+  "description": "Pure C++ gRPC client for MetaTrader 5",
+  "homepage": "https://github.com/hedgebot/mt5-grpc-client",
+  "supports": "windows",
+  "dependencies": [
+    "grpc",
+    "protobuf",
+    "nlohmann-json"
+  ],
+  "builtin-baseline": "c8696863d371ab7f46e213d8f5ca923c4aef2a00"
+}
