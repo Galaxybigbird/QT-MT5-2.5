@@ -4,6 +4,32 @@ package trading;
 option go_package = "github.com/hedgebot/proto/trading";
 option csharp_namespace = "Trading.Proto";
 
+// Unified logging
+message LogEvent {
+  int64 timestamp_ns = 1;
+  string source = 2;        // bridge|nt|mt5
+  string level = 3;         // TRACE|DEBUG|INFO|WARN|ERROR
+  string component = 4;     // queue|stream|trade_exec|close_sync|...
+  string message = 5;
+  string base_id = 6;
+  string trade_id = 7;
+  string nt_order_id = 8;
+  uint64 mt5_ticket = 9;
+  int32 queue_size = 10;
+  int32 net_position = 11;
+  double hedge_size = 12;
+  string error_code = 13;
+  string stack = 14;
+  map<string,string> tags = 15;
+  string schema_version = 16; // added 2025-08 for enrichment tracking
+  string correlation_id = 17; // trace/log correlation across systems
+}
+
+message LogAck {
+  uint32 accepted = 1;
+  uint32 dropped = 2;
+}
+
 // Core trade message
 message Trade {
   string id = 1;
@@ -25,6 +51,7 @@ message Trade {
   double nt_daily_pnl = 15;
   string nt_trade_result = 16;    // "win", "loss", "pending"
   int32 nt_session_trades = 17;
+  uint64 mt5_ticket = 18;         // MT5 position ticket number for CLOSE_HEDGE targeting
 }
 
 // Hedge closure notification
@@ -161,4 +188,9 @@ service StreamingService {
   
   // Trailing stop updates stream
   rpc TrailingUpdatesStream(stream TrailingStopUpdate) returns (stream GenericResponse);
+}
+
+// Logging service (initially unary; can evolve to streaming later)
+service LoggingService {
+  rpc Log(LogEvent) returns (LogAck);
 }

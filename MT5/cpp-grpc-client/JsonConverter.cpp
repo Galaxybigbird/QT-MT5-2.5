@@ -5,6 +5,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <ctime>
 
 using nlohmann::json;
 
@@ -27,7 +28,9 @@ std::string JsonConverter::TradeToJson(const trading::Trade& trade) {
             {"nt_balance", trade.nt_balance()},
             {"nt_daily_pnl", trade.nt_daily_pnl()},
             {"nt_trade_result", trade.nt_trade_result()},
-            {"nt_session_trades", trade.nt_session_trades()}
+            {"nt_session_trades", trade.nt_session_trades()},
+            // Important for CLOSE_HEDGE targeting in EA
+            {"mt5_ticket", trade.mt5_ticket()}
         };
         
         return trade_json.dump();
@@ -60,7 +63,7 @@ trading::Trade JsonConverter::JsonToTrade(const std::string& json_str) {
         trade.set_nt_trade_result(JsonConverter::GetStringField(trade_json, "nt_trade_result"));
         trade.set_nt_session_trades(JsonConverter::GetIntField(trade_json, "nt_session_trades"));
         
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
         // Return empty trade on error
         // Error handling should be done at caller level
     }
@@ -69,12 +72,7 @@ trading::Trade JsonConverter::JsonToTrade(const std::string& json_str) {
 }
 
 bool JsonConverter::IsValidJson(const std::string& json_str) {
-    try {
-        json::parse(json_str);
-        return true;
-    } catch (const std::exception& e) {
-        return false;
-    }
+    return nlohmann::json::accept(json_str);
 }
 
 std::string JsonConverter::GetStringField(const nlohmann::json& json_obj, const std::string& field, const std::string& default_val) {
@@ -82,7 +80,7 @@ std::string JsonConverter::GetStringField(const nlohmann::json& json_obj, const 
         if (json_obj.contains(field) && json_obj[field].is_string()) {
             return json_obj[field].get<std::string>();
         }
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
         // Return default on error
     }
     return default_val;
@@ -99,7 +97,7 @@ double JsonConverter::GetDoubleField(const nlohmann::json& json_obj, const std::
                 return std::stod(str_val);
             }
         }
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
         // Return default on error
     }
     return default_val;
@@ -118,7 +116,7 @@ int JsonConverter::GetIntField(const nlohmann::json& json_obj, const std::string
                 return std::stoi(str_val);
             }
         }
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
         // Return default on error
     }
     return default_val;
@@ -131,14 +129,14 @@ bool JsonConverter::GetBoolField(const nlohmann::json& json_obj, const std::stri
                 return json_obj[field].get<bool>();
             } else if (json_obj[field].is_string()) {
                 std::string str_val = json_obj[field].get<std::string>();
-                std::transform(str_val.begin(), str_val.end(), str_val.begin(), 
+                (void)std::transform(str_val.begin(), str_val.end(), str_val.begin(),
                               [](unsigned char c){ return std::tolower(c); });
                 return str_val == "true" || str_val == "1" || str_val == "yes";
             } else if (json_obj[field].is_number()) {
                 return json_obj[field].get<double>() != 0.0;
             }
         }
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
         // Return default on error
     }
     return default_val;
@@ -167,8 +165,10 @@ std::string JsonConverter::GetCurrentTimestamp() {
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
     
+    std::tm tm_buf{};
+    gmtime_s(&tm_buf, &time_t);
     std::stringstream ss;
-    ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%dT%H:%M:%SZ");
+    ss << std::put_time(&tm_buf, "%Y-%m-%dT%H:%M:%SZ");
     return ss.str();
 }
 
@@ -176,8 +176,10 @@ std::string JsonConverter::FormatTimestamp(int64_t timestamp) {
     auto time_point = std::chrono::system_clock::from_time_t(timestamp);
     auto time_t = std::chrono::system_clock::to_time_t(time_point);
     
+    std::tm tm_buf{};
+    gmtime_s(&tm_buf, &time_t);
     std::stringstream ss;
-    ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");
+    ss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
     return ss.str();
 }
 

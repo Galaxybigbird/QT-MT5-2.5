@@ -1,8 +1,9 @@
+//go:build !headless
+
 package main
 
 import (
 	"embed"
-	"fmt" // Added for debug prints
 	"log"
 
 	"github.com/wailsapp/wails/v2"
@@ -18,12 +19,10 @@ var assets embed.FS
 var icon []byte
 
 func main() {
-	fmt.Println("DEBUG: main.go - Start of main") // Added for debug
 	// Create an instance of the app structure
 	app := NewApp()
 
 	// Create application with options
-	fmt.Println("DEBUG: main.go - Before wails.Run()") // Added for debug
 	err := wails.Run(&options.App{
 		Title:             "Bridge Controller",
 		Width:             800,
@@ -48,7 +47,6 @@ func main() {
 			app,
 		},
 	})
-	fmt.Println("DEBUG: main.go - After wails.Run()") // Added for debug
 
 	if err != nil {
 		log.Fatal(err)

@@ -6,6 +6,7 @@ GrpcIsConnected
 GrpcReconnect
 GrpcStartTradeStream
 GrpcStopTradeStream
+GrpcLog
 GrpcGetNextTrade
 GrpcGetTradeQueueSize
 GrpcSubmitTradeResult
@@ -13,4 +14,3 @@ GrpcHealthCheck
 GrpcNotifyHedgeClose
 GrpcSubmitElasticUpdate
 GrpcSubmitTrailingUpdate
-GrpcGetLastErrorMessage

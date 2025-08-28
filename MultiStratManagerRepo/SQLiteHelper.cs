@@ -40,8 +40,21 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             try
             {
-                // Direct NinjaTrader output - no bridge communication
-                NinjaTrader.Code.Output.Process($"[SQLITE_{level}][{category}] {message}", PrintTo.OutputTab1);
+                var mgr = MultiStratManager.Instance;
+                if (mgr != null)
+                {
+                    switch ((level ?? "").ToUpperInvariant())
+                    {
+                        case "DEBUG": mgr.LogDebug(category, message); break;
+                        case "WARN": mgr.LogWarn(category, message); break;
+                        case "ERROR": mgr.LogError(category, message); break;
+                        default: mgr.LogInfo(category, message); break;
+                    }
+                }
+                else
+                {
+                    NinjaTrader.Code.Output.Process($"[SQLITE_{level}][{category}] {message}", PrintTo.OutputTab1);
+                }
             }
             catch (Exception ex)
             {

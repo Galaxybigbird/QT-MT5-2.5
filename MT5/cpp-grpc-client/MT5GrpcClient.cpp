@@ -24,6 +24,7 @@ using grpc::ClientWriter;
 using grpc::ClientReaderWriter;
 using trading::TradingService;
 using trading::StreamingService;
+using trading::LoggingService;
 using trading::Trade;
 using trading::HealthRequest;
 using trading::HealthResponse;
@@ -32,6 +33,8 @@ using trading::MT5TradeResult;
 using trading::HedgeCloseNotification;
 using trading::ElasticHedgeUpdate;
 using trading::TrailingStopUpdate;
+using trading::LogEvent;
+using trading::LogAck;
 using nlohmann::json;
 
 // Global state
@@ -40,6 +43,7 @@ public:
     std::shared_ptr<Channel> channel_;
     std::unique_ptr<TradingService::Stub> trading_stub_;
     std::unique_ptr<StreamingService::Stub> streaming_stub_;
+    std::unique_ptr<LoggingService::Stub> logging_stub_;
     
     std::atomic<bool> is_initialized_{false};
     std::atomic<bool> is_connected_{false};
@@ -74,8 +78,9 @@ public:
             streaming_thread_.join();
         }
         
-        trading_stub_.reset();
-        streaming_stub_.reset();
+    trading_stub_.reset();
+    streaming_stub_.reset();
+    logging_stub_.reset();
         channel_.reset();
         
         is_initialized_ = false;
@@ -200,7 +205,9 @@ void StreamingThreadFunction() {
                     {"nt_balance", trade.nt_balance()},
                     {"nt_daily_pnl", trade.nt_daily_pnl()},
                     {"nt_trade_result", trade.nt_trade_result()},
-                    {"nt_session_trades", trade.nt_session_trades()}
+                    {"nt_session_trades", trade.nt_session_trades()},
+                    // Critical for deterministic CLOSE_HEDGE when multiple hedges exist
+                    {"mt5_ticket", trade.mt5_ticket()}
                 };
                 
                 g_client_state.EnqueueTrade(trade_json.dump());
@@ -272,9 +279,10 @@ MT5_GRPC_API int __stdcall GrpcInitialize(const wchar_t* server_address, int por
             return ERROR_INIT_FAILED;
         }
         
-        // Create stubs
-        g_client_state.trading_stub_ = TradingService::NewStub(g_client_state.channel_);
-        g_client_state.streaming_stub_ = StreamingService::NewStub(g_client_state.channel_);
+    // Create stubs
+    g_client_state.trading_stub_ = TradingService::NewStub(g_client_state.channel_);
+    g_client_state.streaming_stub_ = StreamingService::NewStub(g_client_state.channel_);
+    g_client_state.logging_stub_ = LoggingService::NewStub(g_client_state.channel_);
         
         // Test connection with health check
         ClientContext context;
@@ -670,6 +678,63 @@ MT5_GRPC_API int __stdcall GrpcSetStreamingTimeout(int timeout_ms) {
 MT5_GRPC_API int __stdcall GrpcSetMaxRetries(int max_retries) {
     g_client_state.max_retries_ = max_retries;
     return ERROR_SUCCESS;
+}
+
+MT5_GRPC_API int __stdcall GrpcLog(const wchar_t* log_json) {
+    try {
+        if (!g_client_state.is_initialized_ || !g_client_state.logging_stub_) {
+            return ERROR_NOT_INITIALIZED;
+        }
+
+        std::string json_str = WideStringToUTF8(log_json);
+        json data = json::parse(json_str, nullptr, false);
+        if (data.is_discarded()) {
+            g_client_state.SetLastError("Invalid JSON for LogEvent");
+            return ERROR_SERIALIZATION;
+        }
+
+        ClientContext context;
+        auto deadline = std::chrono::system_clock::now() + 
+                       std::chrono::milliseconds(g_client_state.connection_timeout_ms_);
+        context.set_deadline(deadline);
+
+        LogEvent evt;
+        // Minimal required fields with safe defaults
+        evt.set_timestamp_ns(data.value("timestamp_ns", 0LL));
+        evt.set_source(data.value("source", std::string("mt5")));
+        evt.set_level(data.value("level", std::string("INFO")));
+        evt.set_component(data.value("component", std::string("EA")));
+        evt.set_message(data.value("message", std::string("")));
+        evt.set_base_id(data.value("base_id", std::string("")));
+        evt.set_trade_id(data.value("trade_id", std::string("")));
+        evt.set_nt_order_id(data.value("nt_order_id", std::string("")));
+        evt.set_mt5_ticket(data.value("mt5_ticket", 0ULL));
+        evt.set_queue_size(data.value("queue_size", 0));
+        evt.set_net_position(data.value("net_position", 0));
+        evt.set_hedge_size(data.value("hedge_size", 0.0));
+        evt.set_error_code(data.value("error_code", std::string("")));
+        evt.set_stack(data.value("stack", std::string("")));
+        evt.set_schema_version(data.value("schema_version", std::string("mt5-1")));
+        evt.set_correlation_id(data.value("correlation_id", std::string("")));
+
+        // Optional tags object
+        if (data.contains("tags") && data["tags"].is_object()) {
+            for (auto it = data["tags"].begin(); it != data["tags"].end(); ++it) {
+                (*evt.mutable_tags())[it.key()] = it.value().is_string() ? it.value().get<std::string>() : it.value().dump();
+            }
+        }
+
+        LogAck ack;
+        auto status = g_client_state.logging_stub_->Log(&context, evt, &ack);
+        if (status.ok() && ack.accepted() > 0) {
+            return ERROR_SUCCESS;
+        }
+        g_client_state.SetLastError("Log failed: " + status.error_message());
+        return ERROR_CONNECTION_FAILED;
+    } catch (const std::exception& e) {
+        g_client_state.SetLastError("Log exception: " + std::string(e.what()));
+        return ERROR_SERIALIZATION;
+    }
 }
 
 } // extern "C"

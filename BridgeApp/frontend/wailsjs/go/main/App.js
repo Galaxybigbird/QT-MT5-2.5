@@ -14,8 +14,8 @@ export function AttemptReconnect(arg1, arg2, arg3) {
   return window['go']['main']['App']['AttemptReconnect'](arg1, arg2, arg3);
 }
 
-export function DisableAllProtocols() {
-  return window['go']['main']['App']['DisableAllProtocols']();
+export function DisableAllProtocols(arg1) {
+  return window['go']['main']['App']['DisableAllProtocols'](arg1);
 }
 
 export function GetHedgeSize() {

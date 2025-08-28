@@ -10,9 +10,10 @@ namespace NTGrpcClient
 {
     internal class TradingClient : ITradingClient
     {
-        private readonly Channel _channel;
+    private readonly Channel _channel;
         private readonly TradingService.TradingServiceClient _client;
         private readonly StreamingService.StreamingServiceClient _streamingClient;
+    private readonly LoggingService.LoggingServiceClient _loggingClient;
         private CancellationTokenSource _streamCancellation;
         private bool _disposed = false;
         
@@ -23,14 +24,29 @@ namespace NTGrpcClient
         {
             try
             {
-                // Extract host and port from serverAddress (remove http:// if present)
+                // Extract host and port, normalize localhost to 127.0.0.1 for Grpc.Core
                 var address = serverAddress.Replace("http://", "").Replace("https://", "");
+                if (address.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase))
+                {
+                    address = "127.0.0.1:" + address.Substring("localhost:".Length);
+                }
                 
                 // For .NET Framework 4.8, use Grpc.Core's native implementation
-                _channel = new Channel(address, ChannelCredentials.Insecure);
+                // Optionally specify a small connect timeout via environment if configured
+                // Configure keepalive to reduce intermittent disconnects
+                var options = new[]
+                {
+                    new ChannelOption("grpc.keepalive_time_ms", 15000),           // ping every 15s
+                    new ChannelOption("grpc.keepalive_timeout_ms", 5000),        // 5s timeout
+                    new ChannelOption("grpc.http2.min_time_between_pings_ms", 10000),
+                    new ChannelOption("grpc.keepalive_permit_without_calls", 1),
+                    new ChannelOption("grpc.max_reconnect_backoff_ms", 5000)    // speed up reconnects
+                };
+                _channel = new Channel(address, ChannelCredentials.Insecure, options);
                 
                 _client = new TradingService.TradingServiceClient(_channel);
                 _streamingClient = new StreamingService.StreamingServiceClient(_channel);
+                _loggingClient = new LoggingService.LoggingServiceClient(_channel);
                 
                 LastError = $"Grpc.Core channel created for {address}";
             }
@@ -42,6 +58,55 @@ namespace NTGrpcClient
             
             // Test connection with better error handling
             Task.Run(async () => await TestConnection());
+        }
+
+    public void LogFireAndForget(string level, string component, string message, string tradeId = "", string errorCode = "", string baseId = "", string correlationId = "")
+        {
+            try
+            {
+                var nowNs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000_000L;
+                var ev = new LogEvent
+                {
+                    TimestampNs = nowNs,
+                    Source = "nt",
+                    Level = string.IsNullOrWhiteSpace(level) ? "INFO" : level,
+                    Component = component ?? "nt_addon",
+                    Message = message ?? string.Empty,
+                    TradeId = tradeId ?? string.Empty,
+                    ErrorCode = errorCode ?? string.Empty,
+                    BaseId = baseId ?? string.Empty
+                };
+                // Elevate base_id from embedded JSON or plain token if not provided
+                if (string.IsNullOrWhiteSpace(ev.BaseId) && !string.IsNullOrWhiteSpace(ev.Message))
+                {
+                    try
+                    {
+                        var m = System.Text.RegularExpressions.Regex.Match(ev.Message, "\\\"base_id\\\"\\s*:\\s*\\\"([^\\\"\\\\]+)\\\"", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (m.Success) ev.BaseId = m.Groups[1].Value.Trim();
+                        if (string.IsNullOrWhiteSpace(ev.BaseId))
+                        {
+                            var m2 = System.Text.RegularExpressions.Regex.Match(ev.Message, "base_id=([A-Za-z0-9_\\-]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                            if (m2.Success) ev.BaseId = m2.Groups[1].Value.Trim();
+                        }
+                    }
+                    catch { }
+                }
+                if (!string.IsNullOrEmpty(correlationId))
+                {
+                    // Proto in this project may not expose CorrelationId yet; store in tags
+                    ev.Tags["correlation_id"] = correlationId;
+                }
+                else if (!string.IsNullOrWhiteSpace(ev.BaseId))
+                {
+                    var corr = CorrelationProvider.Get(ev.BaseId);
+                    if (!string.IsNullOrEmpty(corr)) { ev.Tags["correlation_id"] = corr; }
+                }
+                _ = _loggingClient.LogAsync(ev);
+            }
+            catch
+            {
+                // swallow logging errors
+            }
         }
         
         private async Task TestConnection()
@@ -224,18 +289,39 @@ namespace NTGrpcClient
             {
                 try
                 {
-                    using (var stream = _streamingClient.TradingStream())
+                    // Reconnect loop with jitter backoff
+                    var rand = new Random();
+                    int attempt = 0;
+                    while (!_streamCancellation.IsCancellationRequested)
                     {
-                        // Send initial request
-                        await stream.RequestStream.WriteAsync(new Trade { Id = "init_stream" });
-                        
-                        // Read responses
-                        while (await stream.ResponseStream.MoveNext(_streamCancellation.Token))
+                        try
                         {
-                            var trade = stream.ResponseStream.Current;
-                            var tradeJson = ProtoTradeToJson(trade);
-                            onTradeReceived?.Invoke(tradeJson);
+                            using (var stream = _streamingClient.TradingStream())
+                            {
+                                await stream.RequestStream.WriteAsync(new Trade { Id = "init_stream" });
+                                // Reset attempt on successful connect
+                                attempt = 0;
+                                while (await stream.ResponseStream.MoveNext(_streamCancellation.Token))
+                                {
+                                    var trade = stream.ResponseStream.Current;
+                                    var tradeJson = ProtoTradeToJson(trade);
+                                    onTradeReceived?.Invoke(tradeJson);
+                                }
+                            }
                         }
+                        catch (OperationCanceledException)
+                        {
+                            break; // normal shutdown
+                        }
+                        catch (Exception)
+                        {
+                            // transient error, fall through to backoff
+                        }
+
+                        // Exponential backoff with jitter (max ~5s)
+                        attempt++;
+                        var delayMs = Math.Min(5000, (int)(Math.Pow(2, Math.Min(6, attempt)) * 100) + rand.Next(0, 250));
+                        await Task.Delay(delayMs, _streamCancellation.Token).ContinueWith(_ => { });
                     }
                 }
                 catch (OperationCanceledException)
@@ -244,7 +330,7 @@ namespace NTGrpcClient
                 }
                 catch (Exception)
                 {
-                    // Stream error - could try to reconnect
+                    // swallow; outer loop handles retries
                 }
             });
         }
@@ -302,7 +388,8 @@ namespace NTGrpcClient
                 nt_balance = trade.NtBalance,
                 nt_daily_pnl = trade.NtDailyPnl,
                 nt_trade_result = trade.NtTradeResult,
-                nt_session_trades = trade.NtSessionTrades
+                nt_session_trades = trade.NtSessionTrades,
+                mt5_ticket = trade.Mt5Ticket
             };
             
             return JsonSerializer.Serialize(data);

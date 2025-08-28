@@ -12,6 +12,17 @@ namespace NTGrpcClient
     public static class TradingGrpcClient
     {
         private static ITradingClient _client;
+        // Correlation tracking (base_id -> correlation_id)
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string,string> _corrByBaseId = new System.Collections.Concurrent.ConcurrentDictionary<string,string>();
+        private static string GetOrCreateCorrelation(string baseId)
+        {
+            if (string.IsNullOrWhiteSpace(baseId)) return Guid.NewGuid().ToString("N");
+            return _corrByBaseId.GetOrAdd(baseId, _ => Guid.NewGuid().ToString("N"));
+        }
+        public static void ReleaseCorrelation(string baseId)
+        {
+            if (!string.IsNullOrWhiteSpace(baseId)) _corrByBaseId.TryRemove(baseId, out _);
+        }
         private static bool _initialized = false;
         
         /// <summary>
@@ -24,6 +35,38 @@ namespace NTGrpcClient
             try
             {
                 _client = new TradingClient(serverAddress);
+                // Redirect all Console output to Bridge logging, preserving original output
+                try
+                {
+                    var current = Console.Out;
+                    Console.SetOut(new Trading.Proto.UnifiedLogWriter(current, serverAddress, source: "nt", component: "nt_addon"));
+                    // Emit a quick test line to verify console redirection + LoggingService path
+                    Console.WriteLine("[NT_ADDON][INFO][GRPC] Unified logging initialized.");
+                }
+                catch { /* non-fatal */ }
+                // Perform a quick blocking health check to verify server is reachable
+                try
+                {
+                    var health = _client.HealthCheckAsync("NT_ADDON_INIT");
+                    if (!health.Wait(TimeSpan.FromSeconds(2)))
+                    {
+                        LastError = "HealthCheck timeout";
+                        _initialized = false;
+                        return false;
+                    }
+                    if (!health.Result.Success)
+                    {
+                        LastError = string.IsNullOrWhiteSpace(health.Result.ErrorMessage) ? "HealthCheck failed" : health.Result.ErrorMessage;
+                        _initialized = false;
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LastError = ex.Message;
+                    _initialized = false;
+                    return false;
+                }
                 _initialized = true;
                 return true;
             }
@@ -33,6 +76,21 @@ namespace NTGrpcClient
                 return false;
             }
         }
+
+        // Lightweight log forwarding helpers
+    public static void Log(string level, string component, string message, string tradeId = "", string errorCode = "", string baseId = "")
+        {
+            if (_initialized && _client is TradingClient impl)
+            {
+        string corr = GetOrCreateCorrelation(baseId);
+        impl.LogFireAndForget(level, component, message, tradeId, errorCode, baseId, corr);
+            }
+        }
+
+    public static void LogDebug(string component, string message, string tradeId = "", string baseId = "") => Log("DEBUG", component, message, tradeId, "", baseId);
+    public static void LogInfo(string component, string message, string tradeId = "", string baseId = "") => Log("INFO", component, message, tradeId, "", baseId);
+    public static void LogWarn(string component, string message, string tradeId = "", string baseId = "") => Log("WARN", component, message, tradeId, "", baseId);
+    public static void LogError(string component, string message, string tradeId = "", string errorCode = "", string baseId = "") => Log("ERROR", component, message, tradeId, errorCode, baseId);
         
         /// <summary>
         /// Submit a trade to the bridge server
@@ -269,7 +327,7 @@ namespace NTGrpcClient
         /// <summary>
         /// Version for debugging
         /// </summary>
-        public static string Version => "1.0.2-DEBUG";
+    public static string Version => "1.0.3-CONNECTIVITY";
         
         /// <summary>
         /// Cleanup and dispose

@@ -5,6 +5,7 @@ go 1.23.0
 toolchain go1.23.10
 
 require (
+	github.com/getsentry/sentry-go v0.27.0
 	github.com/wailsapp/wails/v2 v2.10.1
 	google.golang.org/grpc v1.73.0
 	google.golang.org/protobuf v1.36.6

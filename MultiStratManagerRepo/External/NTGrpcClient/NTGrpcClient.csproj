@@ -22,6 +22,10 @@
   </ItemGroup>
   
   <ItemGroup>
+    <Compile Include="..\UnifiedLogWriter.cs" />
+  </ItemGroup>
+  
+  <ItemGroup>
     <Protobuf Include="proto\trading.proto" GrpcServices="Client" />
   </ItemGroup>
 </Project>

@@ -143,7 +143,8 @@ namespace MT5GrpcClient
                                         nt_balance = trade.NtBalance,
                                         nt_daily_pnl = trade.NtDailyPnl,
                                         nt_trade_result = trade.NtTradeResult,
-                                        nt_session_trades = trade.NtSessionTrades
+                                        nt_session_trades = trade.NtSessionTrades,
+                                        mt5_ticket = trade.Mt5Ticket
                                     });
 
                                     _tradeQueue.Enqueue(tradeJson);

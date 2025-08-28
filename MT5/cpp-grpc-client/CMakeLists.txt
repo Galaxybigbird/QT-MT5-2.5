@@ -80,9 +80,9 @@ target_include_directories(MT5GrpcClient
         ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-# Set output name
+# Set output name to avoid collision with managed MT5GrpcClient.dll
 set_target_properties(MT5GrpcClient PROPERTIES
-    OUTPUT_NAME "MT5GrpcClient"
+    OUTPUT_NAME "MT5GrpcClientNative"
     PREFIX ""
 )
 
@@ -97,13 +97,13 @@ if(MSVC)
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd")
 endif()
 
-# Copy DLL to MT5 Libraries folder after build
+# Copy DLL to MT5 Libraries folder after build (as MT5GrpcClientNative.dll)
 if(WIN32)
     add_custom_command(TARGET MT5GrpcClient POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E echo "Copying MT5GrpcClient.dll to MT5 Libraries folder..."
+        COMMAND ${CMAKE_COMMAND} -E echo "Copying MT5GrpcClientNative.dll to MT5 Libraries folder..."
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:MT5GrpcClient>
-            "C:/Users/marth/AppData/Roaming/MetaQuotes/Terminal/7BC3F33EDFDBDBDBADB45838B9A2D03F/MQL5/Libraries/MT5GrpcClient.dll"
+            "C:/Users/marth/AppData/Roaming/MetaQuotes/Terminal/7BC3F33EDFDBDBDBADB45838B9A2D03F/MQL5/Libraries/MT5GrpcClientNative.dll"
         COMMENT "Copying DLL to MT5 Libraries folder"
     )
 endif()

@@ -245,6 +245,24 @@ struct TrailingCheckCache {
     bool last_result;
     double last_price;
     double last_profit_percent;
+    
+    // Copy constructor to fix deprecation warning
+    TrailingCheckCache(const TrailingCheckCache &other) {
+        ticket = other.ticket;
+        last_check_time = other.last_check_time;
+        last_result = other.last_result;
+        last_price = other.last_price;
+        last_profit_percent = other.last_profit_percent;
+    }
+    
+    // Default constructor
+    TrailingCheckCache() {
+        ticket = 0;
+        last_check_time = 0;
+        last_result = false;
+        last_price = 0.0;
+        last_profit_percent = 0.0;
+    }
 };
 
 static TrailingCheckCache g_trailing_cache[];

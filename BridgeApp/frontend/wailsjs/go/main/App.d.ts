@@ -8,7 +8,7 @@ export function AddToTradeQueue(arg1:any):Promise<void>;
 
 export function AttemptReconnect(arg1:boolean,arg2:boolean,arg3:boolean):Promise<Record<string, any>>;
 
-export function DisableAllProtocols():Promise<void>;
+export function DisableAllProtocols(arg1:Array<string>):Promise<void>;
 
 export function GetHedgeSize():Promise<number>;
 

@@ -6,7 +6,7 @@ import (
 	trading "BridgeApp/internal/grpc/proto"
 )
 
-// Import the Trade type from main package  
+// Import the Trade type from main package
 type Trade struct {
 	ID              string    `json:"id"`
 	BaseID          string    `json:"base_id"`
@@ -25,6 +25,7 @@ type Trade struct {
 	NTDailyPnL      float64   `json:"nt_daily_pnl"`
 	NTTradeResult   string    `json:"nt_trade_result"`
 	NTSessionTrades int       `json:"nt_session_trades"`
+	MT5Ticket       uint64    `json:"mt5_ticket"`
 }
 
 // Internal struct definitions that match the app.go structures
@@ -48,6 +49,7 @@ type InternalTrade struct {
 	NTDailyPnL      float64   `json:"nt_daily_pnl,omitempty"`
 	NTTradeResult   string    `json:"nt_trade_result,omitempty"`
 	NTSessionTrades int       `json:"nt_session_trades,omitempty"`
+	MT5Ticket       uint64    `json:"mt5_ticket,omitempty"`
 }
 
 type InternalHedgeCloseNotification struct {
@@ -59,6 +61,7 @@ type InternalHedgeCloseNotification struct {
 	ClosedHedgeAction   string  `json:"closed_hedge_action"`
 	Timestamp           string  `json:"timestamp"`
 	ClosureReason       string  `json:"closure_reason"`
+	MT5Ticket           uint64  `json:"mt5_ticket,omitempty"`
 }
 
 type InternalMT5TradeResult struct {
@@ -76,6 +79,7 @@ type InternalElasticHedgeUpdate struct {
 	CurrentProfit float64 `json:"current_profit"`
 	ProfitLevel   int32   `json:"profit_level"`
 	Timestamp     string  `json:"timestamp"`
+	MT5Ticket     uint64  `json:"mt5_ticket,omitempty"`
 }
 
 type InternalTrailingStopUpdate struct {
@@ -85,6 +89,7 @@ type InternalTrailingStopUpdate struct {
 	TrailingType string  `json:"trailing_type"`
 	CurrentPrice float64 `json:"current_price"`
 	Timestamp    string  `json:"timestamp"`
+	MT5Ticket    uint64  `json:"mt5_ticket,omitempty"`
 }
 
 // convertProtoToInternalTrade converts a protobuf Trade to internal Trade format
@@ -114,6 +119,7 @@ func convertProtoToInternalTrade(proto *trading.Trade) *InternalTrade {
 		NTDailyPnL:      proto.NtDailyPnl,
 		NTTradeResult:   proto.NtTradeResult,
 		NTSessionTrades: int(proto.NtSessionTrades),
+		MT5Ticket:       proto.Mt5Ticket,
 	}
 }
 
@@ -137,6 +143,7 @@ func ConvertInternalToProtoTrade(internal *InternalTrade) *trading.Trade {
 		NtDailyPnl:      internal.NTDailyPnL,
 		NtTradeResult:   internal.NTTradeResult,
 		NtSessionTrades: int32(internal.NTSessionTrades),
+		Mt5Ticket:       internal.MT5Ticket,
 	}
 }
 
@@ -151,6 +158,7 @@ func convertProtoToInternalHedgeClose(proto *trading.HedgeCloseNotification) *In
 		ClosedHedgeAction:   proto.ClosedHedgeAction,
 		Timestamp:           proto.Timestamp,
 		ClosureReason:       proto.ClosureReason,
+		MT5Ticket:           proto.Mt5Ticket,
 	}
 }
 
@@ -165,6 +173,7 @@ func convertInternalToProtoHedgeClose(internal *InternalHedgeCloseNotification) 
 		ClosedHedgeAction:   internal.ClosedHedgeAction,
 		Timestamp:           internal.Timestamp,
 		ClosureReason:       internal.ClosureReason,
+		Mt5Ticket:           internal.MT5Ticket,
 	}
 }
 
@@ -199,6 +208,7 @@ func convertProtoToInternalElasticUpdate(proto *trading.ElasticHedgeUpdate) *Int
 		CurrentProfit: proto.CurrentProfit,
 		ProfitLevel:   proto.ProfitLevel,
 		Timestamp:     proto.Timestamp,
+		MT5Ticket:     proto.Mt5Ticket,
 	}
 }
 
@@ -211,6 +221,7 @@ func convertInternalToProtoElasticUpdate(internal *InternalElasticHedgeUpdate) *
 		CurrentProfit: internal.CurrentProfit,
 		ProfitLevel:   internal.ProfitLevel,
 		Timestamp:     internal.Timestamp,
+		Mt5Ticket:     internal.MT5Ticket,
 	}
 }
 
@@ -223,6 +234,7 @@ func convertProtoToInternalTrailingUpdate(proto *trading.TrailingStopUpdate) *In
 		TrailingType: proto.TrailingType,
 		CurrentPrice: proto.CurrentPrice,
 		Timestamp:    proto.Timestamp,
+		MT5Ticket:    proto.Mt5Ticket,
 	}
 }
 
@@ -235,6 +247,7 @@ func convertInternalToProtoTrailingUpdate(internal *InternalTrailingStopUpdate) 
 		TrailingType: internal.TrailingType,
 		CurrentPrice: internal.CurrentPrice,
 		Timestamp:    internal.Timestamp,
+		Mt5Ticket:    internal.MT5Ticket,
 	}
 }
 
@@ -259,6 +272,7 @@ func convertInternalToMainTrade(internal *InternalTrade) interface{} {
 		NTDailyPnL:      internal.NTDailyPnL,
 		NTTradeResult:   internal.NTTradeResult,
 		NTSessionTrades: internal.NTSessionTrades,
+		MT5Ticket:       internal.MT5Ticket,
 	}
 }
 
@@ -304,9 +318,10 @@ func convertMT5CloseNotificationToProtoTrade(notification interface{}) *trading.
 			NtDailyPnl:      n.NTDailyPnL,
 			NtTradeResult:   n.NTTradeResult,
 			NtSessionTrades: int32(n.NTSessionTrades),
+			Mt5Ticket:       n.MT5Ticket,
 		}
 	}
-	
+
 	// Fallback - try to extract what we can from the interface{}
 	return &trading.Trade{
 		Id:        "mt5_close_notification",

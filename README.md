@@ -19,6 +19,8 @@ This project is a 3-part system designed to synchronize trading actions between 
     *   Option for NinjaTrader to remove its native SL/TP orders for new entries if `EnableSLTPRemoval` is active in the NT Addon.
     *   MT5 EA can manage SL/TP for its hedge/parallel positions, including ATR-based trailing stops.
 *   **Centralized Communication Bridge:** A Go-based application facilitates message passing between NT and MT5.
+*   **Unified Structured Logging:** All NT/MT5/Bridge logs flow into a JSONL file with daily rotation (BRIDGE_LOG_DIR) plus optional Sentry forwarding (ERROR+ by default).
+*   **Extensible Observability:** Support for correlation & schema versioning in log events (`schema_version`, `correlation_id`).
 *   **UI for NinjaTrader Addon:** Provides an interface for managing strategies and settings within NinjaTrader.
 
 ## System Architecture & Components
@@ -113,3 +115,87 @@ The system is composed of three main parts:
 *   Bug: The UI component for hedgebot that switches the status to (active) takes about 15ish seconds to update to active if you loaded the ea first before starting up the bridge. 
 
 *   Bug: Reset bridge state is currently broken, a fix is coming soon with explanation of the feature
+
+## 🔍 Unified Logging & Observability
+
+The Bridge acts as a central collector for log events from all components (NinjaTrader Addon, MT5 EA, Bridge internals) via gRPC `LoggingService.Log`.
+
+### JSONL Log Files
+* Directory resolution order:
+    1. `BRIDGE_LOG_DIR` (if set)
+    2. `logs` folder next to the Bridge executable
+    3. `./logs` (CWD fallback)
+* Rotated daily: `unified-YYYYMMDD.jsonl`
+* Buffered writer (64KB) with periodic flush (250ms) and graceful flush on shutdown.
+
+### Log Event Schema (selected fields)
+| Field | Description |
+|-------|-------------|
+| timestamp_ns | Event time (Unix ns). Filled at ingest if 0. |
+| source | bridge | nt | mt5 |
+| level | INFO | WARN | ERROR (others passthrough) |
+| component | Logical area (queue, stream, trade_exec, etc.) |
+| message | Human-readable description |
+| base_id / trade_id | Trade correlation identifiers |
+| nt_order_id / mt5_ticket | Platform-specific identifiers |
+| queue_size / net_position / hedge_size | Snapshot (auto-added for WARN/ERROR internal events) |
+| error_code | Optional domain error code |
+| stack | Optional stack / trace text |
+| tags | Simple string map for ad-hoc labels |
+| extra | Arbitrary structured enrichment |
+| schema_version | Added 2025-08 (currently "1.0") |
+| correlation_id | End-to-end trace / grouping ID (proto extended 2025-08) |
+
+### Sentry Integration (Phase 1)
+Sentry forwarding is Bridge-only (clients still send plain LogEvents). Qualifying events (>= threshold) are forwarded asynchronously after local file write.
+
+#### Environment Variables
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| SENTRY_DSN | Enables Sentry when non-empty | (disabled) |
+| SENTRY_ENV | Deployment environment (prod/staging/dev) | unset |
+| SENTRY_RELEASE | Release identifier (e.g. bridge@2.0.0) | unset |
+| SENTRY_MIN_EVENT_LEVEL | Promotion threshold (INFO/WARN/ERROR) | WARN (configured) |
+| SENTRY_DEBUG | Verbose SDK logging (true/false) | false |
+
+#### Behavior
+* Non-blocking: File write never waits for network.
+* Tags: `source, component, base_id, trade_id, nt_order_id, mt5_ticket, error_code, schema_version, correlation_id` plus any user `tags`.
+* Contexts: queue/state snapshots, `extra` map, `stack` (if provided).
+* Flush: On graceful shutdown (GUI & headless) a 2s Sentry flush window is attempted.
+
+### Correlation IDs
+`correlation_id` added to the protocol for future cross-system tracing. Until regenerated protobuf stubs are deployed:
+* Proto file already contains the field (index 17).
+* Go server currently ignores it pending `protoc` regeneration (see below).
+* After regeneration, server will map it directly into the unified log pipeline & Sentry tags.
+
+### Regenerating Protobuf After Schema Change
+Install `protoc` (if not already):
+1. Download latest release zip for Windows from: https://github.com/protocolbuffers/protobuf/releases
+2. Extract `protoc.exe` into a folder, e.g. `C:\tools\protoc\`.
+3. Add that folder to your PATH (System Environment Variables > Path).
+
+Then regenerate (from `BridgeApp/`):
+```powershell
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+protoc --go_out=internal/grpc --go_opt=paths=source_relative `
+             --go-grpc_out=internal/grpc --go-grpc_opt=paths=source_relative `
+             proto/trading.proto
+```
+
+For C# (NinjaTrader Addon) and C++ (MT5 DLL), also run the corresponding generation steps (see `Makefile` targets or manually add `--csharp_out` / `--cpp_out`). Copy the regenerated C# files into the Addon’s `External/Proto` folder and rebuild inside NinjaTrader.
+
+### Deployment Notes After Proto Update
+1. Regenerate Go/C#/C++ stubs.
+2. Rebuild Bridge (GUI & headless if used).
+3. Deploy updated C# proto classes + recompile NT Addon.
+4. Rebuild MT5 integration if/when it consumes new fields.
+5. Confirm logs still flowing; then begin populating `correlation_id` from clients if desired.
+
+---
+Future Enhancements (Planned):
+* Client-originated correlation propagation (NT Addon & MT5 EA).
+* Optional sampling & rate limiting for Sentry.
+* Redaction / PII filtering hook prior to external export.

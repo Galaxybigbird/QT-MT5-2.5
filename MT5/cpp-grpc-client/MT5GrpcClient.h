@@ -54,4 +54,5 @@ extern "C" {
     MT5_GRPC_API int __stdcall GrpcSetConnectionTimeout(int timeout_ms);
     MT5_GRPC_API int __stdcall GrpcSetStreamingTimeout(int timeout_ms);
     MT5_GRPC_API int __stdcall GrpcSetMaxRetries(int max_retries);
+    MT5_GRPC_API int __stdcall GrpcLog(const wchar_t* log_json);
 }

@@ -5,7 +5,7 @@
     <Platform>x64</Platform>
     <PlatformTarget>x64</PlatformTarget>
     <OutputType>Library</OutputType>
-    <AssemblyName>MT5GrpcClient</AssemblyName>
+  <AssemblyName>MT5GrpcManaged</AssemblyName>
     <RootNamespace>MT5GrpcClient</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
@@ -13,6 +13,8 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Prefer32Bit>false</Prefer32Bit>
+  <!-- Ensure all resolved NuGet assemblies are copied next to the DLL for MT5 probing -->
+  <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -30,13 +32,26 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Grpc.Net.Client" Version="2.70.0" />
+  <PackageReference Include="Grpc.Net.Client" Version="2.70.0" />
+  <PackageReference Include="Grpc.Core" Version="2.46.6" />
     <PackageReference Include="Grpc.Tools" Version="2.70.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Google.Protobuf" Version="3.28.3" />
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  <!-- JSON: prefer a stable version for net48; we'll keep but ensure deps are present -->
+  <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  <!-- Explicit support libraries to satisfy runtime binding on .NET Framework 4.8 -->
+  <PackageReference Include="System.Memory" Version="4.5.5" />
+  <PackageReference Include="System.Buffers" Version="4.5.1" />
+  <PackageReference Include="System.Numerics.Vectors" Version="4.5.0" />
+  <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+  <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.4" />
+  <PackageReference Include="System.ValueTuple" Version="4.5.0" />
+  <PackageReference Include="System.Text.Encodings.Web" Version="8.0.0" />
+  <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="8.0.0" />
+  <PackageReference Include="System.Net.Http.WinHttpHandler" Version="8.0.0" />
+  <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.1" />
     <PackageReference Include="DllExport" Version="1.8.1">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -45,12 +60,10 @@
 
   <ItemGroup>
     <Compile Include="MT5GrpcClient.cs" />
-    <Compile Include="Generated\Trading.cs" />
-    <Compile Include="Generated\TradingGrpc.cs" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Generated\" />
+  <Protobuf Include="proto\trading.proto" GrpcServices="Client" ProtoRoot="proto" />
   </ItemGroup>
 
   <ItemGroup>

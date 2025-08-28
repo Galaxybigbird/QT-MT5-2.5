@@ -498,8 +498,6 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             try
             {
-                LogToBridge("DEBUG", "UI", "Window Loaded event fired");
-                
                 // Update account list
                 UpdateAccountList();
                 

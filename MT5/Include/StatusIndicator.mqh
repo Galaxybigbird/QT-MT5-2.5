@@ -23,6 +23,11 @@ bool StatusIndicatorVisible = true;
 //+------------------------------------------------------------------+
 void InitStatusIndicator()
 {
+    // If already exists, avoid re-creating and re-logging
+    if(ObjectFind(0, StatusLabelName) >= 0)
+    {
+        return;
+    }
     // Create a text label in the top-right corner of the chart
     ObjectCreate(0, StatusLabelName, OBJ_LABEL, 0, 0, 0);
     
@@ -49,12 +54,19 @@ void InitStatusIndicator()
 //+------------------------------------------------------------------+
 void UpdateStatusIndicator(string text, color textColor = clrLime)
 {
-    if(!ObjectFind(0, StatusLabelName))
+    if(ObjectFind(0, StatusLabelName) < 0)
     {
         // If the label doesn't exist, create it
         InitStatusIndicator();
     }
-    
+    // Only update if something changed to prevent redraw spam
+    static string _last_text = "";
+    static color  _last_color = (color)-1;
+    if(text == _last_text && textColor == _last_color)
+        return;
+    _last_text = text;
+    _last_color = textColor;
+
     // Update the label text and color
     ObjectSetString(0, StatusLabelName, OBJPROP_TEXT, text);
     ObjectSetInteger(0, StatusLabelName, OBJPROP_COLOR, textColor);
