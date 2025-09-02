@@ -120,6 +120,8 @@ hive-mind-prompt-*.txt
 *.swp
 *.swo
 *~
+.roomodes
+.roo
 
 # OS generated files
 .DS_Store
