@@ -8,48 +8,54 @@ import (
 
 // Import the Trade type from main package
 type Trade struct {
-	ID              string    `json:"id"`
-	BaseID          string    `json:"base_id"`
-	Time            time.Time `json:"time"`
-	Action          string    `json:"action"`
-	Quantity        float64   `json:"quantity"`
-	Price           float64   `json:"price"`
-	TotalQuantity   int       `json:"total_quantity"`
-	ContractNum     int       `json:"contract_num"`
-	OrderType       string    `json:"order_type"`
-	MeasurementPips int       `json:"measurement_pips"`
-	RawMeasurement  float64   `json:"raw_measurement"`
-	Instrument      string    `json:"instrument"`
-	AccountName     string    `json:"account_name"`
-	NTBalance       float64   `json:"nt_balance"`
-	NTDailyPnL      float64   `json:"nt_daily_pnl"`
-	NTTradeResult   string    `json:"nt_trade_result"`
-	NTSessionTrades int       `json:"nt_session_trades"`
-	MT5Ticket       uint64    `json:"mt5_ticket"`
+	ID                string    `json:"id"`
+	BaseID            string    `json:"base_id"`
+	Time              time.Time `json:"time"`
+	Action            string    `json:"action"`
+	Quantity          float64   `json:"quantity"`
+	Price             float64   `json:"price"`
+	TotalQuantity     int       `json:"total_quantity"`
+	ContractNum       int       `json:"contract_num"`
+	OrderType         string    `json:"order_type"`
+	MeasurementPips   int       `json:"measurement_pips"`
+	RawMeasurement    float64   `json:"raw_measurement"`
+	Instrument        string    `json:"instrument"`
+	AccountName       string    `json:"account_name"`
+	NTBalance         float64   `json:"nt_balance"`
+	NTDailyPnL        float64   `json:"nt_daily_pnl"`
+	NTTradeResult     string    `json:"nt_trade_result"`
+	NTSessionTrades   int       `json:"nt_session_trades"`
+	MT5Ticket         uint64    `json:"mt5_ticket"`
+	NTPointsPer1kLoss float64   `json:"nt_points_per_1k_loss,omitempty"`
 }
 
 // Internal struct definitions that match the app.go structures
 // These should be moved to a common package in a real implementation
 
 type InternalTrade struct {
-	ID              string    `json:"id"`
-	BaseID          string    `json:"base_id"`
-	Time            time.Time `json:"time"`
-	Action          string    `json:"action"`
-	Quantity        float64   `json:"quantity"`
-	Price           float64   `json:"price"`
-	TotalQuantity   int       `json:"total_quantity"`
-	ContractNum     int       `json:"contract_num"`
-	OrderType       string    `json:"order_type,omitempty"`
-	MeasurementPips int       `json:"measurement_pips,omitempty"`
-	RawMeasurement  float64   `json:"raw_measurement,omitempty"`
-	Instrument      string    `json:"instrument_name,omitempty"`
-	AccountName     string    `json:"account_name,omitempty"`
-	NTBalance       float64   `json:"nt_balance,omitempty"`
-	NTDailyPnL      float64   `json:"nt_daily_pnl,omitempty"`
-	NTTradeResult   string    `json:"nt_trade_result,omitempty"`
-	NTSessionTrades int       `json:"nt_session_trades,omitempty"`
-	MT5Ticket       uint64    `json:"mt5_ticket,omitempty"`
+	ID                string    `json:"id"`
+	BaseID            string    `json:"base_id"`
+	Time              time.Time `json:"time"`
+	Action            string    `json:"action"`
+	Quantity          float64   `json:"quantity"`
+	Price             float64   `json:"price"`
+	TotalQuantity     int       `json:"total_quantity"`
+	ContractNum       int       `json:"contract_num"`
+	OrderType         string    `json:"order_type,omitempty"`
+	MeasurementPips   int       `json:"measurement_pips,omitempty"`
+	RawMeasurement    float64   `json:"raw_measurement,omitempty"`
+	Instrument        string    `json:"instrument_name,omitempty"`
+	AccountName       string    `json:"account_name,omitempty"`
+	NTBalance         float64   `json:"nt_balance,omitempty"`
+	NTDailyPnL        float64   `json:"nt_daily_pnl,omitempty"`
+	NTTradeResult     string    `json:"nt_trade_result,omitempty"`
+	NTSessionTrades   int       `json:"nt_session_trades,omitempty"`
+	MT5Ticket         uint64    `json:"mt5_ticket,omitempty"`
+	NTPointsPer1kLoss float64   `json:"nt_points_per_1k_loss,omitempty"`
+	// Event enrichment (optional)
+	EventType            string  `json:"event_type,omitempty"`
+	ElasticCurrentProfit float64 `json:"elastic_current_profit,omitempty"`
+	ElasticProfitLevel   int32   `json:"elastic_profit_level,omitempty"`
 }
 
 type InternalHedgeCloseNotification struct {
@@ -102,48 +108,57 @@ func convertProtoToInternalTrade(proto *trading.Trade) *InternalTrade {
 	}
 
 	return &InternalTrade{
-		ID:              proto.Id,
-		BaseID:          proto.BaseId,
-		Time:            tradeTime,
-		Action:          proto.Action,
-		Quantity:        proto.Quantity,
-		Price:           proto.Price,
-		TotalQuantity:   int(proto.TotalQuantity),
-		ContractNum:     int(proto.ContractNum),
-		OrderType:       proto.OrderType,
-		MeasurementPips: int(proto.MeasurementPips),
-		RawMeasurement:  proto.RawMeasurement,
-		Instrument:      proto.Instrument,
-		AccountName:     proto.AccountName,
-		NTBalance:       proto.NtBalance,
-		NTDailyPnL:      proto.NtDailyPnl,
-		NTTradeResult:   proto.NtTradeResult,
-		NTSessionTrades: int(proto.NtSessionTrades),
-		MT5Ticket:       proto.Mt5Ticket,
+		ID:                proto.Id,
+		BaseID:            proto.BaseId,
+		Time:              tradeTime,
+		Action:            proto.Action,
+		Quantity:          proto.Quantity,
+		Price:             proto.Price,
+		TotalQuantity:     int(proto.TotalQuantity),
+		ContractNum:       int(proto.ContractNum),
+		OrderType:         proto.OrderType,
+		MeasurementPips:   int(proto.MeasurementPips),
+		RawMeasurement:    proto.RawMeasurement,
+		Instrument:        proto.Instrument,
+		AccountName:       proto.AccountName,
+		NTBalance:         proto.NtBalance,
+		NTDailyPnL:        proto.NtDailyPnl,
+		NTTradeResult:     proto.NtTradeResult,
+		NTSessionTrades:   int(proto.NtSessionTrades),
+		MT5Ticket:         proto.Mt5Ticket,
+		NTPointsPer1kLoss: proto.GetNtPointsPer_1KLoss(),
+		// Event enrichment (if provided on Trade proto, e.g. for Action=EVENT)
+		EventType:            proto.GetEventType(),
+		ElasticCurrentProfit: proto.GetElasticCurrentProfit(),
+		ElasticProfitLevel:   proto.GetElasticProfitLevel(),
 	}
 }
 
 // ConvertInternalToProtoTrade converts an internal Trade to protobuf Trade format (exported for testing)
 func ConvertInternalToProtoTrade(internal *InternalTrade) *trading.Trade {
 	return &trading.Trade{
-		Id:              internal.ID,
-		BaseId:          internal.BaseID,
-		Timestamp:       internal.Time.Unix(),
-		Action:          internal.Action,
-		Quantity:        internal.Quantity,
-		Price:           internal.Price,
-		TotalQuantity:   int32(internal.TotalQuantity),
-		ContractNum:     int32(internal.ContractNum),
-		OrderType:       internal.OrderType,
-		MeasurementPips: int32(internal.MeasurementPips),
-		RawMeasurement:  internal.RawMeasurement,
-		Instrument:      internal.Instrument,
-		AccountName:     internal.AccountName,
-		NtBalance:       internal.NTBalance,
-		NtDailyPnl:      internal.NTDailyPnL,
-		NtTradeResult:   internal.NTTradeResult,
-		NtSessionTrades: int32(internal.NTSessionTrades),
-		Mt5Ticket:       internal.MT5Ticket,
+		Id:                   internal.ID,
+		BaseId:               internal.BaseID,
+		Timestamp:            internal.Time.Unix(),
+		Action:               internal.Action,
+		Quantity:             internal.Quantity,
+		Price:                internal.Price,
+		TotalQuantity:        int32(internal.TotalQuantity),
+		ContractNum:          int32(internal.ContractNum),
+		OrderType:            internal.OrderType,
+		MeasurementPips:      int32(internal.MeasurementPips),
+		RawMeasurement:       internal.RawMeasurement,
+		Instrument:           internal.Instrument,
+		AccountName:          internal.AccountName,
+		NtBalance:            internal.NTBalance,
+		NtDailyPnl:           internal.NTDailyPnL,
+		NtTradeResult:        internal.NTTradeResult,
+		NtSessionTrades:      int32(internal.NTSessionTrades),
+		Mt5Ticket:            internal.MT5Ticket,
+		NtPointsPer_1KLoss:   internal.NTPointsPer1kLoss,
+		EventType:            internal.EventType,
+		ElasticCurrentProfit: internal.ElasticCurrentProfit,
+		ElasticProfitLevel:   internal.ElasticProfitLevel,
 	}
 }
 
@@ -255,24 +270,25 @@ func convertInternalToProtoTrailingUpdate(internal *InternalTrailingStopUpdate) 
 func convertInternalToMainTrade(internal *InternalTrade) interface{} {
 	// Return as interface{} to let AddToTradeQueue handle JSON conversion
 	return Trade{
-		ID:              internal.ID,
-		BaseID:          internal.BaseID,
-		Time:            internal.Time,
-		Action:          internal.Action,
-		Quantity:        internal.Quantity,
-		Price:           internal.Price,
-		TotalQuantity:   internal.TotalQuantity,
-		ContractNum:     internal.ContractNum,
-		OrderType:       internal.OrderType,
-		MeasurementPips: internal.MeasurementPips,
-		RawMeasurement:  internal.RawMeasurement,
-		Instrument:      internal.Instrument,
-		AccountName:     internal.AccountName,
-		NTBalance:       internal.NTBalance,
-		NTDailyPnL:      internal.NTDailyPnL,
-		NTTradeResult:   internal.NTTradeResult,
-		NTSessionTrades: internal.NTSessionTrades,
-		MT5Ticket:       internal.MT5Ticket,
+		ID:                internal.ID,
+		BaseID:            internal.BaseID,
+		Time:              internal.Time,
+		Action:            internal.Action,
+		Quantity:          internal.Quantity,
+		Price:             internal.Price,
+		TotalQuantity:     internal.TotalQuantity,
+		ContractNum:       internal.ContractNum,
+		OrderType:         internal.OrderType,
+		MeasurementPips:   internal.MeasurementPips,
+		RawMeasurement:    internal.RawMeasurement,
+		Instrument:        internal.Instrument,
+		AccountName:       internal.AccountName,
+		NTBalance:         internal.NTBalance,
+		NTDailyPnL:        internal.NTDailyPnL,
+		NTTradeResult:     internal.NTTradeResult,
+		NTSessionTrades:   internal.NTSessionTrades,
+		MT5Ticket:         internal.MT5Ticket,
+		NTPointsPer1kLoss: internal.NTPointsPer1kLoss,
 	}
 }
 

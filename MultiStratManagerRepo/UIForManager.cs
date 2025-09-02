@@ -1475,12 +1475,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                 elasticHedgingGrid.Margin = new Thickness(5);
                 
                 // Define columns with better spacing
-                elasticHedgingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240, GridUnitType.Pixel) }); // Fixed width for labels
-                elasticHedgingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100, GridUnitType.Pixel) }); // Fixed width for inputs
-                elasticHedgingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Fill remaining space
+                // 4 columns to match AddTypeValueSetting (type label, type combo, value label, value textbox)
+                elasticHedgingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240, GridUnitType.Pixel) }); // Type label
+                elasticHedgingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140, GridUnitType.Pixel) }); // Type input
+                elasticHedgingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200, GridUnitType.Pixel) }); // Value label
+                elasticHedgingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120, GridUnitType.Pixel) }); // Value input
                 
-                // Define rows with proper spacing
-                for (int i = 0; i < 4; i++)
+                // Define rows with proper spacing (extra row to host Enable Trailing)
+                for (int i = 0; i < 6; i++)
                 {
                     elasticHedgingGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
                 }
@@ -1507,122 +1509,39 @@ namespace NinjaTrader.NinjaScript.AddOns
                 Grid.SetColumnSpan(enableElasticHedgingCheckBox, 2);
                 elasticHedgingGrid.Children.Add(enableElasticHedgingCheckBox);
 
-                // Profit Update Threshold - Row 1
-                TextBlock profitThresholdLabel = new TextBlock
+                // Enable Trailing CheckBox (moved here from Trailing Settings tab) - Row 1
+                CheckBox enableTrailingCheckBoxInline = new CheckBox
                 {
-                    Text = "Profit Update Threshold ($):",
+                    Content = "Enable Trailing",
+                    Margin = new Thickness(0, 0, 0, 10),
                     VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(20, 5, 10, 5), // Indent for sub-items
-                    Style = Resources["ModernTextBlockStyle"] as Style,
-                    Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)) // Slightly dimmer for sub-items
-                };
-                Grid.SetRow(profitThresholdLabel, 1);
-                Grid.SetColumn(profitThresholdLabel, 0);
-                elasticHedgingGrid.Children.Add(profitThresholdLabel);
-
-                TextBox profitThresholdTextBox = new TextBox
-                {
-                    Width = 90,
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 5, 0, 8),
-                    Style = Resources["ModernTextBoxStyle"] as Style,
-                    Background = new SolidColorBrush(Color.FromRgb(45, 45, 45)),
+                    Style = Resources["ModernCheckBoxStyle"] as Style,
                     Foreground = new SolidColorBrush(Colors.White),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(100, 100, 100)),
-                    BorderThickness = new Thickness(1),
-                    Padding = new Thickness(5, 3, 5, 3),
-                    Text = "50"  // Default value
+                    FontWeight = FontWeights.SemiBold
                 };
-                Binding profitThresholdBinding = new Binding("ProfitUpdateThreshold")
+                Binding enableTrailingBindingInline = new Binding("EnableTrailing")
                 {
                     Source = MultiStratManager.Instance,
                     Mode = BindingMode.TwoWay,
-                    UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
-                    ConverterCulture = CultureInfo.CurrentCulture
+                    UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged
                 };
-                profitThresholdTextBox.SetBinding(TextBox.TextProperty, profitThresholdBinding);
-                Grid.SetRow(profitThresholdTextBox, 1);
-                Grid.SetColumn(profitThresholdTextBox, 1);
-                elasticHedgingGrid.Children.Add(profitThresholdTextBox);
+                enableTrailingCheckBoxInline.SetBinding(ToggleButton.IsCheckedProperty, enableTrailingBindingInline);
+                Grid.SetRow(enableTrailingCheckBoxInline, 1);
+                Grid.SetColumn(enableTrailingCheckBoxInline, 0);
+                Grid.SetColumnSpan(enableTrailingCheckBoxInline, 2);
+                elasticHedgingGrid.Children.Add(enableTrailingCheckBoxInline);
 
-                // Update Interval - Row 2
-                TextBlock updateIntervalLabel = new TextBlock
-                {
-                    Text = "Update Interval (seconds):",
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(20, 5, 10, 5), // Indent for sub-items
-                    Style = Resources["ModernTextBlockStyle"] as Style,
-                    Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)) // Slightly dimmer for sub-items
-                };
-                Grid.SetRow(updateIntervalLabel, 2);
-                Grid.SetColumn(updateIntervalLabel, 0);
-                elasticHedgingGrid.Children.Add(updateIntervalLabel);
+                // Profit Update TRIGGER (Type + Value) - Row 2
+                AddTypeValueSetting(elasticHedgingGrid, 2, "Profit Update TRIGGER Type:", "Profit Update TRIGGER Value:",
+                                    "ElasticTriggerType", "ProfitUpdateThreshold");
 
-                TextBox updateIntervalTextBox = new TextBox
-                {
-                    Width = 90,
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 5, 0, 8),
-                    Style = Resources["ModernTextBoxStyle"] as Style,
-                    Background = new SolidColorBrush(Color.FromRgb(45, 45, 45)),
-                    Foreground = new SolidColorBrush(Colors.White),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(100, 100, 100)),
-                    BorderThickness = new Thickness(1),
-                    Padding = new Thickness(5, 3, 5, 3),
-                    Text = "5"  // Default value
-                };
-                Binding updateIntervalBinding = new Binding("ElasticUpdateIntervalSeconds")
-                {
-                    Source = MultiStratManager.Instance,
-                    Mode = BindingMode.TwoWay,
-                    UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
-                    ConverterCulture = CultureInfo.CurrentCulture
-                };
-                updateIntervalTextBox.SetBinding(TextBox.TextProperty, updateIntervalBinding);
-                Grid.SetRow(updateIntervalTextBox, 2);
-                Grid.SetColumn(updateIntervalTextBox, 1);
-                elasticHedgingGrid.Children.Add(updateIntervalTextBox);
+                // Incremental Profit Updates (Type + Value) - Row 3 (Update Interval removed)
+                AddTypeValueSetting(elasticHedgingGrid, 3, "Increment Type:", "Increment Value:",
+                                    "ElasticProfitUnits", "ElasticIncrementValue");
 
-                // Minimum Profit to Report - Row 3
-                TextBlock minProfitLabel = new TextBlock
-                {
-                    Text = "Minimum Profit to Report ($):",
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(20, 5, 10, 5), // Indent for sub-items
-                    Style = Resources["ModernTextBlockStyle"] as Style,
-                    Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)) // Slightly dimmer for sub-items
-                };
-                Grid.SetRow(minProfitLabel, 3);
-                Grid.SetColumn(minProfitLabel, 0);
-                elasticHedgingGrid.Children.Add(minProfitLabel);
-
-                TextBox minProfitTextBox = new TextBox
-                {
-                    Width = 90,
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 5, 0, 8),
-                    Style = Resources["ModernTextBoxStyle"] as Style,
-                    Background = new SolidColorBrush(Color.FromRgb(45, 45, 45)),
-                    Foreground = new SolidColorBrush(Colors.White),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(100, 100, 100)),
-                    BorderThickness = new Thickness(1),
-                    Padding = new Thickness(5, 3, 5, 3),
-                    Text = "10"  // Default value
-                };
-                Binding minProfitBinding = new Binding("MinProfitToReport")
-                {
-                    Source = MultiStratManager.Instance,
-                    Mode = BindingMode.TwoWay,
-                    UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
-                    ConverterCulture = CultureInfo.CurrentCulture
-                };
-                minProfitTextBox.SetBinding(TextBox.TextProperty, minProfitBinding);
-                Grid.SetRow(minProfitTextBox, 3);
-                Grid.SetColumn(minProfitTextBox, 1);
-                elasticHedgingGrid.Children.Add(minProfitTextBox);
+                // Trailing STOP (Type + Value) - Row 4
+                AddTypeValueSetting(elasticHedgingGrid, 4, "Trailing STOP Type:", "Trailing STOP Value:",
+                                    "TrailingStopType", "TrailingStopValue");
 
                 elasticHedgingGroup.Content = elasticHedgingGrid;
                 controlsGrid.Children.Add(elasticHedgingGroup);
@@ -2015,16 +1934,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 strategyTab.Content = gridBorder;
                 tabControl.Items.Add(strategyTab);
                 
-                // Create Active Trailing Stops Tab
-                TabItem trailingStopsTab = new TabItem();
-                trailingStopsTab.Header = "Active Trailing Stops";
-                trailingStopsTab.Background = new SolidColorBrush(Color.FromRgb(50, 50, 50));
-                trailingStopsTab.Foreground = Brushes.White;
-                
-                // Create trailing stops content
-                Grid trailingStopsContent = CreateTrailingStopsContent();
-                trailingStopsTab.Content = trailingStopsContent;
-                tabControl.Items.Add(trailingStopsTab);
+                // Active Trailing Stops Tab removed per request
                 
                 // Add the tabControl to mainGrid
                 mainGrid.Children.Add(tabControl);
@@ -2056,38 +1966,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             StackPanel contentPanel = new StackPanel();
             contentPanel.Margin = new Thickness(20);
             
-            // Master Trailing Enable/Disable Section
-            GroupBox masterGroup = CreateTrailingGroupBox("Master Trailing Control");
-            Grid masterGrid = new Grid();
-            masterGrid.Margin = new Thickness(10);
-            
-            // Create columns for master control
-            masterGrid.ColumnDefinitions.Add(new ColumnDefinition() { Width = new GridLength(200) });
-            masterGrid.ColumnDefinitions.Add(new ColumnDefinition() { Width = new GridLength(150) });
-            masterGrid.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Auto });
-            
-            // Enable Trailing checkbox
-            CheckBox enableTrailingCheckBox = new CheckBox();
-            enableTrailingCheckBox.Content = "Enable Trailing";
-            enableTrailingCheckBox.Foreground = Brushes.White;
-            enableTrailingCheckBox.FontWeight = FontWeights.Bold;
-            enableTrailingCheckBox.Margin = new Thickness(10, 8, 5, 8);
-            enableTrailingCheckBox.VerticalAlignment = VerticalAlignment.Center;
-            
-            Binding enableTrailingBinding = new Binding("EnableTrailing")
-            {
-                Source = MultiStratManager.Instance,
-                Mode = BindingMode.TwoWay,
-                UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged
-            };
-            enableTrailingCheckBox.SetBinding(CheckBox.IsCheckedProperty, enableTrailingBinding);
-            Grid.SetRow(enableTrailingCheckBox, 0);
-            Grid.SetColumn(enableTrailingCheckBox, 0);
-            Grid.SetColumnSpan(enableTrailingCheckBox, 2);
-            masterGrid.Children.Add(enableTrailingCheckBox);
-            
-            masterGroup.Content = masterGrid;
-            contentPanel.Children.Add(masterGroup);
+            // Master Trailing Enable/Disable Section removed; moved under Elastic Hedging
             
             // Create DEMA-ATR Trailing Settings Section
             GroupBox demaGroup = CreateTrailingGroupBox("Trailing Settings");
@@ -2127,7 +2006,8 @@ namespace NinjaTrader.NinjaScript.AddOns
             demaGroup.Content = demaGrid;
             contentPanel.Children.Add(demaGroup);
             
-            // Create Alternative Trailing Settings Section
+            /*
+            // Create Alternative Trailing Settings Section (DISABLED - merged into Elastic Hedging)
             GroupBox altGroup = CreateTrailingGroupBox("Alternative Trailing Settings");
             Grid altGrid = CreateTrailingSettingsGrid();
             
@@ -2207,7 +2087,8 @@ namespace NinjaTrader.NinjaScript.AddOns
             infoPanel.Children.Add(infoText);
             
             infoBorder.Child = infoPanel;
-            contentPanel.Children.Add(infoBorder);
+            */
+            // contentPanel.Children.Add(infoBorder); // Info panel disabled with the commented block above
             
             scrollViewer.Content = contentPanel;
             mainGrid.Children.Add(scrollViewer);
@@ -3562,20 +3443,19 @@ private void ResetDailyStatusButton_Click(object sender, RoutedEventArgs e)
                     return;
                 }
                 
-                Dictionary<string, MultiStratManager.InternalTrailingStop> internalStops = MultiStratManager.Instance.InternalStops;
-                // Found internal stops
+                // Internal trailing has been removed. Display broker-side traditional trailing stops instead.
+                var traditionalStops = MultiStratManager.Instance.TraditionalTrailingStops;
                 
                 // Clear existing items
                 activeTrailingStops.Clear();
                 
                 // Add current trailing stops
-                foreach (var kvp in internalStops)
+                foreach (var kvp in traditionalStops)
                 {
                     var stop = kvp.Value;
                     // Processing stop
-                    
                     if (!stop.IsActive) continue;
-                    
+
                     double currentPrice = GetCurrentMarketPrice(stop.TrackedPosition?.Instrument);
                     // Current price retrieved
                     
@@ -3588,14 +3468,14 @@ private void ResetDailyStatusButton_Click(object sender, RoutedEventArgs e)
                     if (stop.TrackedPosition != null)
                     {
                         unrealizedPnL = stop.TrackedPosition.GetUnrealizedProfitLoss(PerformanceUnit.Currency, currentPrice);
-                        
+
                         if (stop.TrackedPosition.MarketPosition == MarketPosition.Long)
                         {
-                            stopDistancePoints = currentPrice - stop.StopLevel;
+                            stopDistancePoints = currentPrice - stop.LastStopPrice;
                         }
                         else
                         {
-                            stopDistancePoints = stop.StopLevel - currentPrice;
+                            stopDistancePoints = stop.LastStopPrice - currentPrice;
                         }
                         
                         stopDistancePercent = Math.Abs(stopDistancePoints / currentPrice) * 100;
@@ -3608,13 +3488,13 @@ private void ResetDailyStatusButton_Click(object sender, RoutedEventArgs e)
                         Direction = stop.TrackedPosition?.MarketPosition.ToString() ?? "Unknown",
                         EntryPrice = stop.EntryPrice,
                         CurrentPrice = currentPrice,
-                        StopLevel = stop.StopLevel,
+                        StopLevel = stop.LastStopPrice,
                         UnrealizedPnL = unrealizedPnL,
                         StopDistancePoints = stopDistancePoints,
                         StopDistancePercent = stopDistancePercent,
-                        Status = "Active",
+                        Status = stop.CurrentStopOrder?.OrderState.ToString() ?? "Active",
                         ActivationTime = stop.ActivationTime,
-                        UpdateCount = stop.StopUpdateCount,
+                        UpdateCount = stop.ModificationCount,
                         MaxProfit = stop.MaxProfit
                     };
                     

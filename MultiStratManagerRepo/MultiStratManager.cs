@@ -44,9 +44,8 @@ namespace NinjaTrader.NinjaScript.AddOns
     /// </summary>
     public class MultiStratManager : NinjaTrader.NinjaScript.AddOnBase, INotifyPropertyChanged
     {
-        // Type aliases for UI compatibility - expose types from TrailingAndElasticManager
-        public class InternalTrailingStop : NinjaTrader.NinjaScript.AddOns.InternalTrailingStop { }
-        public class ElasticPositionTracker : NinjaTrader.NinjaScript.AddOns.ElasticPositionTracker { }
+    // Type aliases for UI compatibility - expose types from TrailingAndElasticManager
+    public class ElasticPositionTracker : NinjaTrader.NinjaScript.AddOns.ElasticPositionTracker { }
         private static UIForManager window;
         private bool isFirstRun = true;
         private bool connectionsStarted = false;
@@ -143,6 +142,11 @@ namespace NinjaTrader.NinjaScript.AddOns
         }
         
         // Elastic hedging properties that UI binds to
+        public TrailingActivationType ElasticTriggerType 
+        { 
+            get => trailingAndElasticManager?.ElasticTriggerType ?? TrailingActivationType.Dollars; 
+            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.ElasticTriggerType = value; OnPropertyChanged(nameof(ElasticTriggerType)); } } 
+        }
         public double ProfitUpdateThreshold 
         { 
             get => trailingAndElasticManager?.ProfitUpdateThreshold ?? 50.0; 
@@ -154,11 +158,37 @@ namespace NinjaTrader.NinjaScript.AddOns
             get => trailingAndElasticManager?.ElasticUpdateIntervalSeconds ?? 1; 
             set { if (trailingAndElasticManager != null) { trailingAndElasticManager.ElasticUpdateIntervalSeconds = value; OnPropertyChanged(nameof(ElasticUpdateIntervalSeconds)); } } 
         }
-        
-        public double MinProfitToReport 
-        { 
-            get => trailingAndElasticManager?.MinProfitToReport ?? 10.0; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.MinProfitToReport = value; OnPropertyChanged(nameof(MinProfitToReport)); } } 
+        public TrailingActivationType ElasticProfitUnits
+        {
+            get => trailingAndElasticManager?.ElasticProfitUnits ?? TrailingActivationType.Dollars;
+            set
+            {
+                if (trailingAndElasticManager != null)
+                {
+                    // Keep Alternative Trailing increments in sync with Elastic increment units
+                    trailingAndElasticManager.ElasticProfitUnits = value;
+                    trailingAndElasticManager.TrailingIncrementsType = value;
+                    OnPropertyChanged(nameof(ElasticProfitUnits));
+                    // Also notify in case any UI or logic observes TrailingIncrementsType
+                    OnPropertyChanged(nameof(TrailingIncrementsType));
+                }
+            }
+        }
+        public double ElasticIncrementValue
+        {
+            get => trailingAndElasticManager?.ElasticIncrementValue ?? 10.0;
+            set
+            {
+                if (trailingAndElasticManager != null)
+                {
+                    // Keep Alternative Trailing increments in sync with Elastic increment value
+                    trailingAndElasticManager.ElasticIncrementValue = value;
+                    trailingAndElasticManager.TrailingIncrementsValue = value;
+                    OnPropertyChanged(nameof(ElasticIncrementValue));
+                    // Also notify in case any UI or logic observes TrailingIncrementsValue
+                    OnPropertyChanged(nameof(TrailingIncrementsValue));
+                }
+            }
         }
         
         // Legacy trailing properties that UI still binds to
@@ -210,31 +240,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             set { if (trailingAndElasticManager != null) { trailingAndElasticManager.DEMA_ATR_Multiplier = value; OnPropertyChanged(nameof(DEMA_ATR_Multiplier)); } } 
         }
         
-        // Internal stops access for UI
-        public Dictionary<string, MultiStratManager.InternalTrailingStop> InternalStops
-        {
-            get 
-            { 
-                var managerStops = trailingAndElasticManager?.InternalStops ?? new Dictionary<string, NinjaTrader.NinjaScript.AddOns.InternalTrailingStop>();
-                return managerStops.ToDictionary(kvp => kvp.Key, kvp => new MultiStratManager.InternalTrailingStop
-                {
-                    BaseId = kvp.Value.BaseId,
-                    StopLevel = kvp.Value.StopLevel,
-                    HighWaterMark = kvp.Value.HighWaterMark,
-                    LowWaterMark = kvp.Value.LowWaterMark,
-                    IsActive = kvp.Value.IsActive,
-                    LastUpdate = kvp.Value.LastUpdate,
-                    TrackedPosition = kvp.Value.TrackedPosition,
-                    EntryPrice = kvp.Value.EntryPrice,
-                    LastSentStopLevel = kvp.Value.LastSentStopLevel,
-                    ActivationTime = kvp.Value.ActivationTime,
-                    ActivationPrice = kvp.Value.ActivationPrice,
-                    MaxProfit = kvp.Value.MaxProfit,
-                    StopUpdateCount = kvp.Value.StopUpdateCount,
-                    InitialStopDistance = kvp.Value.InitialStopDistance
-                });
-            }
-        }
+    // Internal trailing has been removed. No InternalStops exposed.
         
         // Elastic positions access for UI
         public Dictionary<string, NinjaTrader.NinjaScript.AddOns.ElasticPositionTracker> ElasticPositions
@@ -417,7 +423,7 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly TimeSpan heartbeatInterval = TimeSpan.FromSeconds(20); // Send heartbeat every 20 seconds (faster than bridge 35s timeout)
         private int heartbeatFailureCount = 0;
         private DateTime lastHeartbeatFailure = DateTime.MinValue;
-        private readonly TimeSpan heartbeatBackoffDuration = TimeSpan.FromMinutes(5); // Backoff for 5 minutes after failures
+    private readonly TimeSpan heartbeatBackoffDuration = TimeSpan.FromSeconds(20); // Short backoff (~one tick) after repeated failures
         private System.Windows.Threading.DispatcherTimer heartbeatTimer;
 
         // Logging infrastructure
@@ -2453,6 +2459,28 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                                 { "nt_session_trades", _sessionTradeCount }
                             };
 
+                            // Inject nt_points_per_1k_loss hint for MT5 elastic sizing.
+                            // Assumption: 1 NT point corresponds to MasterInstrument.PointValue dollars per contract.
+                            // Therefore, NT points for $1000 loss = 1000 / pointValue.
+                            try
+                            {
+                                double pointValue = e.Execution.Instrument?.MasterInstrument?.PointValue ?? 0.0;
+                                if (pointValue > 0)
+                                {
+                                    double ntPointsPer1k = 1000.0 / pointValue;
+                                    tradeData["nt_points_per_1k_loss"] = ntPointsPer1k;
+                                    LogAndPrint($"ELASTIC_HINT_EMIT: nt_points_per_1k_loss={ntPointsPer1k:F2} (pointValue={pointValue:F2}) for {e.Execution.Instrument?.FullName}");
+                                }
+                                else
+                                {
+                                    LogAndPrint($"ELASTIC_HINT_EMIT: Skipped nt_points_per_1k_loss (pointValue invalid for {e.Execution.Instrument?.FullName})");
+                                }
+                            }
+                            catch (Exception ehEx)
+                            {
+                                LogAndPrint($"ELASTIC_HINT_EMIT_ERROR: {ehEx.Message}");
+                            }
+
                             if (e.Execution.Order != null && !string.IsNullOrEmpty(e.Execution.Order.Name))
                             {
                                 if (e.Execution.Order.Name.Contains("TP")) tradeData["order_type"] = "TP";
@@ -2503,7 +2531,6 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                                 double execCurrentPrice = GetCurrentPrice(position.Instrument);
                                 LogAndPrint($"ELASTIC_DEBUG: Found position for tracking - Instrument: {position.Instrument.FullName}, MarketPosition: {position.MarketPosition}, Current P&L: ${position.GetUnrealizedProfitLoss(PerformanceUnit.Currency, execCurrentPrice):F2}");
                                 trailingAndElasticManager?.AddElasticPositionTracking(baseId, position, e.Execution.Price);
-                                trailingAndElasticManager?.AddInternalTrailingStop(baseId, position, e.Execution.Price);
                             }
                             else
                             {
@@ -3749,8 +3776,7 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                         // RemainingQuantity-based completion. Avoid setting IsClosed here; cleanup will remove tracking entry shortly.
                         tradeDetails.ClosedTimestamp = DateTime.Now;
                         
-                        // Clean up internal trailing stops for this BaseID
-                        trailingAndElasticManager?.RemoveInternalTrailingStop(closedTradeBaseId);
+                        // Internal trailing removed: no per-BaseID cleanup required
                         
                         LogAndPrint($"CLOSURE_CLEANUP: All trades closed for BaseID {closedTradeBaseId}. Will cleanup later. Remaining entries: {activeNtTrades.Count}");
                         

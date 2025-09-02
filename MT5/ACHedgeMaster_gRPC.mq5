@@ -1,5 +1,5 @@
 #property link      ""
-#property version   "3.39"
+#property version   "3.48"
 #property strict
 #property description "gRPC Hedge Receiver EA for Go bridge server with Asymmetrical Compounding"
 
@@ -25,20 +25,18 @@ input int    MagicNumber = 12345;    // MagicNumber for trades
 input group "===== Elastic Hedging Settings =====";
 input bool   ElasticHedging_Enabled = true;              // Enable Elastic Hedging
 input double ElasticHedging_NTPointsToMT5 = 100.0;       // NT to MT5 point conversion ratio
+// Note: Index CFD clamp uses a simple fixed cap internally to avoid over-sizing.
 
 input group "--- Tier 1: First Loss Recovery ---";
 input double ElasticHedging_Tier1_TargetProfit = 70.0;   // Target profit for first $1K NT loss ($)
 input double ElasticHedging_Tier1_LotReduction = 0.05;   // Lots to close per profit update
-input double ElasticHedging_Tier1_MaxReduction = 0.80;   // Max % of position to close (80%)
 
 input group "--- Tier 2: Second Loss Recovery ---";
 input double ElasticHedging_Tier2_TargetProfit = 200.0;  // Target profit for second $1K NT loss ($)
 input double ElasticHedging_Tier2_LotReduction = 0.02;   // More aggressive lot reduction per update
-input double ElasticHedging_Tier2_MaxReduction = 0.90;   // More aggressive max reduction (90%)
 input double ElasticHedging_Tier2_Threshold = -1000.0;   // NT PnL threshold to trigger Tier 2
 
 input group "--- General Settings ---";
-input int ElasticHedging_MinUpdateInterval = 1;          // Min seconds between reductions
 
 // Include the asymmetrical compounding functionality
 #include <gRPC/ACFunctions_gRPC.mqh>
@@ -74,6 +72,8 @@ void HandleATRTrailingForPosition(ulong ticket, double entryPrice, double curren
 double CalculateACLotSize(double ntQuantity);
 double CalculateElasticLotSize(double ntQuantity);
 void AddElasticPosition(string baseId, ulong positionTicket, double lots);
+bool IsTradingPermitted(string &reason); // Forward declaration for trading permission preflight
+double AdjustLotForMargin(double desiredLot, ENUM_ORDER_TYPE orderType); // Downscale lot to fit free margin
 
 // AC Risk Management variables already declared in ACFunctions_gRPC.mqh
 
@@ -295,6 +295,8 @@ struct BrokerSpecs {
     double marginRequired;  // Margin per lot
     bool   isValid;         // Whether specs have been loaded
 } g_brokerSpecs;
+    // Optional runtime hint from NT: NT price points corresponding to a $1,000 NT loss
+    double g_ntPointsPer1kLoss = 0.0; // 0 means unset; if provided in trade JSON, we use it
 
 // Race condition fix: Flag to indicate if broker specs are loaded and valid.
 bool g_broker_specs_ready = false;
@@ -399,18 +401,23 @@ bool QueryBrokerSpecs()
         {
             // For NAS100: Contract size * Current price / Leverage
                         g_brokerSpecs.marginRequired = (g_brokerSpecs.contractSize * currentPrice) / leverage;
-                        { string __log=""; StringConcatenate(__log,
-                                "BROKER_SPECS_FIX: Calculated margin requirement: $", g_brokerSpecs.marginRequired,
-                                " per lot (Price: ", currentPrice, ", Leverage: 1:", leverageLong, ")");
-                            Print(__log); ULogInfoPrint(__log); }
+                        string __log = StringFormat(
+                            "BROKER_SPECS_FIX: Calculated margin requirement: $%.2f per lot (Price: %.5f, Leverage: 1:%d)",
+                            (double)g_brokerSpecs.marginRequired,
+                            (double)currentPrice,
+                            (int)leverageLong
+                        );
+                        Print(__log); ULogInfoPrint(__log);
         }
         else
         {
             // Ultimate fallback for $300 account safety
                         g_brokerSpecs.marginRequired = 50.0; // Conservative $50 per lot
-                        { string __log=""; StringConcatenate(__log,
-                                "BROKER_SPECS_FALLBACK: Using conservative margin requirement: $", g_brokerSpecs.marginRequired, " per lot");
-                            Print(__log); ULogInfoPrint(__log); }
+                        string __log2 = StringFormat(
+                            "BROKER_SPECS_FALLBACK: Using conservative margin requirement: $%.2f per lot",
+                            (double)g_brokerSpecs.marginRequired
+                        );
+                        Print(__log2); ULogInfoPrint(__log2);
         }
     }
 
@@ -1283,6 +1290,18 @@ void ProcessTradeFromJson(const string& trade_json)
     
     // Parse enhanced NT performance data if available
     ParseNTPerformanceData(trade_json, nt_balance, nt_daily_pnl, nt_trade_result, nt_session_trades);
+
+    // Optional: capture NT-provided points-per-$1k loss for sizing (if present in JSON)
+    double json_nt_points_per_1k = GetJSONDoubleValue(trade_json, "nt_points_per_1k_loss", -1.0);
+    if(json_nt_points_per_1k > 0) {
+        g_ntPointsPer1kLoss = json_nt_points_per_1k;
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HINT: nt_points_per_1k_loss set from JSON: ", g_ntPointsPer1kLoss); Print(__log); ULogInfoPrint(__log); }
+    } else {
+        // Diagnostics: confirm whether the JSON actually contains the key and what value was parsed
+        int __keyPos = StringFind(trade_json, "\"nt_points_per_1k_loss\"");
+        string __snippet = StringSubstr(trade_json, (__keyPos > 20 ? __keyPos - 20 : 0), 80);
+        { string __log=""; StringConcatenate(__log, "ELASTIC_DEBUG: nt_points_per_1k_loss missing or <=0 (parsed=", DoubleToString(json_nt_points_per_1k, 4), ") keyPos=", (string)IntegerToString(__keyPos), ", snippet=", __snippet); Print(__log); ULogInfoPrint(__log); }
+    }
     UpdateNTPerformanceTracking(nt_balance, nt_daily_pnl, nt_trade_result, nt_session_trades);
     
     // Parse basic trade data
@@ -1298,6 +1317,68 @@ void ProcessTradeFromJson(const string& trade_json)
     measurementPips = GetJSONIntValue(trade_json, "measurement_pips", 0);
     
     { string __log=""; StringConcatenate(__log, "ACHM_LOG: [ProcessTradeFromJson] Parsed NT base_id: '", baseIdFromJson, "', Action: '", incomingNtAction, "', Qty: ", incomingNtQuantity); Print(__log); ULogInfoPrint(__log); }
+
+    // Special-case: handle elastic/trailing events delivered over the trade stream (Option B)
+    // Expecting JSON fields:
+    //  - elastic_hedge_update: base_id, elastic_current_profit/current_profit, elastic_profit_level/profit_level
+    //  - trailing_stop_update: base_id, new_stop_price[, current_price]
+    string evtType = GetJSONStringValue(trade_json, "\"event_type\"");
+    // Log event_type presence and a short JSON snippet for diagnostics
+    {
+        string __snippet = StringSubstr(trade_json, 0, 200);
+        string __log=""; StringConcatenate(__log, "EVENT_DEBUG: evtType='", evtType, "' base_id='", baseIdFromJson, "' json=", __snippet);
+        Print(__log); ULogInfoPrint(__log);
+    }
+    if (evtType == "elastic_hedge_update")
+    {
+        string evtBaseId = GetJSONStringValue(trade_json, "\"base_id\"");
+        if(StringLen(evtBaseId) == 0) evtBaseId = baseIdFromJson; // fallback to previously parsed base id
+        // Support both new elastic_* field names and legacy names
+        double evtProfit = GetJSONDouble(trade_json, "elastic_current_profit");
+        if(evtProfit == 0.0)
+            evtProfit = GetJSONDouble(trade_json, "current_profit");
+        int evtProfitLevel = GetJSONIntValue(trade_json, "elastic_profit_level", INT_MIN);
+        if(evtProfitLevel == INT_MIN)
+            evtProfitLevel = GetJSONIntValue(trade_json, "profit_level", 0);
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Received elastic update for BaseID: ", evtBaseId, ", Profit: $", DoubleToString(evtProfit, 2), ", Level: ", (string)IntegerToString(evtProfitLevel)); Print(__log); ULogInfoPrint(__log); }
+        ProcessElasticHedgeUpdate(evtBaseId, evtProfit, evtProfitLevel);
+        // Do not process further as a regular trade
+        return;
+    }
+    else if (evtType == "trailing_stop_update")
+    {
+        string evtBaseId2 = GetJSONStringValue(trade_json, "\"base_id\"");
+        if(StringLen(evtBaseId2) == 0) evtBaseId2 = baseIdFromJson;
+        // Parse stop and optional current price
+        double newSL = GetJSONDoubleValue(trade_json, "new_stop_price", 0.0);
+        double curPx = GetJSONDoubleValue(trade_json, "current_price", 0.0);
+        if(curPx <= 0.0) {
+            // Fallback to symbol side
+            double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            curPx = (bid > 0 && ask > 0) ? ((bid + ask) / 2.0) : (bid > 0 ? bid : ask);
+        }
+        { string __log=""; StringConcatenate(__log, "TRAIL_STOP: Received trailing update for BaseID: ", evtBaseId2, ", new SL: ", DoubleToString(newSL, _Digits), ", curPx: ", DoubleToString(curPx, _Digits)); Print(__log); ULogInfoPrint(__log); }
+        if(newSL > 0.0)
+            ProcessTrailingStopUpdate(evtBaseId2, newSL, curPx);
+        // Do not process further as a regular trade
+        return;
+    }
+    else if (evtType == "hedge_close_notification")
+    {
+        // Bridge-originated notification; informational only for EA. Avoid acting as a trade.
+        { string __log="ACHM_LOG: [ProcessTradeFromJson] Ignoring incoming hedge_close_notification event"; Print(__log); ULogInfoPrint(__log); }
+        return;
+    }
+    else
+    {
+        // If this arrived as a generic EVENT without a recognized event_type, ignore it to prevent accidental opens
+        string __actionLower = incomingNtAction; StringToLower(__actionLower);
+        if(__actionLower == "event") {
+            { string __log="ACHM_LOG: [ProcessTradeFromJson] Ignoring generic EVENT without recognized event_type"; Print(__log); ULogInfoPrint(__log); }
+            return;
+        }
+    }
     
     // Validate parsed data - prevent processing empty trades
     if(StringLen(incomingNtAction) == 0 && incomingNtQuantity == 0.0 && StringLen(baseIdFromJson) == 0) {
@@ -1592,7 +1673,7 @@ void ProcessCloseHedgeAction(const string& baseId, const string& trade_json, ulo
 
 void ProcessTPSLOrder(const string& baseId, const string& orderType, int measurementPips, const string& trade_json)
 {
-    { string __log=""; StringConcatenate(__log, "ACHM_LOG: [ProcessTPSLOrder] Processing ", orderType, " order for base_id: ", baseId, ", pips: ", measurementPips); Print(__log); ULogInfoPrint(__log); }
+    { string __log = StringFormat("ACHM_LOG: [ProcessTPSLOrder] Processing %s order for base_id: %s, pips: %d", (string)orderType, (string)baseId, (int)measurementPips); Print(__log); ULogInfoPrint(__log); }
     
     // Store TP/SL measurement
     lastTPSL.baseTradeId = baseId;
@@ -1613,22 +1694,43 @@ void ProcessTPSLOrder(const string& baseId, const string& orderType, int measure
     }
     lastTPSL.rawMeasurement = rawMeasurement;
     
-    { string __log=""; StringConcatenate(__log, "ACHM_LOG: [ProcessTPSLOrder] Stored TP/SL measurement: ", orderType, " = ", measurementPips, " pips (", rawMeasurement, ")"); Print(__log); ULogInfoPrint(__log); }
+    { string __log = StringFormat("ACHM_LOG: [ProcessTPSLOrder] Stored TP/SL measurement: %s = %d pips (%.8f)", (string)orderType, (int)measurementPips, (double)rawMeasurement); Print(__log); ULogInfoPrint(__log); }
 }
 
 void ProcessRegularTrade(const string& action, double quantity, double price, const string& baseId, const string& trade_json)
 {
-    { string __log=""; StringConcatenate(__log, "ACHM_LOG: [ProcessRegularTrade] Processing regular trade - Action: ", action, ", Qty: ", quantity, ", Price: ", price, ", BaseId: ", baseId); Print(__log); ULogInfoPrint(__log); }
+    { string __log = StringFormat("ACHM_LOG: [ProcessRegularTrade] Processing regular trade - Action: %s, Qty: %.8f, Price: %.8f, BaseId: %s", (string)action, (double)quantity, (double)price, (string)baseId); Print(__log); ULogInfoPrint(__log); }
     
     // Determine trade direction for hedging
     ENUM_ORDER_TYPE orderType;
-    string commentPrefix;
+    string commentPrefix = ""; // local comment prefix for order comments
     
-    { string __log=""; StringConcatenate(__log, "ACHM_HEDGE_DEBUG: [ProcessRegularTrade] NT Action: '", action, "', EnableHedging: ", EnableHedging); Print(__log); ULogInfoPrint(__log); }
+        // Guard: only process NT actions that are explicit buy/sell. Ignore anything else (e.g., EVENT) to avoid false opens
+        string __actLower = action; StringToLower(__actLower);
+        bool __isBuy  = (__actLower == "buy");
+        bool __isSell = (__actLower == "sell");
+        if(!__isBuy && !__isSell)
+        {
+            { string __ilog = StringFormat("ACHM_LOG: [ProcessRegularTrade] Ignoring non-trade action '%s' for base_id: %s", (string)action, (string)baseId); Print(__ilog); ULogInfoPrint(__ilog); }
+            SubmitTradeResult("ignored", 0, 0.0, false, baseId);
+            return;
+        }
+        // Preflight: verify trading is permitted to avoid 4756 (Trading is prohibited)
+        string tradeBlockReason = "";
+        if(!IsTradingPermitted(tradeBlockReason))
+        {
+            { string __elog = StringFormat("ACHM_ERROR: Trading not permitted for symbol %s: %s. Skipping hedge for base_id: %s", (string)_Symbol, (string)tradeBlockReason, (string)baseId); Print(__elog); ULogErrorPrint(__elog); }
+            SubmitTradeResult("failed", 0, 0.0, false, baseId);
+            return;
+        }
+
+        // Calculate lot size based on mode
+    
+    { string __log = StringFormat("ACHM_HEDGE_DEBUG: [ProcessRegularTrade] NT Action: '%s', EnableHedging: %d", (string)action, (int)EnableHedging); Print(__log); ULogInfoPrint(__log); }
     
     if(EnableHedging) {
         // Hedge opposite direction
-        if(action == "buy" || action == "BUY" || action == "Buy") {
+        if(__isBuy) {
             orderType = ORDER_TYPE_SELL;
             commentPrefix = EA_COMMENT_PREFIX_SELL;
             { string __log="ACHM_HEDGE_DEBUG: [ProcessRegularTrade] HEDGING: NT BUY → MT5 SELL"; Print(__log); ULogInfoPrint(__log); }
@@ -1639,7 +1741,7 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
         }
     } else {
         // Copy same direction
-        if(action == "buy" || action == "BUY" || action == "Buy") {
+        if(__isBuy) {
             orderType = ORDER_TYPE_BUY;
             commentPrefix = EA_COMMENT_PREFIX_BUY;
             { string __log="ACHM_HEDGE_DEBUG: [ProcessRegularTrade] COPYING: NT BUY → MT5 BUY"; Print(__log); ULogInfoPrint(__log); }
@@ -1650,7 +1752,7 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
         }
     }
     
-    { string __log=""; StringConcatenate(__log, "ACHM_HEDGE_DEBUG: [ProcessRegularTrade] Final orderType: ", EnumToString(orderType)); Print(__log); ULogInfoPrint(__log); }
+    { string __log = StringFormat("ACHM_HEDGE_DEBUG: [ProcessRegularTrade] Final orderType: %s", EnumToString(orderType)); Print(__log); ULogInfoPrint(__log); }
     
     // Calculate lot size based on mode
     double lotSize = CalculateLotSize(quantity, baseId, trade_json);
@@ -1661,16 +1763,28 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
     double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
     
     if(lotSize < minLot) {
-        { string __log=""; StringConcatenate(__log, "ACHM_LOG: Calculated lot size ", lotSize, " is below minimum ", minLot, ". Using minimum."); Print(__log); ULogWarnPrint(__log); }
+    { string __log = StringFormat("ACHM_LOG: Calculated lot size %.8f is below minimum %.8f. Using minimum.", (double)lotSize, (double)minLot); Print(__log); ULogWarnPrint(__log); }
         lotSize = minLot;
     }
     if(lotSize > maxLot) {
-        { string __log=""; StringConcatenate(__log, "ACHM_LOG: Calculated lot size ", lotSize, " exceeds maximum ", maxLot, ". Using maximum."); Print(__log); ULogWarnPrint(__log); }
+    { string __log = StringFormat("ACHM_LOG: Calculated lot size %.8f exceeds maximum %.8f. Using maximum.", (double)lotSize, (double)maxLot); Print(__log); ULogWarnPrint(__log); }
         lotSize = maxLot;
     }
     
     // Round to lot step
     lotSize = NormalizeDouble(lotSize / lotStep, 0) * lotStep;
+
+    // Margin-aware downscaling to avoid retcode 10019 (No money)
+    double adjLot = AdjustLotForMargin(lotSize, orderType);
+    if(adjLot < lotSize) {
+        { string __log = StringFormat("ACHM_MARGIN: Downscaling lot due to free margin. Requested %.8f, adjusted %.8f", (double)lotSize, (double)adjLot); Print(__log); ULogWarnPrint(__log); }
+    }
+    if(adjLot <= 0) {
+        { string __elog = StringFormat("ACHM_ERROR: Insufficient free margin to open even min lot for %s. Skipping hedge for base_id: %s", (string)_Symbol, (string)baseId); Print(__elog); ULogErrorPrint(__elog); }
+        SubmitTradeResult("failed", 0, 0.0, false, baseId);
+        return;
+    }
+    lotSize = adjLot;
     
     // Execute the trades - loop for multiple contracts
     string comment = commentPrefix + baseId;
@@ -1683,11 +1797,12 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
     if(contractNumMsg >= 0)
     {
         string totalStr = (totalQuantityMsg > 0 ? (string)IntegerToString(totalQuantityMsg) : "unknown");
-        { string __log=""; StringConcatenate(__log, "ACHM_LOG: Per-contract message: contract #", (contractNumMsg + 1), " of ", totalStr, ", base_id: ", baseId); Print(__log); ULogInfoPrint(__log); }
+        { string __log = StringFormat("ACHM_LOG: Per-contract message: contract #%d of %s, base_id: %s", (int)(contractNumMsg + 1), (string)totalStr, (string)baseId); Print(__log); ULogInfoPrint(__log); }
     }
     else
     {
-        { string __log=""; StringConcatenate(__log, "ACHM_LOG: Need to open ", totalContracts, " hedge trades for NT quantity ", quantity); Print(__log); ULogInfoPrint(__log); }
+        string __log = StringFormat("ACHM_LOG: Need to open %d hedge trades for NT quantity %.8f", (int)totalContracts, (double)quantity);
+        Print(__log); ULogInfoPrint(__log);
     }
     
     for(int i = 0; i < totalContracts; i++) {
@@ -1696,10 +1811,62 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
         ulong dealId = 0;
         ulong positionTicket = 0;
         
-        if(orderType == ORDER_TYPE_BUY) {
-            success = trade.Buy(lotSize, _Symbol, 0, 0, 0, comment);
-        } else {
-            success = trade.Sell(lotSize, _Symbol, 0, 0, 0, comment);
+        // Conservative retry: if broker returns NO_MONEY, step down lot and retry a few times
+        double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+        double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+        if(lotStep <= 0) lotStep = 0.01;
+        double sendLot = lotSize;
+        int maxAttempts = 8;
+        uint lastRetcode = 0;
+        int lastError = 0;
+        string lastRcDesc = "";
+        string lastComment = "";
+        
+        for(int attempt = 0; attempt < maxAttempts && sendLot >= minLot; attempt++)
+        {
+            if(orderType == ORDER_TYPE_BUY) {
+                success = trade.Buy(sendLot, _Symbol, 0, 0, 0, comment);
+            } else {
+                success = trade.Sell(sendLot, _Symbol, 0, 0, 0, comment);
+            }
+            
+            if(success) break;
+            
+            lastError = GetLastError();
+            lastRetcode = trade.ResultRetcode();
+            lastRcDesc = trade.ResultRetcodeDescription();
+            lastComment = trade.ResultComment();
+            
+            // 10019 = TRADE_RETCODE_NO_MONEY
+            // Avoid any implicit conversions by using explicit lowercase temp strings
+            string lcDesc = lastRcDesc;
+            StringToLower(lcDesc);
+            string lcComment = lastComment;
+            StringToLower(lcComment);
+            int idxDesc = StringFind(lcDesc, "money");
+            int idxComment = StringFind(lcComment, "money");
+            bool noMoney = (lastRetcode == 10019) || (idxDesc >= 0) || (idxComment >= 0);
+            if(noMoney)
+            {
+                string __log = StringFormat(
+                    "ACHM_MARGIN: NO_MONEY retcode on send (retcode=%d, desc=%s) for lot=%.8f. Stepping down by lotStep=%.8f and retrying...",
+                    (int)lastRetcode,
+                    lastRcDesc,
+                    (double)sendLot,
+                    (double)lotStep
+                );
+                Print(__log); ULogWarnPrint(__log);
+                // Step down to next lower step
+                double next = MathFloor((sendLot - lotStep) / lotStep) * lotStep;
+                if(next < minLot) { sendLot = 0.0; break; }
+                sendLot = NormalizeDouble(next, 8);
+                // Small backoff
+                Sleep(25);
+                continue;
+            }
+            
+            // For other errors, don't loop excessively
+            break;
         }
         
         if(success) {
@@ -1730,11 +1897,31 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
             if(positionTicket == 0) positionTicket = orderTicket; // last resort
             if(contractNumMsg >= 0 && totalQuantityMsg > 0)
             {
-                { string __log=""; StringConcatenate(__log, "ACHM_LOG: Successfully executed ", EnumToString(orderType), " order #", orderTicket, " (pos ", positionTicket, ") for ", lotSize, " lots (contract ", (contractNumMsg + 1), " of ", totalQuantityMsg, "), base_id: ", baseId); Print(__log); ULogInfoPrint(__log); }
+                string __log = StringFormat(
+                    "ACHM_LOG: Successfully executed %s order #%I64u (pos %I64u) for %.2f lots (contract %d of %d), base_id: %s",
+                    EnumToString(orderType),
+                    (ulong)orderTicket,
+                    (ulong)positionTicket,
+                    (double)lotSize,
+                    (int)(contractNumMsg + 1),
+                    (int)totalQuantityMsg,
+                    baseId
+                );
+                Print(__log); ULogInfoPrint(__log);
             }
             else
             {
-                { string __log=""; StringConcatenate(__log, "ACHM_LOG: Successfully executed ", EnumToString(orderType), " order #", orderTicket, " (pos ", positionTicket, ") for ", lotSize, " lots (trade ", (i+1), " of ", totalContracts, "), base_id: ", baseId); Print(__log); ULogInfoPrint(__log); }
+                string __log = StringFormat(
+                    "ACHM_LOG: Successfully executed %s order #%I64u (pos %I64u) for %.2f lots (trade %d of %d), base_id: %s",
+                    EnumToString(orderType),
+                    (ulong)orderTicket,
+                    (ulong)positionTicket,
+                    (double)lotSize,
+                    (int)(i+1),
+                    (int)totalContracts,
+                    baseId
+                );
+                Print(__log); ULogInfoPrint(__log);
             }
             
             // Add to position tracking
@@ -1756,9 +1943,34 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
             }
             
         } else {
-            int error = GetLastError();
-            { string __log=""; StringConcatenate(__log, "ACHM_LOG: Failed to execute ", EnumToString(orderType), " order ", (i+1), " of ", totalContracts, " for base_id: ", baseId, ". Error: ", error); Print(__log); ULogErrorPrint(__log); }
-            SubmitTradeResult("failed", 0, lotSize, false, baseId);
+            int error = (lastError != 0 ? lastError : GetLastError());
+            uint retcode = (lastRetcode != 0 ? lastRetcode : trade.ResultRetcode());
+            string rcdesc = (lastRcDesc != "" ? lastRcDesc : trade.ResultRetcodeDescription());
+            string rccmt = (lastComment != "" ? lastComment : trade.ResultComment());
+            double triedLot = (sendLot > 0 ? sendLot : lotSize);
+            string __elog = StringFormat(
+                "ACHM_LOG: Failed to execute %s order %d of %d for base_id: %s. Lots: %.8f, Error: %d, Retcode: %u (%s), Comment: %s",
+                EnumToString(orderType),
+                (int)(i+1),
+                (int)totalContracts,
+                baseId,
+                (double)triedLot,
+                (int)error,
+                (uint)retcode,
+                rcdesc,
+                rccmt
+            );
+            Print(__elog); ULogErrorPrint(__elog);
+            // Provide a specific hint for common prohibition code 4756
+            if(error == ERR_TRADE_NOT_ALLOWED)
+            {
+                string __hint = StringFormat(
+                    "ACHM_HINT: Trading is prohibited (4756). Ensure global AutoTrading is ON, EA 'Allow algo trading' is enabled, and symbol %s is tradable and not Close-Only.",
+                    _Symbol
+                );
+                Print(__hint); ULogWarnPrint(__hint);
+            }
+            SubmitTradeResult("failed", 0, triedLot, false, baseId);
         }
         
         // Small delay between trades to avoid overwhelming the broker
@@ -1777,7 +1989,60 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
     // Force overlay recalculation
     ForceOverlayRecalculation();
     
-    { string __log=""; StringConcatenate(__log, "ACHM_LOG: Opened ", successfulTrades, " of ", totalContracts, " requested hedge trades for base_id: ", baseId); Print(__log); ULogInfoPrint(__log); }
+    {
+        string __log = StringFormat(
+            "ACHM_LOG: Opened %d of %d requested hedge trades for base_id: %s",
+            (int)successfulTrades,
+            (int)totalContracts,
+            baseId
+        );
+        Print(__log); ULogInfoPrint(__log);
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Verify trading is permitted and return reason if not             |
+//+------------------------------------------------------------------+
+bool IsTradingPermitted(string &reason)
+{
+    // Global terminal AutoTrading toggle
+    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+    {
+        reason = "Global AutoTrading is disabled (TERMINAL_TRADE_ALLOWED=false).";
+        return false;
+    }
+
+    // EA-level permissions
+    if(!MQLInfoInteger(MQL_TRADE_ALLOWED))
+    {
+        reason = "EA is not permitted to trade (MQL_TRADE_ALLOWED=false). Enable 'Allow algo trading' in EA properties.";
+        return false;
+    }
+
+    // Some brokers expose this flag; if unavailable it will just be 0/ignored by compiler constants
+    #ifdef ACCOUNT_TRADE_EXPERT
+    if(AccountInfoInteger(ACCOUNT_TRADE_EXPERT) == 0)
+    {
+        reason = "Broker/account policy prohibits expert trading (ACCOUNT_TRADE_EXPERT=0).";
+        return false;
+    }
+    #endif
+
+    // Symbol trade mode checks
+    long tradeMode = (long)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE);
+    if(tradeMode == SYMBOL_TRADE_MODE_DISABLED)
+    {
+        reason = "Symbol trade mode is DISABLED.";
+        return false;
+    }
+    if(tradeMode == SYMBOL_TRADE_MODE_CLOSEONLY)
+    {
+        reason = "Symbol trade mode is CLOSE-ONLY (new positions not allowed).";
+        return false;
+    }
+
+    // LONGONLY / SHORTONLY and FULL are allowed; direction constraints will be handled when sending order
+    return true;
 }
 
 double CalculateLotSize(double ntQuantity, const string& baseId, const string& trade_json)
@@ -1804,6 +2069,77 @@ double CalculateLotSize(double ntQuantity, const string& baseId, const string& t
     }
     
     return lotSize;
+}
+
+//+------------------------------------------------------------------+
+//| Adjust lot size to fit available free margin                     |
+//+------------------------------------------------------------------+
+double AdjustLotForMargin(double desiredLot, ENUM_ORDER_TYPE orderType)
+{
+    // Broker constraints
+    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+    double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+    if(lotStep <= 0) lotStep = 0.01; // fallback safety
+
+    // Current price for margin calc
+    double price = (orderType == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                                                : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    if(price <= 0) price = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
+
+    double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+    double safety = 0.85; // slightly more conservative headroom
+
+    // Calculate margin for desired lot
+    double margin = 0.0;
+    bool ok = OrderCalcMargin(orderType, _Symbol, desiredLot, price, margin);
+    if(!ok) {
+        // Approximate required margin if OrderCalcMargin unavailable
+        if(g_brokerSpecs.marginRequired > 0)
+            margin = g_brokerSpecs.marginRequired * desiredLot;
+    }
+
+    if(margin > 0 && freeMargin >= margin * safety) {
+        return MathMin(MathMax(desiredLot, minLot), maxLot);
+    }
+
+    // Compute scaled lot proportionally
+    double scaled = desiredLot;
+    if(margin > 0) {
+        double ratio = (freeMargin * safety) / margin;
+        scaled = desiredLot * MathMax(0.0, ratio);
+    } else if(g_brokerSpecs.marginRequired > 0) {
+        double perLot = g_brokerSpecs.marginRequired;
+        scaled = (freeMargin * safety) / perLot;
+    } else {
+        // No way to estimate margin, give up
+        return 0.0;
+    }
+
+    // Apply constraints and step rounding
+    scaled = MathMin(MathMax(scaled, minLot), maxLot);
+    if(scaled <= 0) return 0.0;
+    scaled = MathFloor(scaled / lotStep) * lotStep;
+    if(scaled < minLot) return 0.0;
+
+    // Refine: ensure scaled lot actually fits margin (few iterations)
+    for(int i=0; i<5; i++) {
+        double m2 = 0.0;
+        if(!OrderCalcMargin(orderType, _Symbol, scaled, price, m2)) {
+            if(g_brokerSpecs.marginRequired > 0)
+                m2 = g_brokerSpecs.marginRequired * scaled;
+        }
+        if(m2 > 0 && m2 > freeMargin * safety) {
+            double next = MathMax(minLot, scaled - lotStep);
+            next = MathFloor(next / lotStep) * lotStep;
+            if(next >= scaled || next < minLot) { scaled = 0.0; break; }
+            scaled = next;
+        } else {
+            break;
+        }
+    }
+
+    return scaled;
 }
 
 //+------------------------------------------------------------------+
@@ -2559,6 +2895,58 @@ double GetJSONDouble(string json, string key)
 }
 
 //+------------------------------------------------------------------+
+//| Extract double value from JSON string with default               |
+//+------------------------------------------------------------------+
+double GetJSONDoubleValue(string json, string key, double defaultValue)
+{
+    string searchKey = "\"" + key + "\"";
+    int keyPos = StringFind(json, searchKey);
+    if(keyPos == -1) {
+        return defaultValue;
+    }
+
+    // Search for colon after the key to avoid preceding matches
+    int colonPos = StringFind(json, ":", keyPos + StringLen(searchKey));
+    if(colonPos == -1) {
+        return defaultValue;
+    }
+
+    int start = colonPos + 1;
+    // Skip whitespace characters
+    while(start < StringLen(json))
+    {
+        ushort ch = StringGetCharacter(json, start);
+        if(ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r')
+            break;
+        start++;
+    }
+
+    if(start >= StringLen(json)) {
+        return defaultValue;
+    }
+
+    // Build the numeric string (supports sign and decimal)
+    string numStr = "";
+    while(start < StringLen(json))
+    {
+        ushort ch = StringGetCharacter(json, start);
+        if((ch >= '0' && ch <= '9') || ch == '.' || ch == '-' || ch == '+')
+        {
+            numStr += CharToString((uchar)ch);
+            start++;
+        }
+        else
+            break;
+    }
+
+    if(numStr == "") {
+        return defaultValue;
+    }
+
+    return StringToDouble(numStr);
+}
+
+//+------------------------------------------------------------------+
 //| Extract integer value from JSON string                          |
 //+------------------------------------------------------------------+
 int GetJSONIntValue(string json, string key, int defaultValue)
@@ -2660,45 +3048,117 @@ void ProcessElasticHedgeUpdate(string baseId, double currentProfit, int profitLe
     // Find the elastic position
     int posIndex = FindElasticPosition(baseId);
     if (posIndex < 0) {
-        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: No elastic position found for BaseID: ", baseId); Print(__log); ULogWarnPrint(__log); }
-        return;
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: No elastic position found for BaseID: ", baseId, ". Attempting on-the-fly initialization from open MT5 position..."); Print(__log); ULogWarnPrint(__log); }
+        // Fallback: if we have an open MT5 position mapped to this baseId, initialize tracking now
+        int openIdx = FindPositionByBaseId(baseId);
+        if (openIdx >= 0) {
+            ulong fallbackTicket = (ulong)g_open_mt5_pos_ids[openIdx];
+            double fallbackLots = 0.0;
+            if (PositionSelectByTicket(fallbackTicket)) {
+                fallbackLots = PositionGetDouble(POSITION_VOLUME);
+            } else {
+                { string __log2=""; StringConcatenate(__log2, "ELASTIC_HEDGE: Fallback init failed - could not select position ticket ", fallbackTicket, " for BaseID: ", baseId); Print(__log2); ULogWarnPrint(__log2); }
+            }
+            if (fallbackTicket > 0 && fallbackLots > 0.0) {
+                AddElasticPosition(baseId, fallbackTicket, fallbackLots);
+                { string __log3=""; StringConcatenate(__log3, "ELASTIC_HEDGE: Backfilled elastic tracking for BaseID: ", baseId, 
+                                  ", Ticket: ", (long)fallbackTicket, ", Lots: ", fallbackLots, 
+                                  ". Proceeding with partial-close evaluation."); Print(__log3); ULogInfoPrint(__log3); }
+                // Re-check after backfill
+                posIndex = FindElasticPosition(baseId);
+                if (posIndex < 0) {
+                    { string __log4=""; StringConcatenate(__log4, "ELASTIC_HEDGE: Backfill succeeded but position index not found for BaseID: ", baseId, ". Aborting update."); Print(__log4); ULogWarnPrint(__log4); }
+                    return;
+                }
+            } else {
+                { string __log5=""; StringConcatenate(__log5, "ELASTIC_HEDGE: No open MT5 position found or zero lots for BaseID: ", baseId, ". Skipping update."); Print(__log5); ULogWarnPrint(__log5); }
+                return;
+            }
+        } else {
+            // Second-level fallback: scan open positions by comment to backfill mapping (handles MT5 comment truncation)
+            { string __log7=""; StringConcatenate(__log7, "ELASTIC_HEDGE: No array mapping found for BaseID: ", baseId, 
+                              ". Scanning open positions by comment for resilient backfill..."); Print(__log7); ULogWarnPrint(__log7); }
+
+            int total = PositionsTotal();
+            int matchCount = 0;
+            ulong candidateTicket = 0;
+            double candidateLots = 0.0;
+
+            // Use the same prefixes as when opening hedges
+            string buyPrefix = EA_COMMENT_PREFIX_BUY;   // "NT_Hedge_BUY_"
+            string sellPrefix = EA_COMMENT_PREFIX_SELL; // "NT_Hedge_SELL_"
+
+            for (int i = 0; i < total; i++) {
+                ulong vpt = PositionGetTicket(i);
+                if (vpt == 0 || !PositionSelectByTicket(vpt)) continue;
+                string psym = PositionGetString(POSITION_SYMBOL);
+                if (psym != _Symbol) continue; // limit to current symbol
+
+                string comment = PositionGetString(POSITION_COMMENT);
+                string tradePortionComment = "";
+                if (StringFind(comment, buyPrefix) == 0) {
+                    tradePortionComment = StringSubstr(comment, StringLen(buyPrefix));
+                } else if (StringFind(comment, sellPrefix) == 0) {
+                    tradePortionComment = StringSubstr(comment, StringLen(sellPrefix));
+                } else {
+                    continue;
+                }
+
+                if (tradePortionComment != "") {
+                    int maxLen = MathMin(StringLen(baseId), StringLen(tradePortionComment));
+                    if (maxLen > 0 && StringSubstr(baseId, 0, maxLen) == tradePortionComment) {
+                        matchCount++;
+                        candidateTicket = (ulong)PositionGetInteger(POSITION_TICKET);
+                        candidateLots   = PositionGetDouble(POSITION_VOLUME);
+                    }
+                }
+            }
+
+            if (matchCount == 1 && candidateTicket > 0 && candidateLots > 0.0) {
+                AddElasticPosition(baseId, candidateTicket, candidateLots);
+                { string __log8=""; StringConcatenate(__log8, "ELASTIC_HEDGE: Comment-scan backfill succeeded for BaseID: ", baseId,
+                                  ", Ticket: ", (long)candidateTicket, ", Lots: ", candidateLots, 
+                                  ". Proceeding with partial-close evaluation."); Print(__log8); ULogInfoPrint(__log8); }
+                posIndex = FindElasticPosition(baseId);
+                if (posIndex < 0) {
+                    { string __log9=""; StringConcatenate(__log9, "ELASTIC_HEDGE: Backfill succeeded but position index not found for BaseID: ", baseId, ". Aborting update."); Print(__log9); ULogWarnPrint(__log9); }
+                    return;
+                }
+            } else if (matchCount > 1) {
+                { string __log10=""; StringConcatenate(__log10, "ELASTIC_HEDGE: Comment-scan found ", matchCount, 
+                                   " ambiguous matches for BaseID: ", baseId, ". Skipping for safety."); Print(__log10); ULogWarnPrint(__log10); }
+                return;
+            } else {
+                { string __log11=""; StringConcatenate(__log11, "ELASTIC_HEDGE: No matching open MT5 position found by comment for BaseID: ", baseId, 
+                                   ". Skipping update."); Print(__log11); ULogWarnPrint(__log11); }
+                return;
+            }
+        }
     }
     
-    // Check if enough time has passed since last reduction
-    if (TimeCurrent() - g_elasticPositions[posIndex].lastReductionTime < ElasticHedging_MinUpdateInterval) {
-        Print("ELASTIC_HEDGE: Update too soon. Last reduction was ", 
-              (int)(TimeCurrent() - g_elasticPositions[posIndex].lastReductionTime), " seconds ago");
-        return;
-    }
+    // Removed throttle between reductions to sync with NT trailing behavior
     
     // Determine which tier to use based on NT PnL
     bool isHighRiskTier = (g_ntDailyPnL <= ElasticHedging_Tier2_Threshold);
     
-    double lotsToClose, maxReductionPercent;
+    double lotsToClose;
     if (isHighRiskTier) {
         lotsToClose = ElasticHedging_Tier2_LotReduction;
-        maxReductionPercent = ElasticHedging_Tier2_MaxReduction;
         { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Using Tier 2 (High Risk) settings - NT PnL: $", g_ntDailyPnL); Print(__log); ULogInfoPrint(__log); }
     } else {
         lotsToClose = ElasticHedging_Tier1_LotReduction;
-        maxReductionPercent = ElasticHedging_Tier1_MaxReduction;
         { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Using Tier 1 (Standard) settings - NT PnL: $", g_ntDailyPnL); Print(__log); ULogInfoPrint(__log); }
     }
-    
-    double maxReduction = g_elasticPositions[posIndex].initialLots * maxReductionPercent;
     
     // Debug logging
     Print("ELASTIC_HEDGE: Position details - Initial: ", g_elasticPositions[posIndex].initialLots,
           ", Remaining: ", g_elasticPositions[posIndex].remainingLots,
           ", Already reduced: ", g_elasticPositions[posIndex].totalLotsReduced);
-    Print("ELASTIC_HEDGE: Reduction settings - Per update: ", lotsToClose,
-          ", Max allowed: ", maxReduction, " (", (maxReductionPercent*100), "% of initial)");
+    Print("ELASTIC_HEDGE: Reduction settings - Per update: ", lotsToClose);
     
-    // Don't exceed max reduction
-    if (g_elasticPositions[posIndex].totalLotsReduced + lotsToClose > maxReduction) {
-        lotsToClose = maxReduction - g_elasticPositions[posIndex].totalLotsReduced;
-        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Adjusting lots to close to stay within max: ", lotsToClose); Print(__log); ULogInfoPrint(__log); }
-    }
+    // Safety: don't close more than remaining
+    if (lotsToClose > g_elasticPositions[posIndex].remainingLots)
+        lotsToClose = g_elasticPositions[posIndex].remainingLots;
     
     double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
     { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Will attempt to close ", lotsToClose, " lots. Min lot: ", minLot); Print(__log); ULogInfoPrint(__log); }
@@ -2726,7 +3186,7 @@ void ProcessElasticHedgeUpdate(string baseId, double currentProfit, int profitLe
             GrpcSubmitElasticUpdate(update_json);
         }
     } else {
-        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Max reduction reached or lots too small for BaseID: ", baseId); Print(__log); ULogInfoPrint(__log); }
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: No reduction applied (below min lot or nothing remaining) for BaseID: ", baseId); Print(__log); ULogInfoPrint(__log); }
     }
 }
 
@@ -2825,6 +3285,12 @@ int FindPositionByBaseId(string baseId)
 //+------------------------------------------------------------------+
 bool PartialClosePosition(ulong ticket, double lotsToClose)
 {
+    // Safety: only allow partial closes when Elastic mode is active
+    if(!ElasticHedging_Enabled || LotSizingMode != Elastic_Hedging) {
+        { string __log="ELASTIC_HEDGE: Partial close skipped (Elastic disabled or LotSizingMode != Elastic_Hedging)"; Print(__log); ULogWarnPrint(__log); }
+        return false;
+    }
+
     if (!PositionSelectByTicket(ticket)) {
         Print("ELASTIC_HEDGE: Failed to select position ", ticket);
         return false;
@@ -2894,6 +3360,8 @@ void AddElasticPosition(string baseId, ulong positionTicket, double lots)
     
     Print("ELASTIC_HEDGE: Added elastic tracking for BaseID: ", baseId, 
           ", Ticket: ", positionTicket, ", Lots: ", lots);
+    { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Added elastic tracking for BaseID: ", baseId, 
+                      ", Ticket: ", (long)positionTicket, ", Lots: ", lots); ULogInfoPrint(__log); }
 }
 
 //+------------------------------------------------------------------+
@@ -3369,10 +3837,18 @@ bool OpenNewHedgeOrder(string hedgeOrigin, string tradeId, string nt_instrument_
     double slPoints = slDist / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
 
     /*----------------------------------------------------------------
-     3.  Volume calculation
+     3.  Determine NT quantity (from group) and calculate volume
     ----------------------------------------------------------------*/
-    double volume = DefaultLot;                 // fallback default
+    // Try to locate the NT quantity for this base_id (tradeId)
+    int ntQty = 0;
+    for(int k=0; k < ArraySize(g_baseIds); k++) {
+        if(g_baseIds[k] == tradeId) {
+            if(k < ArraySize(g_totalQuantities)) ntQty = g_totalQuantities[k];
+            break;
+        }
+    }
 
+    double volume = DefaultLot; // fallback default
     if(LotSizingMode == Asymmetric_Compounding && UseACRiskManagement)
     {
         double equity      = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -3386,27 +3862,8 @@ bool OpenNewHedgeOrder(string hedgeOrigin, string tradeId, string nt_instrument_
     }
     else if(LotSizingMode == Elastic_Hedging)
     {
-        // Use tier-based calculation for elastic hedging
-        double targetProfit;
-        bool isHighRiskTier = (g_ntDailyPnL <= -1000.0); // Tier 2 threshold
-        
-        if (isHighRiskTier) {
-            targetProfit = 200.0; // Tier 2 target
-        } else {
-            targetProfit = 70.0;  // Tier 1 target
-        }
-        
-        double pointsMove = 50.0 * ElasticHedging_NTPointsToMT5; // Convert NT points to MT5 points
-        double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-        double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-        double pointSize = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-        double pointValue = (tickValue / tickSize) * pointSize;
-        
-        if (pointValue > 0) {
-            volume = targetProfit / (pointsMove * pointValue);
-        } else {
-            volume = DefaultLot; // Fallback
-        }
+        // Use the dedicated elastic calculator (tier-aware, NT→MT5 conversion, target profits)
+        volume = CalculateElasticLotSize((double)ntQty);
     }
 
     double finalVol = volume;  // Volume already calculated based on selected mode
@@ -3422,7 +3879,7 @@ bool OpenNewHedgeOrder(string hedgeOrigin, string tradeId, string nt_instrument_
     if(finalVol < minLot) finalVol = minLot; // ensure never below exchange minimum after rounding
 
     /*----------------------------------------------------------------
-     4.  Order type & comment (hedgeOrigin determines Buy vs. Sell)
+     4.  Order type, margin-aware adjustment, and comment
     ----------------------------------------------------------------*/
     // If EnableHedging is true, OnTimer sets hedgeOrigin to the OPPOSITE of the NT action.
     // If EnableHedging is false (copying), OnTimer sets hedgeOrigin to the SAME as the NT action.
@@ -3433,6 +3890,17 @@ bool OpenNewHedgeOrder(string hedgeOrigin, string tradeId, string nt_instrument_
         request.type = ORDER_TYPE_SELL;
     } else {
         Print("ERROR: OpenNewHedgeOrder - Invalid hedgeOrigin '", hedgeOrigin, "'. Cannot determine order type.");
+        return false;
+    }
+
+    // Adjust for free margin if needed
+    double adjVol = AdjustLotForMargin(finalVol, request.type);
+    if(adjVol < finalVol - 1e-8) {
+        ULogWarnPrint(StringFormat("ACHM_MARGIN: Downscaling lot due to free margin. Requested %.4f -> adjusted %.4f", finalVol, adjVol));
+        finalVol = adjVol;
+    }
+    if(finalVol < minLot - 1e-8) {
+        ULogErrorPrint(StringFormat("ACHM_MARGIN: Insufficient free margin even for min lot %.4f. Aborting order for base_id=%s", minLot, tradeId));
         return false;
     }
 
@@ -3617,6 +4085,10 @@ bool OpenNewHedgeOrder(string hedgeOrigin, string tradeId, string nt_instrument_
                 // Add to elastic hedging tracking if enabled
                 if (ElasticHedging_Enabled && LotSizingMode == Elastic_Hedging) {
                     AddElasticPosition(tradeId, new_mt5_position_id, finalVol);
+                } else if (ElasticHedging_Enabled && LotSizingMode != Elastic_Hedging) {
+                    Print("ELASTIC_HEDGE: Tracking NOT added for BaseID '", tradeId, "' because LotSizingMode != Elastic_Hedging (", (int)LotSizingMode, ")");
+                } else if (!ElasticHedging_Enabled) {
+                    Print("ELASTIC_HEDGE: Tracking NOT added for BaseID '", tradeId, "' because ElasticHedging_Enabled is false");
                 }
                 
                 // Final validation after position addition
@@ -3907,10 +4379,86 @@ double CalculateACLotSize(double ntQuantity)
     return DefaultLot;
 }
 
+// Helper: basic detector for index CFD symbols (reduces oversizing risk)
+bool __IsIndexCFD(string sym)
+{
+    string up = sym;
+    StringToUpper(up);
+    if(StringFind(up, "NAS")   >= 0 || StringFind(up, "US100") >= 0 || StringFind(up, "NAS100") >= 0) return true;
+    if(StringFind(up, "US30")  >= 0 || StringFind(up, "DJ30")  >= 0 || StringFind(up, "DOW")    >= 0) return true;
+    if(StringFind(up, "SPX")   >= 0 || StringFind(up, "US500") >= 0 || StringFind(up, "SP500")  >= 0) return true;
+    if(StringFind(up, "GER40") >= 0 || StringFind(up, "DE40")  >= 0) return true;
+    if(StringFind(up, "UK100") >= 0 || StringFind(up, "FTSE")  >= 0) return true;
+    return false;
+}
+
 double CalculateElasticLotSize(double ntQuantity)
 {
-    // Stub implementation - return default lot
-    return DefaultLot;
+    if(!ElasticHedging_Enabled || LotSizingMode != Elastic_Hedging)
+        return DefaultLot;
+
+    // Use Tier 1 target for initial sizing to avoid oversizing on volatile indices.
+    // Tier 2 aggressiveness will be applied by partial-close cadence, not initial lot size.
+    double targetProfit = ElasticHedging_Tier1_TargetProfit;
+
+    // Expected rebound distance in MT5 points for a $1k NT move
+    // Must come either from NT JSON (g_ntPointsPer1kLoss) or future logic; avoid hardcoding here
+    if(g_ntPointsPer1kLoss <= 0.0) {
+        { string __log = "ELASTIC_WARNING: nt_points_per_1k_loss not provided; defaulting to MinLot to avoid oversizing."; Print(__log); ULogWarnPrint(__log); }
+        double __minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+        if(__minLot <= 0) __minLot = 0.01;
+        { string __dbg=""; StringConcatenate(__dbg, "ELASTIC_DEBUG: g_ntPointsPer1kLoss=", DoubleToString(g_ntPointsPer1kLoss, 4), ", tierTarget=", DoubleToString(targetProfit, 2), ", using MinLot=", DoubleToString(__minLot, 2)); Print(__dbg); ULogInfoPrint(__dbg); }
+        return __minLot;
+    }
+    double pointsMove = g_ntPointsPer1kLoss * ElasticHedging_NTPointsToMT5;
+
+    // Value of 1 MT5 point per 1.0 lot
+    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+    double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+    double pointSize = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+    if(tickValue <= 0.0 || tickSize <= 0.0 || pointSize <= 0.0) {
+        double __minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+        if(__minLot <= 0) __minLot = 0.01;
+        { string __dbg=""; StringConcatenate(__dbg, "ELASTIC_DEBUG: invalid symbol metrics (tickValue=", DoubleToString(tickValue, 6), ", tickSize=", DoubleToString(tickSize, 6), ", pointSize=", DoubleToString(pointSize, 6), ") → MinLot=", DoubleToString(__minLot, 2)); Print(__dbg); ULogWarnPrint(__dbg); }
+        return __minLot;
+    }
+
+    double pointValue = (tickValue / tickSize) * pointSize; // $ per point per 1 lot
+    if(pointValue <= 0.0) {
+        double __minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+        if(__minLot <= 0) __minLot = 0.01;
+        { string __dbg=""; StringConcatenate(__dbg, "ELASTIC_DEBUG: computed pointValue<=0 (", DoubleToString(pointValue, 8), ") → MinLot=", DoubleToString(__minLot, 2)); Print(__dbg); ULogWarnPrint(__dbg); }
+        return __minLot;
+    }
+
+    // Lot formula: targetProfit = lots * pointsMove * pointValue
+    double lots = targetProfit / (pointsMove * pointValue);
+
+    // Removed fixed index-CFD cap to restore original sizing behavior; rely on broker limits and margin-aware downscale
+    if(!MathIsValidNumber(lots) || lots <= 0.0) {
+        double __minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+        if(__minLot <= 0) __minLot = 0.01;
+        { string __dbg=""; StringConcatenate(__dbg, "ELASTIC_DEBUG: invalid lots calc from targetProfit=", DoubleToString(targetProfit, 2), ", pointsMove=", DoubleToString(pointsMove, 2), ", pointValue=", DoubleToString(pointValue, 6), " → MinLot=", DoubleToString(__minLot, 2)); Print(__dbg); ULogWarnPrint(__dbg); }
+        return __minLot;
+    }
+
+    // Respect broker limits and steps
+    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+    double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+    if(lotStep <= 0) lotStep = 0.01;
+
+    if(lots < minLot) lots = minLot;
+    if(lots > maxLot) lots = maxLot;
+
+    // Round to step
+    double __preRoundLots = lots;
+    lots = NormalizeDouble(MathRound(lots / lotStep) * lotStep, 8);
+    if(lots < minLot) lots = minLot;
+
+    { string __dbg=""; StringConcatenate(__dbg, "ELASTIC_DEBUG: g_ntPointsPer1kLoss=", DoubleToString(g_ntPointsPer1kLoss, 4), ", NTtoMT5=", DoubleToString(ElasticHedging_NTPointsToMT5, 2), ", pointsMove=", DoubleToString(pointsMove, 2), ", tickValue=", DoubleToString(tickValue, 6), ", tickSize=", DoubleToString(tickSize, 6), ", pointSize=", DoubleToString(pointSize, 6), ", pointValue=", DoubleToString(pointValue, 6), ", targetProfit=", DoubleToString(targetProfit, 2), ", lots(pre-round)=", DoubleToString(__preRoundLots, 3), ", lots(final)=", DoubleToString(lots, 3), ", minLot=", DoubleToString(minLot, 2), ", step=", DoubleToString(lotStep, 2), ", maxLot=", DoubleToString(maxLot, 2)); Print(__dbg); ULogInfoPrint(__dbg); }
+
+    return lots;
 }
 
 // AddElasticPosition function is declared at line 71 - implementation removed to fix duplicate definition error

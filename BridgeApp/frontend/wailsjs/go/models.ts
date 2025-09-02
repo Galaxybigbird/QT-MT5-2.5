@@ -20,6 +20,10 @@ export namespace main {
 	    nt_trade_result: string;
 	    nt_session_trades: number;
 	    mt5_ticket: number;
+	    nt_points_per_1k_loss?: number;
+	    event_type?: string;
+	    elastic_current_profit?: number;
+	    elastic_profit_level?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Trade(source);
@@ -45,6 +49,10 @@ export namespace main {
 	        this.nt_trade_result = source["nt_trade_result"];
 	        this.nt_session_trades = source["nt_session_trades"];
 	        this.mt5_ticket = source["mt5_ticket"];
+	        this.nt_points_per_1k_loss = source["nt_points_per_1k_loss"];
+	        this.event_type = source["event_type"];
+	        this.elastic_current_profit = source["elastic_current_profit"];
+	        this.elastic_profit_level = source["elastic_profit_level"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

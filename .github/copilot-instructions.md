@@ -30,7 +30,7 @@ Goal: Give AI agents the minimum, project-specific context to work productively 
   - **After making changes to Bridge code**: Use `./run-wails-dev-with-logs.ps1` from repo root for development with enhanced logging
   - **Build standalone Bridge server**: `cd 'c:\Documents\Dev\OfficialFuturesHedgebotv2\BridgeApp'; go build -o bridge-server.exe .`
 - NT: build/use `External/NTGrpcClient.dll`; ensure .NET 4.8 and add `netstandard.dll` ref if CS0012 occurs (see gRPC progress docs)
-- MT5: `MT5/build.ps1` for C# DLL; or follow `MT5/cpp-grpc-client/README.md` for pure C++ DLL and copy to `MQL5\Libraries`
+- MT5: Build the native C++ gRPC client using your native dev prompt only. After any MT5-related changes, you MUST run `MT5/cpp-grpc-client/build_cpp_grpc.bat` to rebuild and deploy the DLLs to `MQL5\Libraries`. Do NOT use the PowerShell `build.ps1` for MT5 builds.
 
 ### NinjaTrader deploy script (recommended)
 - Use `scripts/deploy-nt-to-ninjatrader.ps1` to build the NT gRPC client DLLs and deploy both DLLs and NinjaScript source `.cs` files for the MultiStratManager addon to their correct NinjaTrader folders.
@@ -53,7 +53,7 @@ Goal: Give AI agents the minimum, project-specific context to work productively 
 	`C:\Users\marth\AppData\Roaming\MetaQuotes\Terminal\7BC3F33EDFDBDBDBADB45838B9A2D03F\MQL5` and copy over.
 	- Example: for includes like `ACFunctions_gRPC.mqh`, target is
 		`...\MQL5\Include\gRPC\ACFunctions_gRPC.mqh` (preserve folder structure).
-	- Recompile the EA in MetaEditor after copying.
+	- Recompile the EA in MetaEditor after copying. If native DLLs are involved, rebuild them via `MT5/cpp-grpc-client/build_cpp_grpc.bat` first.
 - NinjaTrader MultiStratManager: copy changes from `MultiStratManagerRepo/` to
 	`C:\Users\marth\OneDrive\Desktop\OneDrive\Old video editing files\NinjaTrader 8\bin\Custom\AddOns\MultiStratManager`, then rebuild inside NinjaTrader.
 
@@ -97,10 +97,11 @@ Goal: Give AI agents the minimum, project-specific context to work productively 
 - Bridge logs: startup, health, queue size, stream sends (server.go/app.go)
 - Health `source` values update status: `addon`, `hedgebot`, `nt_addon_init`
 - NT: NinjaScript Output shows gRPC vs HTTP fallback
-- MT5: Experts tab; `GrpcInitialize` and streaming stats
+- MT5: Experts tab; `GrpcInitialize` and streaming stats; ensure native C++ client rebuilt via `MT5/cpp-grpc-client/build_cpp_grpc.bat` before testing.
 
 ## When changing protocol/schema
 - Edit `BridgeApp/proto/trading.proto` → run `make proto` in `BridgeApp/` → update JSON/proto conversions in Go + NT + MT5
+- For MT5: rebuild the native client via `MT5/cpp-grpc-client/build_cpp_grpc.bat` from your native dev prompt so the deployed DLLs are refreshed.
 
 ## Gotchas
 - NinjaTrader targets .NET 4.8: missing `netstandard.dll` causes CS0012

@@ -52,6 +52,12 @@ message Trade {
   string nt_trade_result = 16;    // "win", "loss", "pending"
   int32 nt_session_trades = 17;
   uint64 mt5_ticket = 18;         // MT5 position ticket number for CLOSE_HEDGE targeting
+  // Elastic sizing hint: NT points that correspond to $1000 loss for 1 contract on NT
+  double nt_points_per_1k_loss = 19; // keep in sync with BridgeApp/proto/trading.proto
+  // Event enrichment forwarded via Trade stream so EA can branch at parse time
+  string event_type = 20;                // e.g., "elastic_hedge_update"
+  double elastic_current_profit = 21;    // forwarded for elastic events
+  int32 elastic_profit_level = 22;       // forwarded for elastic events
 }
 
 // Hedge closure notification

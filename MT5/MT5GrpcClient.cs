@@ -1,3 +1,5 @@
+// Nullable context enabled for proper annotation handling
+#nullable enable
 using System;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
@@ -333,7 +335,7 @@ namespace MT5GrpcClient
         /// </summary>
         /// <returns>0 on success, negative error code on failure</returns>
         
-        public static int GrpcStartTradeStream()
+    public static int GrpcStartTradeStream()
         {
             try
             {
@@ -343,23 +345,26 @@ namespace MT5GrpcClient
                 if (_isStreamingActive)
                     return ERROR_SUCCESS; // Already streaming
 
-                _streamingTask = Task.Run(async () =>
+        // Capture a stable cancellation token to avoid nullability warnings and race conditions
+        var token = _cancellationTokenSource?.Token ?? CancellationToken.None;
+
+        _streamingTask = Task.Run(async () =>
                 {
                     try
                     {
-                        while (!_cancellationTokenSource?.Token.IsCancellationRequested ?? false)
+            while (!token.IsCancellationRequested)
                         {
                             try
                             {
                                 // Use bidirectional streaming as defined in protobuf
-                                var call = _client.GetTrades(cancellationToken: _cancellationTokenSource.Token);
+                var call = _client.GetTrades(cancellationToken: token);
                                 
                                 // Send periodic health requests to keep stream alive
                                 _ = Task.Run(async () =>
                                 {
                                     try
                                     {
-                                        while (!_cancellationTokenSource.Token.IsCancellationRequested)
+                    while (!token.IsCancellationRequested)
                                         {
                                             await call.RequestStream.WriteAsync(new HealthRequest
                                             {
@@ -367,7 +372,7 @@ namespace MT5GrpcClient
                                                 OpenPositions = 0
                                             });
                                             
-                                            await Task.Delay(1000, _cancellationTokenSource.Token); // Send heartbeat every second
+                        await Task.Delay(1000, token); // Send heartbeat every second
                                         }
                                     }
                                     catch (Exception)
@@ -378,42 +383,46 @@ namespace MT5GrpcClient
                                     {
                                         await call.RequestStream.CompleteAsync();
                                     }
-                                }, _cancellationTokenSource.Token);
+                }, token);
                                 
                                 // Read incoming trades from the response stream
-                                while (await call.ResponseStream.MoveNext(_cancellationTokenSource.Token))
+                while (await call.ResponseStream.MoveNext(token))
                                 {
                                     var trade = call.ResponseStream.Current;
                                     // Convert trade to JSON and add to queue
                                     var tradeJson = JsonSerializer.Serialize(new
                                     {
-                                        id = trade.Id,
-                                        base_id = trade.BaseId,
+                                        id = trade.Id ?? string.Empty,
+                                        base_id = trade.BaseId ?? string.Empty,
                                         timestamp = trade.Timestamp,
-                                        action = trade.Action,
+                                        action = trade.Action ?? string.Empty,
                                         quantity = trade.Quantity,
                                         price = trade.Price,
                                         total_quantity = trade.TotalQuantity,
                                         contract_num = trade.ContractNum,
-                                        order_type = trade.OrderType,
+                                        order_type = trade.OrderType ?? string.Empty,
                                         measurement_pips = trade.MeasurementPips,
                                         raw_measurement = trade.RawMeasurement,
-                                        instrument = trade.Instrument,
-                                        account_name = trade.AccountName,
+                                        instrument = trade.Instrument ?? string.Empty,
+                                        account_name = trade.AccountName ?? string.Empty,
                                         nt_balance = trade.NtBalance,
                                         nt_daily_pnl = trade.NtDailyPnl,
-                                        nt_trade_result = trade.NtTradeResult,
+                                        nt_trade_result = trade.NtTradeResult ?? string.Empty,
                                         nt_session_trades = trade.NtSessionTrades,
-                                        mt5_ticket = trade.Mt5Ticket
+                                        mt5_ticket = trade.Mt5Ticket,
+                                        nt_points_per_1k_loss = trade.NtPointsPer1KLoss,
+                                        event_type = trade.EventType ?? string.Empty,
+                                        elastic_current_profit = trade.ElasticCurrentProfit,
+                                        elastic_profit_level = trade.ElasticProfitLevel
                                     });
 
                                     _tradeQueue.Enqueue(tradeJson);
                                 }
                             }
-                            catch (Exception ex)
+                            catch (Exception)
                             {
                                 // Connection lost, try to reconnect after delay
-                                await Task.Delay(5000, _cancellationTokenSource.Token);
+                                await Task.Delay(5000, token);
                             }
                         }
                     }

@@ -193,6 +193,8 @@ void StreamingThreadFunction() {
                     {"base_id", trade.base_id()},
                     {"timestamp", trade.timestamp()},
                     {"action", trade.action()},
+                    // Ensure EA can branch on elastic/trailing events
+                    {"event_type", trade.event_type()},
                     {"quantity", trade.quantity()},
                     {"price", trade.price()},
                     {"total_quantity", trade.total_quantity()},
@@ -206,6 +208,11 @@ void StreamingThreadFunction() {
                     {"nt_daily_pnl", trade.nt_daily_pnl()},
                     {"nt_trade_result", trade.nt_trade_result()},
                     {"nt_session_trades", trade.nt_session_trades()},
+                    // Elastic sizing hint propagated from NT via Bridge
+                    {"nt_points_per_1k_loss", trade.nt_points_per_1k_loss()},
+                    // Forward elastic metrics used by EA for partial-close gating
+                    {"elastic_current_profit", trade.elastic_current_profit()},
+                    {"elastic_profit_level", trade.elastic_profit_level()},
                     // Critical for deterministic CLOSE_HEDGE when multiple hedges exist
                     {"mt5_ticket", trade.mt5_ticket()}
                 };

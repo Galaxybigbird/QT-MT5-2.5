@@ -364,7 +364,8 @@ namespace NTGrpcClient
                 NtBalance = GetDoubleValue(root, "nt_balance"),
                 NtDailyPnl = GetDoubleValue(root, "nt_daily_pnl"),
                 NtTradeResult = GetStringValue(root, "nt_trade_result"),
-                NtSessionTrades = GetInt32Value(root, "nt_session_trades")
+                NtSessionTrades = GetInt32Value(root, "nt_session_trades"),
+                NtPointsPer1KLoss = GetDoubleValue(root, "nt_points_per_1k_loss")
             };
         }
         
@@ -389,7 +390,8 @@ namespace NTGrpcClient
                 nt_daily_pnl = trade.NtDailyPnl,
                 nt_trade_result = trade.NtTradeResult,
                 nt_session_trades = trade.NtSessionTrades,
-                mt5_ticket = trade.Mt5Ticket
+                mt5_ticket = trade.Mt5Ticket,
+                nt_points_per_1k_loss = trade.NtPointsPer1KLoss
             };
             
             return JsonSerializer.Serialize(data);
@@ -400,13 +402,33 @@ namespace NTGrpcClient
             var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             
+            // Accept both schema keys and legacy aliases to be tolerant to callers
+            double currentProfit = GetDoubleValue(root, "current_profit");
+            if (Math.Abs(currentProfit) < double.Epsilon)
+            {
+                // legacy alias
+                currentProfit = GetDoubleValue(root, "elastic_current_profit");
+                if (Math.Abs(currentProfit) < double.Epsilon)
+                    currentProfit = GetDoubleValue(root, "price");
+            }
+            int profitLevel = GetInt32Value(root, "profit_level");
+            if (profitLevel == 0)
+            {
+                // legacy alias
+                profitLevel = GetInt32Value(root, "elastic_profit_level");
+                if (profitLevel == 0)
+                    profitLevel = GetInt32Value(root, "level");
+                if (profitLevel == 0)
+                    profitLevel = GetInt32Value(root, "volume");
+            }
+
             return new ElasticHedgeUpdate
             {
                 EventType = GetStringValue(root, "event_type"),
                 Action = GetStringValue(root, "action"),
                 BaseId = GetStringValue(root, "base_id"),
-                CurrentProfit = GetDoubleValue(root, "current_profit"),
-                ProfitLevel = GetInt32Value(root, "profit_level"),
+                CurrentProfit = currentProfit,
+                ProfitLevel = profitLevel,
                 Timestamp = GetStringValue(root, "timestamp"),
                 Mt5Ticket = GetUInt64Value(root, "mt5_ticket")
             };

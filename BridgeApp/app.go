@@ -57,6 +57,11 @@ type App struct {
 	// Track NT-initiated close requests by MT5 ticket to tag subsequent MT5 close results as acks
 	ntCloseMux         sync.Mutex
 	ntInitiatedTickets map[uint64]time.Time // ticket -> time marked
+
+	// Cache NT sizing hints per BaseID so elastic events can carry them
+	baseIdToNtPoints map[string]float64 // BaseID -> nt_points_per_1k_loss
+	// Fallback cache per instrument to cover early elastic events before Buy/Sell caching
+	instrumentToNtPts map[string]float64 // instrument -> nt_points_per_1k_loss
 }
 
 // bestInstAcctFor returns the best-known instrument and account for a given BaseID.
@@ -105,7 +110,13 @@ type Trade struct {
 	NTSessionTrades int     `json:"nt_session_trades"`
 
 	// MT5 position tracking
-	MT5Ticket uint64 `json:"mt5_ticket"` // MT5 position ticket number (always include, even if 0)
+	MT5Ticket         uint64  `json:"mt5_ticket"`                      // MT5 position ticket number (always include, even if 0)
+	NTPointsPer1kLoss float64 `json:"nt_points_per_1k_loss,omitempty"` // Elastic sizing hint
+
+	// Optional event enrichment (forwarded verbatim to MT5 stream JSON)
+	EventType            string  `json:"event_type,omitempty"`
+	ElasticCurrentProfit float64 `json:"elastic_current_profit,omitempty"`
+	ElasticProfitLevel   int32   `json:"elastic_profit_level,omitempty"`
 }
 
 // pendingClose tracks a queued NT-initiated close request waiting for ticket resolution
@@ -260,6 +271,8 @@ func NewApp() *App {
 		baseIdToAccount:    make(map[string]string),
 		pendingCloses:      make(map[string][]pendingClose),
 		ntInitiatedTickets: make(map[uint64]time.Time),
+		baseIdToNtPoints:   make(map[string]float64),
+		instrumentToNtPts:  make(map[string]float64),
 	}
 
 	// Initialize gRPC server
@@ -289,10 +302,9 @@ func (a *App) startup(ctx context.Context) {
 			<-ticker.C
 
 			a.addonStatusMux.Lock()
-			if a.addonConnected && time.Since(a.lastAddonRequestTime) > 30*time.Second {
-				log.Printf("Addon connection timeout detected (last request: %s ago)", time.Since(a.lastAddonRequestTime))
-				a.addonConnected = false
-				log.Printf("Addon connection set to false due to timeout")
+			// Do not forcibly mark disconnected on idle; only warn if stale.
+			if a.addonConnected && time.Since(a.lastAddonRequestTime) > 2*time.Minute {
+				log.Printf("Addon connection appears stale (last request: %s ago) — keeping connected=true until explicit disconnect", time.Since(a.lastAddonRequestTime))
 			}
 			a.addonStatusMux.Unlock()
 		}
@@ -530,7 +542,12 @@ func (a *App) AddToTradeQueue(trade interface{}) error {
 
 	log.Printf("AddToTradeQueue: Successfully converted trade - ID: %s, Action: %s", t.ID, t.Action)
 
-	// Track instrument/account per BaseID for later ticket resolution when BaseIDs diverge
+	// If this is an EVENT trade, emit a concise debug snapshot of the enrichment payload
+	if strings.EqualFold(strings.TrimSpace(t.Action), "EVENT") {
+		log.Printf("DEBUG: EVENT enqueue base_id=%s event_type=%s elastic_current_profit=%.4f elastic_profit_level=%d nt_points_per_1k_loss=%.4f", strings.TrimSpace(t.BaseID), strings.TrimSpace(t.EventType), t.ElasticCurrentProfit, t.ElasticProfitLevel, t.NTPointsPer1kLoss)
+	}
+
+	// Track instrument/account and nt_points_per_1k_loss per BaseID for later use
 	if b := strings.TrimSpace(t.BaseID); b != "" {
 		actLower := strings.ToLower(strings.TrimSpace(t.Action))
 		if actLower == "buy" || actLower == "sell" {
@@ -540,6 +557,14 @@ func (a *App) AddToTradeQueue(trade interface{}) error {
 			}
 			if acct := strings.TrimSpace(t.AccountName); acct != "" {
 				a.baseIdToAccount[b] = acct
+			}
+			// Cache NT sizing hint if present and > 0
+			if t.NTPointsPer1kLoss > 0 {
+				a.baseIdToNtPoints[b] = t.NTPointsPer1kLoss
+				if inst := strings.TrimSpace(t.Instrument); inst != "" {
+					// Also cache per instrument as a fallback for early elastic events
+					a.instrumentToNtPts[inst] = t.NTPointsPer1kLoss
+				}
 			}
 			a.mt5TicketMux.Unlock()
 		}
@@ -1302,11 +1327,102 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 
 func (a *App) HandleElasticUpdate(update interface{}) error {
 	log.Printf("gRPC: Received elastic update: %+v", update)
+	// Extract minimal fields
+	baseID := getBaseIDFromRequest(update)
+	profitLvl := getElasticProfitLevel(update)
+	curProfit := getElasticCurrentProfit(update)
+	mt5tk := getMT5TicketFromRequest(update)
+	log.Printf("DEBUG: Elastic extract base_id=%s profit_level=%d current_profit=%.4f mt5_ticket=%d", baseID, profitLvl, curProfit, mt5tk)
+
+	// Inject cached NT sizing hint and enrichment where possible
+	// Try BaseID first, then instrument fallback, and a brief wait to catch just-enqueued Buy
+	a.mt5TicketMux.RLock()
+	ntPts := a.baseIdToNtPoints[baseID]
+	inst, acct := a.baseIdToInstrument[baseID], a.baseIdToAccount[baseID]
+	// Instrument-level fallback if BaseID not yet cached
+	if ntPts <= 0 && inst != "" {
+		if v, ok := a.instrumentToNtPts[inst]; ok && v > 0 {
+			ntPts = v
+		}
+	}
+	// Cross-reference fallback: if this base has a mapped related base, try its cached hints
+	if ntPts <= 0 {
+		if rel, ok := a.baseIdCrossRef[baseID]; ok && rel != "" {
+			if v, ok2 := a.baseIdToNtPoints[rel]; ok2 && v > 0 {
+				ntPts = v
+			}
+			// Backfill instrument/account from related base if missing
+			if inst == "" {
+				if v, ok2 := a.baseIdToInstrument[rel]; ok2 && strings.TrimSpace(v) != "" {
+					inst = v
+				}
+			}
+			if acct == "" {
+				if v, ok2 := a.baseIdToAccount[rel]; ok2 && strings.TrimSpace(v) != "" {
+					acct = v
+				}
+			}
+		}
+	}
+	a.mt5TicketMux.RUnlock()
+
+	// If still missing, wait briefly for Buy/Sell caching to land
+	if ntPts <= 0 {
+		for i := 0; i < 10; i++ { // up to ~150ms
+			time.Sleep(15 * time.Millisecond)
+			a.mt5TicketMux.RLock()
+			ntPts = a.baseIdToNtPoints[baseID]
+			if ntPts <= 0 && inst == "" && acct == "" {
+				// Re-resolve best instrument/account (could have been cached meanwhile)
+				inst, acct = a.bestInstAcctFor(baseID)
+			}
+			a.mt5TicketMux.RUnlock()
+			if ntPts > 0 {
+				break
+			}
+		}
+		if ntPts <= 0 && inst != "" {
+			a.mt5TicketMux.RLock()
+			if v, ok := a.instrumentToNtPts[inst]; ok && v > 0 {
+				ntPts = v
+			}
+			a.mt5TicketMux.RUnlock()
+		}
+	}
+
+	// Enqueue a lightweight event trade carrying enrichment so EA can branch on event_type
+	ct := Trade{
+		ID:                   fmt.Sprintf("elastic_evt_%d", time.Now().UnixNano()),
+		BaseID:               baseID,
+		Time:                 time.Now(),
+		Action:               "EVENT",
+		Quantity:             0,
+		Price:                0,
+		TotalQuantity:        0,
+		ContractNum:          0,
+		OrderType:            "EVENT",
+		MeasurementPips:      0,
+		RawMeasurement:       0,
+		Instrument:           inst,
+		AccountName:          acct,
+		MT5Ticket:            mt5tk,
+		NTPointsPer1kLoss:    ntPts,
+		EventType:            "elastic_hedge_update",
+		ElasticCurrentProfit: curProfit,
+		ElasticProfitLevel:   int32(profitLvl),
+	}
+	if err := a.AddToTradeQueue(ct); err != nil {
+		return fmt.Errorf("failed to enqueue elastic event: %v", err)
+	}
+	if ntPts <= 0 {
+		log.Printf("WARN: Enqueued elastic event without nt_points_per_1k_loss (base_id=%s, inst=%s)", baseID, inst)
+	}
 	return nil
 }
 
 func (a *App) HandleTrailingStopUpdate(update interface{}) error {
 	log.Printf("gRPC: Received trailing stop update: %+v", update)
+	// No synthetic mapping; EA may act on elastic updates sent explicitly via SubmitElasticUpdate.
 	return nil
 }
 
@@ -1942,7 +2058,14 @@ func (a *App) reconcilePendingCloses() {
 // Helper functions to extract data from the hedge close request
 func getBaseIDFromRequest(request interface{}) string {
 	if req, ok := request.(map[string]interface{}); ok {
+		// Support common key variants
 		if baseID, ok := req["BaseID"].(string); ok {
+			return baseID
+		}
+		if baseID, ok := req["base_id"].(string); ok {
+			return baseID
+		}
+		if baseID, ok := req["BaseId"].(string); ok { // camel variant
 			return baseID
 		}
 	}
@@ -2105,6 +2228,135 @@ func getMT5TicketFromRequest(request interface{}) uint64 {
 	}
 	log.Printf("DEBUG: No ticket found, returning 0")
 	return 0
+}
+
+// Elastic update helpers (reflective extract to avoid package coupling)
+func getElasticProfitLevel(update interface{}) int {
+	// Helper to parse any to int
+	parseToInt := func(x interface{}) (int, bool) {
+		switch t := x.(type) {
+		case int:
+			return t, true
+		case int32:
+			return int(t), true
+		case int64:
+			return int(t), true
+		case float64:
+			return int(t), true
+		case float32:
+			return int(t), true
+		case string:
+			if i, err := strconv.Atoi(strings.TrimSpace(t)); err == nil {
+				return i, true
+			}
+		}
+		return 0, false
+	}
+	// Map case: try multiple aliases and casings
+	if m, ok := update.(map[string]interface{}); ok {
+		keys := []string{"ProfitLevel", "profit_level", "profitLevel", "ElasticProfitLevel", "elastic_profit_level", "elasticProfitLevel", "level"}
+		for _, k := range keys {
+			if v, ok := m[k]; ok {
+				if iv, ok2 := parseToInt(v); ok2 {
+					return iv
+				}
+			}
+		}
+	}
+	// Struct case: scan fields case-insensitively
+	val := reflect.ValueOf(update)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if val.Kind() == reflect.Struct {
+		cand := map[string]struct{}{"profitlevel": {}, "elasticprofitlevel": {}, "level": {}}
+		t := val.Type()
+		for i := 0; i < val.NumField(); i++ {
+			name := strings.ToLower(t.Field(i).Name)
+			if _, ok := cand[name]; ok {
+				f := val.Field(i)
+				switch f.Kind() {
+				case reflect.Int, reflect.Int32, reflect.Int64:
+					return int(f.Int())
+				case reflect.Float32, reflect.Float64:
+					return int(f.Float())
+				case reflect.String:
+					if i, err := strconv.Atoi(strings.TrimSpace(f.String())); err == nil {
+						return i
+					}
+				}
+			}
+		}
+		// Fallback to exact name
+		f := val.FieldByName("ProfitLevel")
+		if f.IsValid() && (f.Kind() == reflect.Int || f.Kind() == reflect.Int32 || f.Kind() == reflect.Int64) {
+			return int(f.Int())
+		}
+	}
+	return 0
+}
+
+func getElasticCurrentProfit(update interface{}) float64 {
+	// Helper to parse any to float64
+	parseToFloat := func(x interface{}) (float64, bool) {
+		switch t := x.(type) {
+		case float64:
+			return t, true
+		case float32:
+			return float64(t), true
+		case int:
+			return float64(t), true
+		case int32:
+			return float64(t), true
+		case int64:
+			return float64(t), true
+		case string:
+			if f, err := strconv.ParseFloat(strings.TrimSpace(t), 64); err == nil {
+				return f, true
+			}
+		}
+		return 0, false
+	}
+	if m, ok := update.(map[string]interface{}); ok {
+		keys := []string{"CurrentProfit", "current_profit", "currentProfit", "ElasticCurrentProfit", "elastic_current_profit", "elasticCurrentProfit", "profit"}
+		for _, k := range keys {
+			if v, ok := m[k]; ok {
+				if fv, ok2 := parseToFloat(v); ok2 {
+					return fv
+				}
+			}
+		}
+	}
+	val := reflect.ValueOf(update)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if val.Kind() == reflect.Struct {
+		cand := map[string]struct{}{"currentprofit": {}, "elasticcurrentprofit": {}, "profit": {}}
+		t := val.Type()
+		for i := 0; i < val.NumField(); i++ {
+			name := strings.ToLower(t.Field(i).Name)
+			if _, ok := cand[name]; ok {
+				f := val.Field(i)
+				switch f.Kind() {
+				case reflect.Float32, reflect.Float64:
+					return f.Float()
+				case reflect.Int, reflect.Int32, reflect.Int64:
+					return float64(f.Int())
+				case reflect.String:
+					if fl, err := strconv.ParseFloat(strings.TrimSpace(f.String()), 64); err == nil {
+						return fl
+					}
+				}
+			}
+		}
+		// Fallback to exact name
+		f := val.FieldByName("CurrentProfit")
+		if f.IsValid() && (f.Kind() == reflect.Float64 || f.Kind() == reflect.Float32) {
+			return f.Float()
+		}
+	}
+	return 0.0
 }
 
 // DisableAllProtocols stops the gRPC server (for shutdown or UI action)

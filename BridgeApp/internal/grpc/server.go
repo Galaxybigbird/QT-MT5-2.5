@@ -359,6 +359,39 @@ func (s *Server) GetTrades(stream trading.TradingService_GetTradesServer) error 
 				}
 			}
 
+			// Emit sizing hint presence for diagnostics
+			if trade.GetNtPointsPer_1KLoss() <= 0 {
+				extra := map[string]interface{}{
+					"trade_id":              trade.Id,
+					"base_id":               trade.BaseId,
+					"action":                trade.Action,
+					"instrument":            trade.Instrument,
+					"nt_points_per_1k_loss": trade.GetNtPointsPer_1KLoss(),
+				}
+				// If this is an EVENT, include event payload details for diagnostics
+				if strings.EqualFold(trade.Action, "EVENT") {
+					extra["event_type"] = trade.EventType
+					extra["elastic_current_profit"] = trade.ElasticCurrentProfit
+					extra["elastic_profit_level"] = trade.ElasticProfitLevel
+				}
+				blog.L().Warn("stream", "sending trade without nt_points_per_1k_loss (EA will fallback)", extra)
+			} else {
+				extra := map[string]interface{}{
+					"trade_id":              trade.Id,
+					"base_id":               trade.BaseId,
+					"action":                trade.Action,
+					"instrument":            trade.Instrument,
+					"nt_points_per_1k_loss": trade.GetNtPointsPer_1KLoss(),
+				}
+				// If this is an EVENT, include event payload details for diagnostics
+				if strings.EqualFold(trade.Action, "EVENT") {
+					extra["event_type"] = trade.EventType
+					extra["elastic_current_profit"] = trade.ElasticCurrentProfit
+					extra["elastic_profit_level"] = trade.ElasticProfitLevel
+				}
+				blog.L().Info("stream", "sending trade with nt_points_per_1k_loss", extra)
+			}
+
 			log.Printf("gRPC: Sending trade to MT5 stream - ID: %s, Action: %s", trade.Id, trade.Action)
 			if err := stream.Send(trade); err != nil {
 				log.Printf("gRPC: Error sending trade to stream: %v", err)
@@ -661,6 +694,12 @@ func (s *Server) GetSettings(ctx context.Context, req *trading.SettingsRequest) 
 // SystemHeartbeat handles system heartbeat requests
 func (s *Server) SystemHeartbeat(ctx context.Context, req *trading.HeartbeatRequest) (*trading.HeartbeatResponse, error) {
 	log.Printf("gRPC: Heartbeat from component: %s, Status: %s", req.Component, req.Status)
+
+	// Treat NT addon heartbeat as proof-of-life
+	switch strings.ToUpper(req.GetComponent()) {
+	case "ADDON", "NT_ADDON", "NT_ADDON_INIT", "NT_ADDON_KEEPALIVE", "NT", "NINJATRADER":
+		s.app.SetAddonConnected(true)
+	}
 
 	return &trading.HeartbeatResponse{
 		Status:  "acknowledged",
@@ -983,6 +1022,9 @@ func (s *Server) TradingStream(stream trading.StreamingService_TradingStreamServ
 		log.Printf("gRPC: Bidirectional trading stream %s disconnected", streamID)
 	}()
 
+	// Mark addon as connected on stream establishment
+	s.app.SetAddonConnected(true)
+
 	// Handle the stream
 	errChan := make(chan error, 2)
 
@@ -994,6 +1036,9 @@ func (s *Server) TradingStream(stream trading.StreamingService_TradingStreamServ
 				errChan <- err
 				return
 			}
+
+			// Any inbound message from NT proves life; refresh addon connection
+			s.app.SetAddonConnected(true)
 
 			// Process incoming trade (similar to SubmitTrade)
 			log.Printf("gRPC: Received trade via bidirectional stream - ID: %s", trade.Id)
