@@ -1,5 +1,5 @@
 #property link      ""
-#property version   "3.48"
+#property version   "3.51"
 #property strict
 #property description "gRPC Hedge Receiver EA for Go bridge server with Asymmetrical Compounding"
 
@@ -111,11 +111,6 @@ const string    EA_COMMENT_PREFIX_SELL = CommentPrefix + "SELL_"; // Specific pr
     int GrpcGetConnectionStatus(string &status_json, int buffer_size);
     int GrpcGetStreamingStats(string &stats_json, int buffer_size);
     int GrpcGetLastError(string &error_message, int buffer_size);
-   
-    // Configuration functions
-    int GrpcSetConnectionTimeout(int timeout_ms);
-    int GrpcSetStreamingTimeout(int timeout_ms);
-    int GrpcSetMaxRetries(int max_retries);
 #import
 
 //+------------------------------------------------------------------+
@@ -308,6 +303,8 @@ bool grpc_streaming = false;
 datetime grpc_last_connection_attempt = 0;
 int grpc_connection_retry_interval = 5; // seconds
 int grpc_max_retries = 3;
+// Track parameter-change restarts to avoid unnecessary re-initialization
+bool g_param_change_restart = false;
 
 // Instead of struct array, use separate arrays for each field
 string g_baseIds[];           // Array of base trade IDs
@@ -756,29 +753,18 @@ bool InitializeGrpcConnection()
         return false;
     }
     
-    ULogInfoPrint("INFO: DLL connection verified, configuring timeouts...");
-    
-    // Configure timeouts to prevent hanging - CRITICAL FOR STABILITY
-    int timeout_result = GrpcSetConnectionTimeout(5000);  // 5 second connection timeout
-    if(timeout_result != 0) {
-        ULogWarnPrint("WARNING: Failed to set connection timeout, using defaults");
+    ULogInfoPrint("INFO: DLL connection verified");
+
+    // If transport already reports connected, reuse existing connection (common during parameter changes)
+    int already = GrpcIsConnected();
+    if(already == 1)
+    {
+        ULogInfoPrint("InitializeGrpcConnection: Transport already connected — reusing without re-init");
+        grpc_last_connection_attempt = TimeCurrent();
+        return true;
     }
     
-    // Removed explicit streaming timeout to keep trade stream persistent.
-    // Original line:
-    // timeout_result = GrpcSetStreamingTimeout(10000);  // 10 second streaming timeout
-    // If needed later, re-enable with a MUCH larger value (e.g., 3600000 for 1h) or add heartbeat logic.
-    // timeout_result = GrpcSetStreamingTimeout(3600000);
-    // if(timeout_result != 0) {
-    //     Print("WARNING: Failed to set streaming timeout, using defaults");
-    // }
-    
-    timeout_result = GrpcSetMaxRetries(2);  // Limit retries to prevent infinite loops
-    if(timeout_result != 0) {
-        ULogWarnPrint("WARNING: Failed to set max retries, using defaults");
-    }
-    
-    ULogInfoPrint("INFO: Timeouts configured, initializing gRPC connection...");
+    ULogInfoPrint("INFO: Initializing gRPC connection...");
     
     // Initialize the gRPC client with timeout protection
     int result = GrpcInitialize(BridgeServerAddress, BridgeServerPort);
@@ -816,6 +802,18 @@ bool InitializeGrpcConnection()
 bool StartGrpcTradeStreaming()
 {
     ULogInfoPrint("Starting gRPC trade streaming with timeout protection...");
+    // If a previous stream is still flagged as running, defensively stop it first
+    if(grpc_streaming)
+    {
+        ULogWarnPrint("StartGrpcTradeStreaming: Previous stream flag was true — attempting to stop before restart");
+        int stop_rc = GrpcStopTradeStream();
+        if(stop_rc != 0)
+        {
+            string stop_err; StringReserve(stop_err, 1024); GrpcGetLastError(stop_err, 1024);
+            ULogWarnPrint(StringFormat("StartGrpcTradeStreaming: GrpcStopTradeStream returned %d - %s (continuing to start)", stop_rc, stop_err));
+        }
+        grpc_streaming = false;
+    }
     
     // Check if we're still connected before attempting to start streaming
     if(!grpc_connected) {
@@ -835,6 +833,20 @@ bool StartGrpcTradeStreaming()
     
     grpc_streaming = true;
     ULogInfoPrint("gRPC trade streaming started successfully");
+
+    // Optional: kick a health check immediately to refresh Bridge status and leave a clear audit trail
+    string _hc_req = "{\"source\":\"hedgebot\",\"open_positions\":" + IntegerToString(PositionsTotal()) + "}";
+    string _hc_resp; StringReserve(_hc_resp, 2048);
+    int _hc_rc = GrpcHealthCheck(_hc_req, _hc_resp, 2048);
+    if(_hc_rc == 0)
+    {
+        ULogInfoPrint("Post-stream-start health check OK: " + _hc_resp);
+    }
+    else
+    {
+        string _hc_err; StringReserve(_hc_err, 1024); GrpcGetLastError(_hc_err, 1024);
+        ULogWarnPrint(StringFormat("Post-stream-start health check failed rc=%d: %s", _hc_rc, _hc_err));
+    }
     
     return true;
 }
@@ -1098,15 +1110,35 @@ int OnInit()
     InitStatusOverlay();
     InitATRTrailing();
     
-    // Initialize gRPC connection (NON-BLOCKING - EA should work without bridge)
+    // Initialize or reuse gRPC connection (NON-BLOCKING)
     { string __log="Attempting gRPC connection (EA will work without bridge)..."; Print(__log); ULogInfoPrint(__log); }
-    if(!InitializeGrpcConnection()) {
+    bool init_ok = false;
+    if(g_param_change_restart)
+    {
+        ULogInfoPrint("PARAM_CHANGE: OnInit detected parameter-change restart; preferring existing connection if present");
+        if(GrpcIsConnected() == 1)
+        {
+            init_ok = true;
+            ULogInfoPrint("PARAM_CHANGE: Reusing existing gRPC transport (skip GrpcInitialize)");
+        }
+        else
+        {
+            ULogInfoPrint("PARAM_CHANGE: Transport not connected; performing normal initialization");
+            init_ok = InitializeGrpcConnection();
+        }
+    }
+    else
+    {
+        init_ok = InitializeGrpcConnection();
+    }
+
+    if(!init_ok) {
         { string __log="INFO: gRPC connection not available. EA running in offline mode."; Print(__log); ULogInfoPrint(__log); }
         { string __log="Bridge server connection will be retried automatically."; Print(__log); ULogInfoPrint(__log); }
         grpc_connected = false;
         UpdateStatusIndicator("Bridge Offline", clrOrange);
     } else {
-        { string __log="gRPC connection established successfully"; Print(__log); ULogInfoPrint(__log); }
+        { string __log="gRPC connection established or reused successfully"; Print(__log); ULogInfoPrint(__log); }
         grpc_connected = true;
         UpdateStatusIndicator("Bridge Connected", clrGreen);
         
@@ -1115,6 +1147,9 @@ int OnInit()
             { string __log="INFO: Trade streaming not started. Will retry automatically."; Print(__log); ULogInfoPrint(__log); }
         }
     }
+
+    // Clear the param-change hint once handled
+    g_param_change_restart = false;
     
     Print("=================================");
     Print("✓ ACHedgeMaster gRPC initialization complete");
@@ -2172,6 +2207,28 @@ void OnDeinit(const int reason)
     Print("OnDeinit: Starting graceful cleanup... Reason: ", reason);
     Print("OnDeinit: Deinit reason codes: 0=Program, 1=Remove, 2=Recompile, 3=ChartClose, 4=Parameters, 5=Account, 6=Template, 7=Initfailed, 8=Close");
     
+    // CRITICAL FIX: Handle parameter changes without full shutdown
+    if(reason == 4) { // REASON_PARAMETERS
+    Print("OnDeinit: Parameter/settings change detected - performing minimal cleanup to preserve connection");
+    Print("OnDeinit: EA will automatically restart with new parameters WHILE maintaining gRPC stability");
+    ULogInfoPrint("PARAM_CHANGE_START: minimal deinit begin");
+        
+        // Only stop timer to prevent processing during restart
+        EventKillTimer();
+        Print("OnDeinit: Timer stopped (parameter change mode)");
+        
+    // IMPORTANT: Do NOT flip grpc_connected/grpc_streaming flags here to avoid transient "offline" state in logs/UI.
+    // We also avoid any artificial sleeps; MT5 will immediately call OnInit with new params.
+    // Mark that a param-change restart is pending so OnInit can prefer connection reuse
+    g_param_change_restart = true;
+        
+    Print("OnDeinit: Minimal cleanup complete - gRPC connection preserved for quick restart");
+    ULogInfoPrint("PARAM_CHANGE_END: minimal deinit complete");
+        return; // Skip full shutdown - EA will restart with OnInit
+    }
+    
+    // Full shutdown for other reasons (chart close, EA removal, etc.)
+    Print("OnDeinit: Performing full cleanup...");
     // Step 1: Stop timer immediately to prevent new processing
     EventKillTimer();
     Print("OnDeinit: Timer stopped");
@@ -2181,7 +2238,7 @@ void OnDeinit(const int reason)
     grpc_streaming = false;
     
     // Step 3: Allow brief time for current operations to complete
-    Sleep(50);  // Reduced from 100ms for faster shutdown
+    Sleep(50);
     
     // Step 4: Attempt graceful gRPC shutdown with timeout protection
     Print("OnDeinit: Attempting graceful gRPC shutdown...");
@@ -2514,7 +2571,17 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
     // All other closures are just MT5 closures - no need to distinguish manual vs automatic
     
     // Send closure notification to Bridge Server
-    NotifyMT5PositionClosure(baseId, position_ticket, deal_volume, closure_reason);
+    // Dedup: if a specific hedge_close was already sent or is pending for this baseId/ticket, skip generic notification
+    string dedupKey = baseId + ":" + StringFormat("%I64u", position_ticket);
+    if(HasNotificationBeenSent(dedupKey, "hedge_close") || HasNotificationBeenSent(dedupKey, "hedge_close_pending"))
+    {
+        { string __log; StringConcatenate(__log, "CLOSURE_DETECTION: Skipping generic MT5_position_closed for ", dedupKey, 
+              " because a specific hedge_close was already sent."); Print(__log); ULogInfoPrint(__log); }
+    }
+    else
+    {
+        NotifyMT5PositionClosure(baseId, position_ticket, deal_volume, closure_reason);
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -3162,7 +3229,38 @@ void ProcessElasticHedgeUpdate(string baseId, double currentProfit, int profitLe
     
     double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
     { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Will attempt to close ", lotsToClose, " lots. Min lot: ", minLot); Print(__log); ULogInfoPrint(__log); }
-    
+
+    // Evaluate current live volume from MT5 to decide partial vs full close
+    double currentLotsOnMT5 = 0.0;
+    if (PositionSelectByTicket(g_elasticPositions[posIndex].positionTicket)) {
+        currentLotsOnMT5 = PositionGetDouble(POSITION_VOLUME);
+    }
+
+    bool shouldFullClose = false;
+    if (currentLotsOnMT5 > 0) {
+        // If this reduction would consume the entire position or the remainder is below min lot, perform a full close
+        if (lotsToClose >= currentLotsOnMT5 - 1e-8) {
+            shouldFullClose = true;
+        } else {
+            double projectedRemaining = g_elasticPositions[posIndex].remainingLots - lotsToClose;
+            if (projectedRemaining < minLot) shouldFullClose = true;
+        }
+        // If we can't even do a partial due to min lot but what's left is tiny, full close
+        if (lotsToClose < minLot && g_elasticPositions[posIndex].remainingLots <= minLot + 1e-8) {
+            shouldFullClose = true;
+        }
+    }
+
+    if (shouldFullClose) {
+        // Close the entire hedge immediately and tag as elastic completion
+        if (CloseElasticHedgeFully(baseId, g_elasticPositions[posIndex].positionTicket, "elastic_completion")) {
+            { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Fully closed hedge due to elastic completion for BaseID: ", baseId); Print(__log); ULogInfoPrint(__log); }
+        } else {
+            { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Attempt to fully close hedge FAILED for BaseID: ", baseId); Print(__log); ULogErrorPrint(__log); }
+        }
+        return;
+    }
+
     if (lotsToClose > 0 && lotsToClose >= minLot) {
         // Execute partial close
         if (PartialClosePosition(g_elasticPositions[posIndex].positionTicket, lotsToClose)) {
@@ -3184,9 +3282,20 @@ void ProcessElasticHedgeUpdate(string baseId, double currentProfit, int profitLe
             update_json += "}";
             
             GrpcSubmitElasticUpdate(update_json);
+
+            // If after partial the remaining lots are at/below min lot, finalize by closing fully
+            if (g_elasticPositions[posIndex].remainingLots <= minLot + 1e-8) {
+                if (CloseElasticHedgeFully(baseId, g_elasticPositions[posIndex].positionTicket, "elastic_completion")) {
+                    { string __log2=""; StringConcatenate(__log2, "ELASTIC_HEDGE: Remaining lots at/below min. Fully closed hedge for BaseID: ", baseId); Print(__log2); ULogInfoPrint(__log2); }
+                }
+            }
         }
     } else {
         { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: No reduction applied (below min lot or nothing remaining) for BaseID: ", baseId); Print(__log); ULogInfoPrint(__log); }
+        // If nothing applied because we're below min lot but still have tiny remainder, close fully to complete elastic sequence
+        if (g_elasticPositions[posIndex].remainingLots > 0 && g_elasticPositions[posIndex].remainingLots <= minLot + 1e-8 && currentLotsOnMT5 > 0) {
+            CloseElasticHedgeFully(baseId, g_elasticPositions[posIndex].positionTicket, "elastic_completion");
+        }
     }
 }
 
@@ -3316,19 +3425,132 @@ bool PartialClosePosition(ulong ticket, double lotsToClose)
     trade.SetExpertMagicNumber(MagicNumber);
     trade.SetDeviationInPoints(Slippage);
     
+    // Compute context for reasoned notification and dedup suppression
+    ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+    string action = (posType == POSITION_TYPE_BUY) ? "SELL" : "BUY"; // counter action reflects what was closed
+
+    // Resolve base_id for this ticket (via map first, then open positions arrays)
+    string baseId = "";
+    if(g_map_position_id_to_base_id != NULL)
+    {
+        CString *ptr = NULL;
+        if(g_map_position_id_to_base_id.TryGetValue((long)ticket, ptr) && ptr != NULL)
+            baseId = ptr.Str();
+    }
+    if(baseId == "")
+    {
+        for(int i = 0; i < ArraySize(g_open_mt5_pos_ids); i++)
+        {
+            if((ulong)g_open_mt5_pos_ids[i] == ticket)
+            {
+                baseId = g_open_mt5_base_ids[i];
+                break;
+            }
+        }
+    }
+
+    string tkStr = StringFormat("%I64u", ticket);
+    string pendingKey = baseId + ":" + tkStr;
+
+    // Pre-mark pending to suppress generic MT5_position_closed from OnTradeTransaction
+    if(baseId != "" && !HasNotificationBeenSent(pendingKey, "hedge_close_pending"))
+    {
+        MarkNotificationSent(pendingKey, "hedge_close_pending");
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Marked pending hedge_close for ", pendingKey, " before PositionClosePartial"); Print(__log); ULogInfoPrint(__log); }
+    }
+
     // Use PositionClosePartial which is designed for partial closes
     if (!trade.PositionClosePartial(ticket, lotsToClose)) {
         Print("ELASTIC_HEDGE: PositionClosePartial failed. Error: ", GetLastError(), ", Result comment: ", trade.ResultComment());
+        // Clear pending mark on failure
+        if(baseId != "") RemoveNotificationMark(pendingKey, "hedge_close_pending");
         return false;
     }
     
     // Check result
     if (trade.ResultRetcode() != TRADE_RETCODE_DONE) {
         Print("ELASTIC_HEDGE: Partial close failed. Retcode: ", trade.ResultRetcode(), ", Comment: ", trade.ResultComment());
+        if(baseId != "") RemoveNotificationMark(pendingKey, "hedge_close_pending");
         return false;
     }
     
     Print("ELASTIC_HEDGE: Successfully closed ", lotsToClose, " lots of position ", ticket);
+
+    // Send specific hedge_close for partial reduction so NT can skip auto-close while trailing+profit
+    if(baseId != "")
+    {
+        SendHedgeCloseNotification(baseId, _Symbol, "MT5_Account", lotsToClose, action, TimeCurrent(), "elastic_partial_close");
+        // Mark as notified to avoid duplicate generic notification for this (baseId,ticket)
+        MarkNotificationSent(baseId + ":" + tkStr, "hedge_close");
+        // Clear pending
+        RemoveNotificationMark(pendingKey, "hedge_close_pending");
+    }
+
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Remove position from elastic tracking                            |
+//+------------------------------------------------------------------+
+void RemoveElasticPosition(string baseId)
+{
+    int idx = FindElasticPosition(baseId);
+    if (idx < 0) return;
+    int last = ArraySize(g_elasticPositions) - 1;
+    if (idx != last && last >= 0) {
+        g_elasticPositions[idx] = g_elasticPositions[last];
+    }
+    if (last >= 0) ArrayResize(g_elasticPositions, last);
+    { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Removed elastic tracking for BaseID: ", baseId); Print(__log); ULogInfoPrint(__log); }
+}
+
+//+------------------------------------------------------------------+
+//| Fully close hedge and send reasoned notification                 |
+//+------------------------------------------------------------------+
+bool CloseElasticHedgeFully(string baseId, ulong ticket, string reason)
+{
+    if (!PositionSelectByTicket(ticket)) {
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: CloseElasticHedgeFully failed to select ticket ", ticket); Print(__log); ULogErrorPrint(__log); }
+        return false;
+    }
+
+    double vol = PositionGetDouble(POSITION_VOLUME);
+    ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+    string action = (posType == POSITION_TYPE_BUY) ? "SELL" : "BUY";
+
+    // Pre-mark this (baseId,ticket) as having a pending specific hedge_close to suppress generic notification
+    string tkStr = StringFormat("%I64u", ticket);
+    string pendingKey = baseId + ":" + tkStr;
+    if(!HasNotificationBeenSent(pendingKey, "hedge_close_pending"))
+    {
+        MarkNotificationSent(pendingKey, "hedge_close_pending");
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Marked pending hedge_close for ", pendingKey, " before PositionClose"); Print(__log); ULogInfoPrint(__log); }
+    }
+
+    trade.SetExpertMagicNumber(MagicNumber);
+    trade.SetDeviationInPoints(Slippage);
+    if (!trade.PositionClose(ticket)) {
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: PositionClose failed for ticket ", ticket, ". Error: ", GetLastError(), ", Comment: ", trade.ResultComment()); Print(__log); ULogErrorPrint(__log); }
+        // Clear pending mark on failure so future generic notifications aren't suppressed erroneously
+        RemoveNotificationMark(pendingKey, "hedge_close_pending");
+        return false;
+    }
+    if (trade.ResultRetcode() != TRADE_RETCODE_DONE) {
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: PositionClose retcode != DONE for ticket ", ticket, ", Retcode: ", trade.ResultRetcode(), ", Comment: ", trade.ResultComment()); Print(__log); ULogErrorPrint(__log); }
+        // Clear pending mark on failure
+        RemoveNotificationMark(pendingKey, "hedge_close_pending");
+        return false;
+    }
+
+    // Send immediate notification with explicit reason to prevent NT auto-close
+    SendHedgeCloseNotification(baseId, _Symbol, "MT5_Account", vol, action, TimeCurrent(), reason);
+    // Mark as notified to avoid duplicate from OnTradeTransaction handler
+    MarkNotificationSent(baseId + ":" + tkStr, "hedge_close");
+    // Clear the pending mark now that the specific notification has been sent
+    RemoveNotificationMark(pendingKey, "hedge_close_pending");
+
+    // Remove tracking to avoid further updates
+    RemoveElasticPosition(baseId);
     return true;
 }
 
@@ -3418,6 +3640,35 @@ bool HasNotificationBeenSent(string baseId, string eventType)
 void MarkNotificationSent(string baseId, string eventType)
 {
     AddNotifiedBaseId(baseId + "_" + eventType);
+}
+
+//+------------------------------------------------------------------+
+//| Remove a notification mark for specific event type               |
+//+------------------------------------------------------------------+
+void RemoveNotificationMark(string baseId, string eventType)
+{
+    string key = baseId + "_" + eventType;
+    int count = ArraySize(g_notified_base_ids);
+    for (int i = 0; i < count; i++)
+    {
+        if (g_notified_base_ids[i] == key)
+        {
+            // Remove by swapping with last and resizing arrays to keep them in sync
+            int last = count - 1;
+            if (i != last)
+            {
+                g_notified_base_ids[i] = g_notified_base_ids[last];
+                g_notified_timestamps[i] = g_notified_timestamps[last];
+            }
+            if (last >= 0)
+            {
+                ArrayResize(g_notified_base_ids, last);
+                ArrayResize(g_notified_timestamps, last);
+            }
+            Print("COMPREHENSIVE_DUPLICATE_PREVENTION: Removed notification mark '", key, "'. New total: ", last);
+            return;
+        }
+    }
 }
 
 //+------------------------------------------------------------------+

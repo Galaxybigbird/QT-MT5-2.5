@@ -686,6 +686,17 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                                 LogInfo("GRPC", $"MT5_CLOSE_NOTIFICATION is NT_CLOSE_ACK for BaseID {baseId}; acknowledging without submitting NT close order.");
                                 return;
                             }
+
+                            // POLICY: Do NOT close NT when MT5 reports an elastic partial close
+                            string closureReason = ExtractJsonValue(tradeResultJson, "closure_reason");
+                            if (string.IsNullOrEmpty(closureReason))
+                                closureReason = ExtractJsonValue(tradeResultJson, "nt_trade_result");
+
+                            if (!string.IsNullOrEmpty(closureReason) && closureReason.Equals("elastic_partial_close", StringComparison.OrdinalIgnoreCase))
+                            {
+                                LogInfo("GRPC", $"[ELASTIC_PARTIAL_SKIP] Skipping NT close for BaseID {baseId} due to MT5 elastic_partial_close.");
+                                return;
+                            }
                             // Process MT5 close notification and close corresponding NT position
                             HandleMT5InitiatedClosure(tradeResultJson, baseId);
                         }
@@ -711,7 +722,10 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                 LogInfo("GRPC", $"DEBUG: Full JSON received: {notificationJson}");
                 
                 // Extract closure details from JSON
-                string closureReason = ExtractJsonValue(notificationJson, "nt_trade_result");
+                // Prefer explicit closure_reason when present; fallback to nt_trade_result (compat)
+                string closureReason = ExtractJsonValue(notificationJson, "closure_reason");
+                if (string.IsNullOrEmpty(closureReason))
+                    closureReason = ExtractJsonValue(notificationJson, "nt_trade_result");
                 string mt5TicketStr = ExtractJsonValue(notificationJson, "id"); // Use the closure ID as reference
                 string instrument = ExtractJsonValue(notificationJson, "instrument_name");
                 
@@ -2872,6 +2886,49 @@ private HashSet<string> trackedHedgeClosingOrderIds;
         {
             LogAndPrint($"[HEDGE_CLOSE_NO_POSITION] No open position for {notification.nt_instrument_symbol} on {notification.nt_account_name} – nothing to close.");
             return;
+        }
+
+        // Special-cases for elastic-managed closures
+        try
+        {
+            var reason = notification.ClosureReason ?? ExtractJsonValue(SimpleJson.SerializeObject(notification), "closure_reason");
+            bool isElasticCompletion = !string.IsNullOrEmpty(reason) && reason.Equals("elastic_completion", StringComparison.OrdinalIgnoreCase);
+            bool isElasticPartial = !string.IsNullOrEmpty(reason) && reason.Equals("elastic_partial_close", StringComparison.OrdinalIgnoreCase);
+            // 1) elastic_partial_close: NEVER close the NT position; MT5 is reducing hedge size only
+            if (isElasticPartial)
+            {
+                double lastPrice = GetCurrentPrice(position.Instrument);
+                double unrealized = position.GetUnrealizedProfitLoss(PerformanceUnit.Currency, lastPrice);
+                LogAndPrint($"[ELASTIC_PARTIAL_SKIP] Skipping NT close for {notification.base_id} on partial hedge close (reason={reason}). NT Unrealized PnL=${unrealized:F2}");
+                return;
+            }
+
+            // 2) elastic_completion: If trailing remains active and NT is in profit, keep NT open (skip close)
+            if (isElasticCompletion)
+            {
+                // Check profit and trailing state via TrailingAndElasticManager
+                double lastPrice = GetCurrentPrice(position.Instrument);
+                double unrealized = position.GetUnrealizedProfitLoss(PerformanceUnit.Currency, lastPrice);
+                bool isTrailingActive = false;
+                try
+                {
+                    var tracker = trailingAndElasticManager?.ElasticPositions?.ContainsKey(notification.base_id) == true
+                        ? trailingAndElasticManager?.ElasticPositions[notification.base_id]
+                        : null;
+                    isTrailingActive = tracker?.IsTrailingActive == true;
+                }
+                catch { /* ignore */ }
+
+                if (isTrailingActive && unrealized > 0)
+                {
+                    LogAndPrint($"[ELASTIC_COMPLETION_SKIP] Skipping NT close for {notification.base_id} because trailing is active and PnL=${unrealized:F2} > 0 (reason={reason})");
+                    return;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogAndPrint($"[ELASTIC_COMPLETION_CHECK_ERROR] {ex.Message}");
         }
 
         // Compute desired close quantity based on tracked trade (fallback to 1 contract if unknown)

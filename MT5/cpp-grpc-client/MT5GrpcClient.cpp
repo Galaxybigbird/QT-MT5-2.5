@@ -60,6 +60,9 @@ public:
     
     std::thread streaming_thread_;
     std::atomic<bool> stop_streaming_{false};
+    // Pointer to the active streaming context to allow external cancellation
+    std::mutex streaming_ctx_mutex_;
+    grpc::ClientContext* active_streaming_context_ = nullptr; // non-owning; valid only while stream runs
     
     std::string last_error_;
     std::mutex error_mutex_;
@@ -73,6 +76,14 @@ public:
     void Cleanup() {
         is_streaming_ = false;
         stop_streaming_ = true;
+
+        // Proactively cancel the active streaming context to unblock any pending Read/Write
+        {
+            std::lock_guard<std::mutex> lock(streaming_ctx_mutex_);
+            if (active_streaming_context_ != nullptr) {
+                active_streaming_context_->TryCancel();
+            }
+        }
         
         if (streaming_thread_.joinable()) {
             streaming_thread_.join();
@@ -91,6 +102,19 @@ public:
         while (!trade_queue_.empty()) {
             trade_queue_.pop();
         }
+    }
+
+    // Non-blocking cancel used from DllMain PROCESS_DETACH to avoid deadlocks
+    void QuickCancelForDetach() {
+        is_streaming_ = false;
+        stop_streaming_ = true;
+        {
+            std::lock_guard<std::mutex> lock(streaming_ctx_mutex_);
+            if (active_streaming_context_ != nullptr) {
+                active_streaming_context_->TryCancel();
+            }
+        }
+        // Do NOT join threads or destroy gRPC objects here; defer to explicit GrpcShutdown
     }
     
     void SetLastError(const std::string& error) {
@@ -156,6 +180,11 @@ void StreamingThreadFunction() {
     while (!g_client_state.stop_streaming_ && g_client_state.is_initialized_) {
         try {
             ClientContext context;
+            // Expose context for external cancellation while this stream is active
+            {
+                std::lock_guard<std::mutex> lock(g_client_state.streaming_ctx_mutex_);
+                g_client_state.active_streaming_context_ = &context;
+            }
             // Only set deadline if timeout is specified (> 0)
             if (g_client_state.streaming_timeout_ms_ > 0) {
                 auto deadline = std::chrono::system_clock::now() + 
@@ -230,10 +259,20 @@ void StreamingThreadFunction() {
                 g_client_state.SetLastError("Stream error: " + status.error_message());
                 g_client_state.is_connected_ = false;
             }
+            // Clear exposed context pointer once stream ends
+            {
+                std::lock_guard<std::mutex> lock(g_client_state.streaming_ctx_mutex_);
+                g_client_state.active_streaming_context_ = nullptr;
+            }
             
         } catch (const std::exception& e) {
             g_client_state.SetLastError("Streaming exception: " + std::string(e.what()));
             g_client_state.is_connected_ = false;
+            // Ensure exposed context pointer is cleared on exceptions too
+            {
+                std::lock_guard<std::mutex> lock(g_client_state.streaming_ctx_mutex_);
+                g_client_state.active_streaming_context_ = nullptr;
+            }
         }
         
         // Reconnection delay
@@ -253,7 +292,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     case DLL_THREAD_DETACH:
         break;
     case DLL_PROCESS_DETACH:
-        g_client_state.Cleanup();
+    // Avoid blocking in DllMain; just cancel to unblock any pending IO
+    g_client_state.QuickCancelForDetach();
         break;
     }
     return TRUE;
@@ -370,6 +410,13 @@ MT5_GRPC_API int __stdcall GrpcStopTradeStream() {
     try {
         g_client_state.is_streaming_ = false;
         g_client_state.stop_streaming_ = true;
+        // Cancel active streaming context to interrupt blocking Read/Write immediately
+        {
+            std::lock_guard<std::mutex> lock(g_client_state.streaming_ctx_mutex_);
+            if (g_client_state.active_streaming_context_ != nullptr) {
+                g_client_state.active_streaming_context_->TryCancel();
+            }
+        }
         
         if (g_client_state.streaming_thread_.joinable()) {
             g_client_state.streaming_thread_.join();

@@ -52,6 +52,10 @@ type Server struct {
 	// to suppress any stale CLOSE_HEDGE requests still lingering in buffers.
 	recentlyClosedTickets map[uint64]time.Time
 	rcMux                 sync.Mutex
+
+	// currentMT5StreamID tracks the single active MT5 GetTrades stream. New connections supersede older ones.
+	currentMT5StreamID string
+	mt5StreamMux       sync.RWMutex
 }
 
 // AppInterface defines the interface that the App struct must implement for gRPC integration
@@ -268,7 +272,7 @@ func (s *Server) enqueueTradeWithSplit(req *trading.Trade) error {
 
 // GetTrades handles streaming trade requests from MT5
 func (s *Server) GetTrades(stream trading.TradingService_GetTradesServer) error {
-	log.Println("gRPC: New trade stream connected from MT5")
+	log.Println("gRPC: New trade stream connection attempt from MT5")
 
 	// Track first activity time to help diagnose client-side idle timeouts
 	startTime := time.Now()
@@ -281,9 +285,39 @@ func (s *Server) GetTrades(stream trading.TradingService_GetTradesServer) error 
 	streamChan := make(chan *trading.Trade, 100)
 	streamID := fmt.Sprintf("stream_%d", time.Now().UnixNano())
 
+	// Supersede any existing MT5 streams to enforce a single active stream
 	s.streamsMux.Lock()
+	// Remove older MT5 streams (prefix "stream_")
+	removed := 0
+	for id := range s.tradeStreams {
+		if strings.HasPrefix(id, "stream_") {
+			// Skip the new one about to be added
+			if id == streamID {
+				continue
+			}
+			delete(s.tradeStreams, id)
+			removed++
+			log.Printf("gRPC: Superseding prior MT5 stream %s (removed)", id)
+		}
+	}
+	// Register this stream as active
 	s.tradeStreams[streamID] = streamChan
 	s.streamsMux.Unlock()
+
+	// Mark this stream as the current MT5 stream
+	s.mt5StreamMux.Lock()
+	s.currentMT5StreamID = streamID
+	s.mt5StreamMux.Unlock()
+
+	// Log connection with stream context
+	s.streamsMux.RLock()
+	connCount := len(s.tradeStreams)
+	s.streamsMux.RUnlock()
+	if removed > 0 {
+		log.Printf("gRPC: New trade stream connected from MT5 - id=%s active_streams=%d (superseded %d older MT5 stream(s))", streamID, connCount, removed)
+	} else {
+		log.Printf("gRPC: New trade stream connected from MT5 - id=%s active_streams=%d", streamID, connCount)
+	}
 
 	// Clean up on exit
 	defer func() {
@@ -293,7 +327,7 @@ func (s *Server) GetTrades(stream trading.TradingService_GetTradesServer) error 
 		streamCount := len(s.tradeStreams)
 		s.streamsMux.Unlock()
 
-		log.Printf("gRPC: Trade stream %s disconnected", streamID)
+		log.Printf("gRPC: Trade stream %s disconnected (remaining_streams=%d)", streamID, streamCount)
 
 		// Mark hedgebot as inactive when stream disconnects
 		// Only if this was the last active stream
@@ -321,13 +355,24 @@ func (s *Server) GetTrades(stream trading.TradingService_GetTradesServer) error 
 			s.app.SetHedgebotActive(true)
 			// Rate-limit health logs to avoid JSONL spam
 			if s.shouldLogHealth(req.GetSource(), 30*time.Second) {
-				log.Printf("gRPC: GetTrades ping from source: %s", req.GetSource())
+				s.streamsMux.RLock()
+				count := len(s.tradeStreams)
+				s.streamsMux.RUnlock()
+				log.Printf("gRPC: GetTrades ping from source: %s (stream_id=%s active_streams=%d)", req.GetSource(), streamID, count)
 			}
 		}
 	}()
 
 	// Handle incoming health requests and send trades
 	for {
+		// If this stream has been superseded, close it proactively
+		s.mt5StreamMux.RLock()
+		currentID := s.currentMT5StreamID
+		s.mt5StreamMux.RUnlock()
+		if currentID != "" && currentID != streamID {
+			log.Printf("gRPC: Trade stream %s superseded by %s; closing stream", streamID, currentID)
+			return status.Error(codes.Canceled, "superseded by new MT5 connection")
+		}
 		select {
 		case <-stream.Context().Done():
 			uptime := time.Since(startTime)
@@ -393,11 +438,29 @@ func (s *Server) GetTrades(stream trading.TradingService_GetTradesServer) error 
 			}
 
 			log.Printf("gRPC: Sending trade to MT5 stream - ID: %s, Action: %s", trade.Id, trade.Action)
-			if err := stream.Send(trade); err != nil {
-				log.Printf("gRPC: Error sending trade to stream: %v", err)
+			if err := s.sendTradeWithTimeout(stream, trade, 2*time.Second); err != nil {
+				log.Printf("gRPC: Error sending trade to stream (id=%s): %v", streamID, err)
 				return err
 			}
 		}
+	}
+}
+
+// sendTradeWithTimeout attempts to send a trade on the server stream with a timeout to avoid indefinite blocking
+func (s *Server) sendTradeWithTimeout(stream trading.TradingService_GetTradesServer, trade *trading.Trade, timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() {
+		// Note: stream.Send is blocking; this goroutine will exit when send completes or context cancels
+		done <- stream.Send(trade)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return status.Error(codes.DeadlineExceeded, fmt.Sprintf("send timeout after %s", timeout))
+	case <-stream.Context().Done():
+		return stream.Context().Err()
 	}
 }
 

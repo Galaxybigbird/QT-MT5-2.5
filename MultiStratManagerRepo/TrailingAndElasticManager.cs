@@ -339,9 +339,27 @@ namespace NinjaTrader.NinjaScript.AddOns
                     }
                     else
                     {
-                        // Position closed, remove from tracking
-                        elasticPositions.Remove(tracker.BaseId);
-                        LogAndPrint($"Position {tracker.BaseId} closed, removing from elastic tracking");
+                        // Confirm the NT position is truly flat (not just MT5 hedge reduced) before removing tracking
+                        try
+                        {
+                            var acct = parentManager?.MonitoredAccount;
+                            var stillOpen = acct?.Positions?.Any(p => p.Instrument.FullName == tracker.InstrumentFullName && p.MarketPosition == tracker.MarketPosition && p.Quantity != 0) == true;
+                            if (stillOpen)
+                            {
+                                LogAndPrint($"ELASTIC_DEBUG: Position missing in local lookup but account still shows open qty for {tracker.BaseId}; retaining elastic tracking");
+                            }
+                            else
+                            {
+                                elasticPositions.Remove(tracker.BaseId);
+                                LogAndPrint($"Position {tracker.BaseId} closed, removing from elastic tracking");
+                            }
+                        }
+                        catch
+                        {
+                            // Fallback to prior behavior if account check fails
+                            elasticPositions.Remove(tracker.BaseId);
+                            LogAndPrint($"Position {tracker.BaseId} closed, removing from elastic tracking");
+                        }
                     }
                 }
             }

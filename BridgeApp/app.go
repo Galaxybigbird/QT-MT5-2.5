@@ -62,6 +62,72 @@ type App struct {
 	baseIdToNtPoints map[string]float64 // BaseID -> nt_points_per_1k_loss
 	// Fallback cache per instrument to cover early elastic events before Buy/Sell caching
 	instrumentToNtPts map[string]float64 // instrument -> nt_points_per_1k_loss
+
+	// Recent elastic-close context to align/suppress subsequent generic MT5TradeResult closes
+	elasticMux            sync.Mutex
+	recentElasticByBase   map[string]elasticMark // BaseID -> last elastic close marker
+	recentElasticByTicket map[uint64]elasticMark // MT5 ticket -> last elastic close marker
+}
+
+// elasticMark captures an elastic close signal context for short-lived correlation
+type elasticMark struct {
+	reason string
+	when   time.Time
+	ticket uint64
+	qty    float64
+}
+
+// markElasticClose records an elastic close marker for correlation windows
+func (a *App) markElasticClose(baseID string, ticket uint64, reason string, qty float64) {
+	if strings.TrimSpace(baseID) == "" || !strings.HasPrefix(strings.ToLower(reason), "elastic_") {
+		return
+	}
+	a.elasticMux.Lock()
+	if a.recentElasticByBase == nil {
+		a.recentElasticByBase = make(map[string]elasticMark)
+	}
+	if a.recentElasticByTicket == nil {
+		a.recentElasticByTicket = make(map[uint64]elasticMark)
+	}
+	mk := elasticMark{reason: reason, when: time.Now(), ticket: ticket, qty: qty}
+	a.recentElasticByBase[baseID] = mk
+	if ticket != 0 {
+		a.recentElasticByTicket[ticket] = mk
+	}
+	a.elasticMux.Unlock()
+	log.Printf("gRPC: Marked recent elastic close context: base_id=%s ticket=%d reason=%s qty=%.4f", baseID, ticket, reason, qty)
+}
+
+// recentElasticFor returns an elastic marker if found for base or ticket within a TTL
+func (a *App) recentElasticFor(baseID string, ticket uint64, within time.Duration) (elasticMark, bool) {
+	a.elasticMux.Lock()
+	defer a.elasticMux.Unlock()
+	var mk elasticMark
+	var ok bool
+	// Prefer ticket match when available
+	if ticket != 0 {
+		if v, exists := a.recentElasticByTicket[ticket]; exists && time.Since(v.when) <= within {
+			return v, true
+		}
+	}
+	if v, exists := a.recentElasticByBase[baseID]; exists && time.Since(v.when) <= within {
+		mk, ok = v, true
+	}
+	// Garbage collect stale entries occasionally
+	if len(a.recentElasticByBase) > 0 || len(a.recentElasticByTicket) > 0 {
+		cutoff := time.Now().Add(-within)
+		for k, v := range a.recentElasticByBase {
+			if v.when.Before(cutoff) {
+				delete(a.recentElasticByBase, k)
+			}
+		}
+		for k, v := range a.recentElasticByTicket {
+			if v.when.Before(cutoff) {
+				delete(a.recentElasticByTicket, k)
+			}
+		}
+	}
+	return mk, ok
 }
 
 // bestInstAcctFor returns the best-known instrument and account for a given BaseID.
@@ -277,6 +343,9 @@ func NewApp() *App {
 
 	// Initialize gRPC server
 	app.grpcServer = grpcserver.NewGRPCServer(app)
+
+	// Initialize elastic correlation maps
+	app.initElasticMaps()
 
 	return app
 }
@@ -783,6 +852,18 @@ func (a *App) GetTradeHistory() []Trade {
 	return a.tradeHistory
 }
 
+// initElasticMaps ensures new elastic correlation maps are initialized
+func (a *App) initElasticMaps() {
+	a.elasticMux.Lock()
+	if a.recentElasticByBase == nil {
+		a.recentElasticByBase = make(map[string]elasticMark)
+	}
+	if a.recentElasticByTicket == nil {
+		a.recentElasticByTicket = make(map[uint64]elasticMark)
+	}
+	a.elasticMux.Unlock()
+}
+
 // Placeholder implementations for gRPC interface compliance
 func (a *App) HandleHedgeCloseNotification(notification interface{}) error {
 	log.Printf("gRPC: Received hedge close notification: %+v", notification)
@@ -798,11 +879,15 @@ func (a *App) HandleHedgeCloseNotification(notification interface{}) error {
 	closureReason := getClosureReasonFromRequest(notification)
 	log.Printf("gRPC: Closure reason: %s for BaseID: %s", closureReason, baseID)
 
-	// Check if this is an MT5-initiated closure
+	// Treat both native MT5_* reasons and elastic_* reasons as MT5-originated signals.
+	// Elastic reasons are intentful EA-side close events (partial or completion) and must NOT
+	// be turned into NT-initiated CLOSE_HEDGE requests.
+	lowerReason := strings.ToLower(strings.TrimSpace(closureReason))
 	isMT5Closure := closureReason == "MT5_position_closed" ||
 		closureReason == "MT5_stop_loss" ||
 		closureReason == "MT5_manual_close" ||
-		closureReason == "MT5_take_profit"
+		closureReason == "MT5_take_profit" ||
+		strings.HasPrefix(lowerReason, "elastic_")
 
 	if isMT5Closure {
 		// MT5 initiated the closure - need to notify NinjaTrader
@@ -851,38 +936,50 @@ func (a *App) HandleHedgeCloseNotification(notification interface{}) error {
 			ClosureReason:   closureReason,
 		}
 
-		// If MT5 didn't include a ticket, try to infer one from our known pool to avoid NT dedup dropping sequential closes
-		if closeNotification.MT5Ticket == 0 {
-			inferred := uint64(0)
-			// Look up any known tickets for this BaseID
-			a.mt5TicketMux.Lock()
-			if list, ok := a.baseIdToTickets[baseID]; ok && len(list) > 0 {
-				// Take the oldest (first) ticket and remove it from the pool to prevent re-use
-				inferred = list[0]
-				remaining := list[1:]
-				if len(remaining) == 0 {
-					delete(a.baseIdToTickets, baseID)
-				} else {
-					a.baseIdToTickets[baseID] = remaining
+		// If this is an elastic signaled close, mark context for correlation and avoid
+		// mutating ticket pools on partials (MT5 position remains open with reduced volume).
+		if strings.HasPrefix(lowerReason, "elastic_") {
+			a.markElasticClose(baseID, closeNotification.MT5Ticket, closureReason, closeNotification.Quantity)
+			// On elastic partials, do not attempt ticket inference (we don't want to pop tickets)
+			// and do not prune mappings below. If the EA omitted the ticket, we keep it as 0.
+			if strings.EqualFold(lowerReason, "elastic_partial_close") {
+				// Clear any stale pending NT CLOSE_HEDGE accidentally recorded for this BaseID
+				// to prevent immediate re-closing of newly opened tickets.
+				a.mt5TicketMux.Lock()
+				if _, had := a.pendingCloses[baseID]; had {
+					delete(a.pendingCloses, baseID)
+					log.Printf("gRPC: Cleared pending CLOSE_HEDGE for BaseID %s due to elastic_partial_close (prevent premature closures).", baseID)
 				}
-				// Also clear single-ticket convenience map if it matches
-				if cur, ok2 := a.baseIdToMT5Ticket[baseID]; ok2 && cur == inferred {
-					delete(a.baseIdToMT5Ticket, baseID)
-				}
-				// And reverse map (ticket -> baseID) for this ticket
-				delete(a.mt5TicketToBaseId, inferred)
-			}
-			a.mt5TicketMux.Unlock()
-
-			if inferred != 0 {
-				closeNotification.MT5Ticket = inferred
-				log.Printf("DEBUG: Inferred MT5 ticket %d for close notification (BaseID: %s) due to missing ticket from MT5; ensures NT processes unique sequential closes.", inferred, baseID)
-			} else {
-				log.Printf("DEBUG: No MT5 ticket extracted from notification and none inferred; NT may fall back to base_id-only logic")
+				a.mt5TicketMux.Unlock()
 			}
 		} else {
-			// MT5 included a ticket
-			log.Printf("DEBUG: Extracted MT5 ticket %d from notification (type %T)", closeNotification.MT5Ticket, notification)
+			// Non-elastic MT5 close: if MT5 didn't include a ticket, try to infer one
+			if closeNotification.MT5Ticket == 0 {
+				inferred := uint64(0)
+				a.mt5TicketMux.Lock()
+				if list, ok := a.baseIdToTickets[baseID]; ok && len(list) > 0 {
+					inferred = list[0]
+					remaining := list[1:]
+					if len(remaining) == 0 {
+						delete(a.baseIdToTickets, baseID)
+					} else {
+						a.baseIdToTickets[baseID] = remaining
+					}
+					if cur, ok2 := a.baseIdToMT5Ticket[baseID]; ok2 && cur == inferred {
+						delete(a.baseIdToMT5Ticket, baseID)
+					}
+					delete(a.mt5TicketToBaseId, inferred)
+				}
+				a.mt5TicketMux.Unlock()
+				if inferred != 0 {
+					closeNotification.MT5Ticket = inferred
+					log.Printf("DEBUG: Inferred MT5 ticket %d for close notification (BaseID: %s) due to missing ticket from MT5; ensures NT processes unique sequential closes.", inferred, baseID)
+				} else {
+					log.Printf("DEBUG: No MT5 ticket extracted from notification and none inferred; NT may fall back to base_id-only logic")
+				}
+			} else {
+				log.Printf("DEBUG: Extracted MT5 ticket %d from notification (type %T)", closeNotification.MT5Ticket, notification)
+			}
 		}
 
 		// Broadcast MT5 closure notifications to NT streams only (not MT5 streams to prevent circular trades)
@@ -890,15 +987,15 @@ func (a *App) HandleHedgeCloseNotification(notification interface{}) error {
 		log.Printf("gRPC: Broadcasting MT5 closure notification to NT streams for BaseID: %s", baseID)
 		a.grpcServer.BroadcastMT5CloseToNTStreams(closeNotification)
 
-		// Prune stored ticket mappings for this closed ticket (idempotent if we already inferred-and-popped above)
-		if closeNotification.MT5Ticket != 0 {
+		// Prune stored ticket mappings only for non-elastic or elastic completion signals.
+		// For elastic_partial_close we keep mappings intact (position remains open).
+		if closeNotification.MT5Ticket != 0 && !strings.EqualFold(lowerReason, "elastic_partial_close") {
 			a.mt5TicketMux.Lock()
 			delete(a.mt5TicketToBaseId, closeNotification.MT5Ticket)
 			if cur, ok := a.baseIdToMT5Ticket[baseID]; ok && cur == closeNotification.MT5Ticket {
 				delete(a.baseIdToMT5Ticket, baseID)
 			}
 			if list, ok := a.baseIdToTickets[baseID]; ok {
-				// remove ticket from slice if still present
 				nl := make([]uint64, 0, len(list))
 				for _, v := range list {
 					if v != closeNotification.MT5Ticket {
@@ -917,11 +1014,11 @@ func (a *App) HandleHedgeCloseNotification(notification interface{}) error {
 
 		log.Printf("gRPC: Successfully sent MT5 closure notification to NinjaTrader for BaseID: %s", baseID)
 		return nil
-	} else {
-		// NinjaTrader initiated the closure - delegate to the unified NT close handler
-		log.Printf("gRPC: NT-initiated closure detected - delegating to HandleNTCloseHedgeRequest for BaseID: %s", baseID)
-		return a.HandleNTCloseHedgeRequest(notification)
 	}
+
+	// Not an MT5/elastic close notification; ignore here (NT-originated closes are handled via HandleNTCloseHedgeRequest entrypoint)
+	log.Printf("gRPC: Non-MT5 close notification ignored in HandleHedgeCloseNotification (BaseID: %s, reason=%s)", baseID, closureReason)
+	return nil
 }
 
 func (a *App) HandleMT5TradeResult(result interface{}) error {
@@ -936,6 +1033,17 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 				// Closure result: prune mapping and notify NT so NT won't keep retrying
 				base := mt5Result.ID
 				ticket := mt5Result.Ticket
+				// Before pruning/broadcasting, check for recent elastic context to avoid overriding intent
+				if mk, ok := a.recentElasticFor(base, ticket, 3*time.Second); ok {
+					// If the elastic reason was a partial, we suppress this generic MT5_position_closed broadcast
+					if strings.EqualFold(mk.reason, "elastic_partial_close") {
+						log.Printf("gRPC: Suppressing generic MT5TradeResult close for ticket %d (BaseID: %s) due to recent elastic_partial_close context.", ticket, base)
+						// Still prune the ticket mapping below to keep state consistent
+					} else {
+						// Reclassify generic reason to the elastic context (e.g., elastic_completion)
+						log.Printf("gRPC: Reclassifying MT5TradeResult close for ticket %d (BaseID: %s) from MT5_position_closed to %s due to recent elastic context.", ticket, base, mk.reason)
+					}
+				}
 				a.mt5TicketMux.Lock()
 				// Remove from reverse map and single-ticket map
 				delete(a.mt5TicketToBaseId, ticket)
@@ -969,6 +1077,18 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 					delete(a.ntInitiatedTickets, ticket)
 				}
 				a.ntCloseMux.Unlock()
+
+				// Decide closure reason and whether to suppress based on recent elastic context
+				closureReason := "MT5_position_closed"
+				suppress := false
+				if mk, ok := a.recentElasticFor(base, ticket, 3*time.Second); ok {
+					if strings.EqualFold(mk.reason, "elastic_partial_close") {
+						// Suppress broadcasting this generic close; partial already communicated intent
+						suppress = true
+					} else {
+						closureReason = mk.reason // carry over elastic_completion, etc.
+					}
+				}
 
 				// Broadcast MT5 close notification to NT streams (idempotent on NT side)
 				closeNotification := struct {
@@ -1010,10 +1130,14 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 					NTTradeResult:   "mt5_closed",
 					NTSessionTrades: 0,
 					MT5Ticket:       ticket,
-					ClosureReason:   "MT5_position_closed",
+					ClosureReason:   closureReason,
 				}
-				a.grpcServer.BroadcastMT5CloseToNTStreams(closeNotification)
-				log.Printf("gRPC: Pruned mapping and broadcasted MT5 close for ticket %d (BaseID: %s)", ticket, base)
+				if suppress {
+					log.Printf("gRPC: Skipped broadcasting MT5 close for ticket %d (BaseID: %s) due to elastic_partial_close context.", ticket, base)
+				} else {
+					a.grpcServer.BroadcastMT5CloseToNTStreams(closeNotification)
+					log.Printf("gRPC: Pruned mapping and broadcasted MT5 close for ticket %d (BaseID: %s) with reason %s", ticket, base, closureReason)
+				}
 			} else {
 				// Open/fill result: record mapping and try to drain pendings
 				a.mt5TicketMux.Lock()
@@ -1143,6 +1267,16 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 				}
 				if isClose {
 					// Prune mappings on close and notify NT
+					// Check for recent elastic context before processing
+					var baseElastic string
+					if mk, ok := a.recentElasticFor(baseId, ticket, 3*time.Second); ok {
+						baseElastic = mk.reason
+						if strings.EqualFold(baseElastic, "elastic_partial_close") {
+							log.Printf("gRPC: Suppressing legacy MT5TradeResult close for ticket %d (BaseID: %s) due to recent elastic_partial_close context.", ticket, baseId)
+						} else {
+							log.Printf("gRPC: Reclassifying legacy MT5TradeResult close for ticket %d (BaseID: %s) to %s due to recent elastic context.", ticket, baseId, baseElastic)
+						}
+					}
 					a.mt5TicketMux.Lock()
 					delete(a.mt5TicketToBaseId, ticket)
 					if cur, ok := a.baseIdToMT5Ticket[baseId]; ok && cur == ticket {
@@ -1173,6 +1307,16 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 						delete(a.ntInitiatedTickets, ticket)
 					}
 					a.ntCloseMux.Unlock()
+
+					closureReason := "MT5_position_closed"
+					suppress := false
+					if baseElastic != "" {
+						if strings.EqualFold(baseElastic, "elastic_partial_close") {
+							suppress = true
+						} else {
+							closureReason = baseElastic
+						}
+					}
 
 					closeNotification := struct {
 						ID              string    `json:"id"`
@@ -1213,10 +1357,14 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 						NTTradeResult:   "mt5_closed",
 						NTSessionTrades: 0,
 						MT5Ticket:       ticket,
-						ClosureReason:   "MT5_position_closed",
+						ClosureReason:   closureReason,
 					}
-					a.grpcServer.BroadcastMT5CloseToNTStreams(closeNotification)
-					log.Printf("gRPC: Pruned mapping and broadcasted MT5 close for ticket %d (BaseID: %s)", ticket, baseId)
+					if suppress {
+						log.Printf("gRPC: Skipped broadcasting MT5 close for ticket %d (BaseID: %s) due to elastic_partial_close context.", ticket, baseId)
+					} else {
+						a.grpcServer.BroadcastMT5CloseToNTStreams(closeNotification)
+						log.Printf("gRPC: Pruned mapping and broadcasted MT5 close for ticket %d (BaseID: %s) with reason %s", ticket, baseId, closureReason)
+					}
 				} else {
 					a.mt5TicketMux.Lock()
 					a.mt5TicketToBaseId[ticket] = baseId

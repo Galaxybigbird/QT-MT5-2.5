@@ -316,6 +316,14 @@ func convertMT5CloseNotificationToProtoTrade(notification interface{}) *trading.
 		MT5Ticket       uint64    `json:"mt5_ticket"`
 		ClosureReason   string    `json:"closure_reason"`
 	}); ok {
+		// For MT5 close notifications, prefer carrying the EA's closure_reason back to NT.
+		// We map it onto NtTradeResult to avoid a proto change; NT will read closure_reason first and
+		// fall back to nt_trade_result if needed.
+		ntResult := n.NTTradeResult
+		if n.ClosureReason != "" {
+			ntResult = n.ClosureReason
+		}
+
 		return &trading.Trade{
 			Id:              n.ID,
 			BaseId:          n.BaseID,
@@ -332,7 +340,7 @@ func convertMT5CloseNotificationToProtoTrade(notification interface{}) *trading.
 			AccountName:     n.AccountName,
 			NtBalance:       n.NTBalance,
 			NtDailyPnl:      n.NTDailyPnL,
-			NtTradeResult:   n.NTTradeResult,
+			NtTradeResult:   ntResult,
 			NtSessionTrades: int32(n.NTSessionTrades),
 			Mt5Ticket:       n.MT5Ticket,
 		}
