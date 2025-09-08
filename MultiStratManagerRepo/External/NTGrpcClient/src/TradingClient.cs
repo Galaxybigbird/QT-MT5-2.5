@@ -10,13 +10,14 @@ namespace NTGrpcClient
 {
     internal class TradingClient : ITradingClient
     {
-    private readonly Channel _channel;
+        private readonly Channel _channel;
         private readonly TradingService.TradingServiceClient _client;
         private readonly StreamingService.StreamingServiceClient _streamingClient;
-    private readonly LoggingService.LoggingServiceClient _loggingClient;
+        private readonly LoggingService.LoggingServiceClient _loggingClient;
         private CancellationTokenSource _streamCancellation;
+        private Task _streamTask;
         private bool _disposed = false;
-        
+
         public bool IsConnected { get; private set; }
         public string LastError { get; private set; } = "";
         
@@ -55,9 +56,6 @@ namespace NTGrpcClient
                 LastError = $"Failed to create Grpc.Core channel: {ex.Message}";
                 throw;
             }
-            
-            // Test connection with better error handling
-            Task.Run(async () => await TestConnection());
         }
 
     public void LogFireAndForget(string level, string component, string message, string tradeId = "", string errorCode = "", string baseId = "", string correlationId = "")
@@ -169,6 +167,8 @@ namespace NTGrpcClient
                 });
                 
                 bool isHealthy = response.Status == "healthy";
+                // Update connection state based on health response
+                IsConnected = isHealthy;
                 
                 return new OperationResult
                 {
@@ -180,6 +180,7 @@ namespace NTGrpcClient
             catch (Exception ex)
             {
                 LastError = $"EXCEPTION: {ex.GetType().Name}: {ex.Message}";
+                IsConnected = false;
                 
                 return new OperationResult
                 {
@@ -284,8 +285,8 @@ namespace NTGrpcClient
         public void StartTradingStream(Action<string> onTradeReceived)
         {
             _streamCancellation = new CancellationTokenSource();
-            
-            Task.Run(async () =>
+
+            _streamTask = Task.Run(async () =>
             {
                 try
                 {
@@ -334,10 +335,12 @@ namespace NTGrpcClient
                 }
             });
         }
-        
+
         public void StopTradingStream()
         {
-            _streamCancellation?.Cancel();
+            try { _streamCancellation?.Cancel(); } catch { }
+            try { _streamTask?.Wait(2000); } catch { }
+            _streamTask = null;
         }
         
         // JSON conversion methods

@@ -17,6 +17,11 @@ namespace Trading.Proto
     private readonly BlockingCollection<string> _queue = new BlockingCollection<string>(new ConcurrentQueue<string>());
     private readonly Thread _worker;
     private volatile bool _running = true;
+    // Failure backoff to avoid hangs when bridge is down
+    private int _consecutiveFailures = 0;
+    private DateTime _firstFailureAt = DateTime.MinValue;
+    private static readonly TimeSpan FailureWindow = TimeSpan.FromSeconds(10);
+    private const int FailureThreshold = 8; // after ~8 failures in 10s, stop sender thread
 
     // Duplicate suppression (message hash -> last seen ms)
     private static readonly ConcurrentDictionary<string, long> _recent = new ConcurrentDictionary<string, long>();
@@ -103,7 +108,6 @@ namespace Trading.Proto
 
         private void Worker()
         {
-            // Simple sender loop; sends one event at a time with light backoff on failure
             while (_running)
             {
                 string line = null;
@@ -125,53 +129,47 @@ namespace Trading.Proto
                         Component = _component,
                         Message = line ?? string.Empty
                     };
+
                     // BaseId extraction heuristics:
                     // 1. JSON fragment: "base_id":"VALUE"
                     // 2. Plain token: base_id=VALUE
                     try
                     {
                         string baseId = null;
-
-                        // Regex JSON extraction
                         var jm = JsonBaseIdRegex.Match(line);
                         if (jm.Success)
                             baseId = jm.Groups["id"].Value.Trim();
-
                         if (string.IsNullOrWhiteSpace(baseId))
                         {
                             var pm = PlainBaseIdRegex.Match(line);
                             if (pm.Success)
                                 baseId = pm.Groups[1].Value.Trim();
                         }
-
                         if (!string.IsNullOrWhiteSpace(baseId))
                         {
                             ev.BaseId = baseId;
-                            // Correlation reuse from shared provider
                             var corr = CorrelationProvider.Get(baseId);
                             if (!string.IsNullOrEmpty(corr)) ev.Tags["correlation_id"] = corr;
                         }
-
-                        // If line contains [WARN] but level not WARN, upgrade
                         if (ev.Level != "WARN" && line.IndexOf("[WARN]", StringComparison.OrdinalIgnoreCase) >= 0)
                             ev.Level = "WARN";
-
                         ev.Tags["normalized"] = "true";
                     }
                     catch { /* ignore parsing issues */ }
 
-                    // Fire-and-forget; we don't want to block Console
                     try
                     {
                         _ = _logging.LogAsync(ev);
+                        _consecutiveFailures = 0;
+                        _firstFailureAt = DateTime.MinValue;
                     }
                     catch (RpcException)
                     {
-                        // transient; drop
+                        HandleFailure();
                     }
                     catch
                     {
-                        // ignore
+                        HandleFailure();
                     }
                 }
                 catch
@@ -181,7 +179,29 @@ namespace Trading.Proto
             }
         }
 
-    private static bool IsDuplicate(string line)
+        private void HandleFailure()
+        {
+            try
+            {
+                var now = DateTime.UtcNow;
+                if (_firstFailureAt == DateTime.MinValue)
+                    _firstFailureAt = now;
+                _consecutiveFailures++;
+                if (_consecutiveFailures >= FailureThreshold && (now - _firstFailureAt) <= FailureWindow)
+                {
+                    _running = false; // stop loop; Console still writes to fallback
+                }
+                if ((now - _firstFailureAt) > FailureWindow)
+                {
+                    // reset window
+                    _consecutiveFailures = 0;
+                    _firstFailureAt = DateTime.MinValue;
+                }
+            }
+            catch { /* ignore */ }
+        }
+
+        private static bool IsDuplicate(string line)
         {
             if (string.IsNullOrWhiteSpace(line)) return false; // let blank lines through once
             try

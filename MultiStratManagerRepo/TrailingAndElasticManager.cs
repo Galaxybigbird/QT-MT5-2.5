@@ -506,6 +506,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                                 double currentProfitDollars = position.GetUnrealizedProfitLoss(PerformanceUnit.Currency, trailCurrentPrice);
                                 int levelToSend = Math.Max(earnedLevel, 1);
                                 Task.Run(() => SendElasticHedgeUpdate(tracker.BaseId, currentProfitDollars, levelToSend));
+                                // Keep monitor and trailing paths in sync to avoid out-of-order/lower-level resends
+                                if (tracker.LastReportedIncrement < levelToSend)
+                                    tracker.LastReportedIncrement = levelToSend;
                                 LogAndPrint($"Elastic profit update sent due to trailing increment for {tracker.BaseId}: Profit=${currentProfitDollars:F2}, Level={levelToSend}");
                             }
                             catch (Exception sendEx)

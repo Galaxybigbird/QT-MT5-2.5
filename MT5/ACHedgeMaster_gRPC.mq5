@@ -1,5 +1,5 @@
 #property link      ""
-#property version   "3.51"
+#property version   "3.54"
 #property strict
 #property description "gRPC Hedge Receiver EA for Go bridge server with Asymmetrical Compounding"
 
@@ -3203,6 +3203,36 @@ void ProcessElasticHedgeUpdate(string baseId, double currentProfit, int profitLe
         }
     }
     
+    // Check if we've already processed this profit level to avoid duplicate partial closes
+    // FIXED: Allow reprocessing of same level if sufficient time has passed (handles NT retries/resends)
+    datetime currentTime = TimeCurrent();
+    bool isStaleUpdate = (currentTime - g_elasticPositions[posIndex].lastReductionTime) > 10; // 10 seconds tolerance
+    
+    // ADDITIONAL FIX: Reset stale tracking if position size changed significantly (handles mapping loss recovery)
+    double currentPositionSize = 0;
+    if (PositionSelectByTicket(g_elasticPositions[posIndex].positionTicket)) {
+        currentPositionSize = PositionGetDouble(POSITION_VOLUME);
+    }
+    bool positionSizeChanged = MathAbs(currentPositionSize - g_elasticPositions[posIndex].remainingLots) > 0.01;
+    
+    if (profitLevel <= g_elasticPositions[posIndex].profitLevelsReceived && !isStaleUpdate && !positionSizeChanged) {
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Already processed profit level ", profitLevel, 
+                          " for BaseID: ", baseId, " (last processed: ", g_elasticPositions[posIndex].profitLevelsReceived, 
+                          ") recently. Skipping duplicate update."); Print(__log); ULogInfoPrint(__log); }
+        return;
+    }
+    
+    if (isStaleUpdate && profitLevel <= g_elasticPositions[posIndex].profitLevelsReceived) {
+        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Stale update detected for profit level ", profitLevel, 
+                          " for BaseID: ", baseId, " (last processed: ", g_elasticPositions[posIndex].profitLevelsReceived, 
+                          ", time since last: ", (currentTime - g_elasticPositions[posIndex].lastReductionTime), "s). Allowing reprocessing."); Print(__log); ULogWarnPrint(__log); }
+    }
+    
+    // Log the profit level progression
+    { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Processing NEW profit level ", profitLevel, 
+                      " for BaseID: ", baseId, " (previous: ", g_elasticPositions[posIndex].profitLevelsReceived, 
+                      ")"); Print(__log); ULogInfoPrint(__log); }
+    
     // Removed throttle between reductions to sync with NT trailing behavior
     
     // Determine which tier to use based on NT PnL
@@ -3261,40 +3291,82 @@ void ProcessElasticHedgeUpdate(string baseId, double currentProfit, int profitLe
         return;
     }
 
-    if (lotsToClose > 0 && lotsToClose >= minLot) {
-        // Execute partial close
-        if (PartialClosePosition(g_elasticPositions[posIndex].positionTicket, lotsToClose)) {
-            g_elasticPositions[posIndex].remainingLots -= lotsToClose;
-            g_elasticPositions[posIndex].totalLotsReduced += lotsToClose;
-            g_elasticPositions[posIndex].profitLevelsReceived = profitLevel;
-            g_elasticPositions[posIndex].lastReductionTime = TimeCurrent();
-            
-            Print("ELASTIC_HEDGE: Reduced ", lotsToClose, " lots for BaseID: ", baseId,
-                  " at NT profit: $", DoubleToString(currentProfit, 2),
-                  ". Total reduced: ", g_elasticPositions[posIndex].totalLotsReduced,
-                  ", Remaining: ", g_elasticPositions[posIndex].remainingLots);
-                  
-            // Send notification to Bridge via gRPC
-            string update_json = "{";
-            update_json += "\"base_id\":\"" + baseId + "\",";
-            update_json += "\"current_profit\":" + DoubleToString(currentProfit, 2) + ",";
-            update_json += "\"profit_level\":" + IntegerToString(profitLevel);
-            update_json += "}";
-            
-            GrpcSubmitElasticUpdate(update_json);
+    // NEW: Execute one partial close per profit level advanced
+    // Example: previous=4, profitLevel=10 -> perform 6 partial closes (subject to min lot / full-close rules)
+    int previousLevel = g_elasticPositions[posIndex].profitLevelsReceived;
+    int targetLevel = profitLevel;
+    if (targetLevel < previousLevel) targetLevel = previousLevel; // guard
 
-            // If after partial the remaining lots are at/below min lot, finalize by closing fully
-            if (g_elasticPositions[posIndex].remainingLots <= minLot + 1e-8) {
-                if (CloseElasticHedgeFully(baseId, g_elasticPositions[posIndex].positionTicket, "elastic_completion")) {
-                    { string __log2=""; StringConcatenate(__log2, "ELASTIC_HEDGE: Remaining lots at/below min. Fully closed hedge for BaseID: ", baseId); Print(__log2); ULogInfoPrint(__log2); }
+    for (int lvl = previousLevel + 1; lvl <= targetLevel; lvl++)
+    {
+        // Re-evaluate lots, min lot, and full-close conditions each iteration
+        bool isHighRiskTierIter = (g_ntDailyPnL <= ElasticHedging_Tier2_Threshold);
+        double lotsToCloseIter = isHighRiskTierIter ? ElasticHedging_Tier2_LotReduction : ElasticHedging_Tier1_LotReduction;
+        double minLotIter = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+
+        // Refresh current MT5 volume for safety
+        double liveLots = 0.0;
+        if (PositionSelectByTicket(g_elasticPositions[posIndex].positionTicket))
+            liveLots = PositionGetDouble(POSITION_VOLUME);
+
+        // Determine if this iteration should fully close instead
+        bool fullThisStep = false;
+        if (liveLots > 0)
+        {
+            if (lotsToCloseIter >= liveLots - 1e-8) fullThisStep = true; else
+            {
+                double projectedRemaining = g_elasticPositions[posIndex].remainingLots - lotsToCloseIter;
+                if (projectedRemaining < minLotIter) fullThisStep = true;
+            }
+            if (lotsToCloseIter < minLotIter && g_elasticPositions[posIndex].remainingLots <= minLotIter + 1e-8)
+                fullThisStep = true;
+        }
+
+        if (fullThisStep)
+        {
+            if (CloseElasticHedgeFully(baseId, g_elasticPositions[posIndex].positionTicket, "elastic_completion"))
+            {
+                { string __lf=""; StringConcatenate(__lf, "ELASTIC_HEDGE: Fully closed hedge during per-level iteration at level ", lvl, " for BaseID: ", baseId); Print(__lf); ULogInfoPrint(__lf); }
+            }
+            break; // position fully closed; exit loop
+        }
+
+        if (lotsToCloseIter > 0 && lotsToCloseIter >= minLotIter)
+        {
+            if (PartialClosePosition(g_elasticPositions[posIndex].positionTicket, lotsToCloseIter, lvl))
+            {
+                g_elasticPositions[posIndex].remainingLots -= lotsToCloseIter;
+                g_elasticPositions[posIndex].totalLotsReduced += lotsToCloseIter;
+                g_elasticPositions[posIndex].profitLevelsReceived = lvl;
+                g_elasticPositions[posIndex].lastReductionTime = TimeCurrent();
+
+                Print("ELASTIC_HEDGE: Per-level reduction executed at level ", lvl, ": ", lotsToCloseIter,
+                      " lots for BaseID: ", baseId, ". Remaining: ", g_elasticPositions[posIndex].remainingLots);
+
+                // Also emit the elastic update echo (keeps Bridge metrics aligned with the level applied)
+                string update_json = "{";
+                update_json += "\"base_id\":\"" + baseId + "\",";
+                update_json += "\"current_profit\":" + DoubleToString(currentProfit, 2) + ",";
+                update_json += "\"profit_level\":" + IntegerToString(lvl);
+                update_json += "}";
+                GrpcSubmitElasticUpdate(update_json);
+
+                // If we are at/under min lot now, finalize
+                if (g_elasticPositions[posIndex].remainingLots <= minLotIter + 1e-8)
+                {
+                    CloseElasticHedgeFully(baseId, g_elasticPositions[posIndex].positionTicket, "elastic_completion");
+                    break;
                 }
             }
         }
-    } else {
-        { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: No reduction applied (below min lot or nothing remaining) for BaseID: ", baseId); Print(__log); ULogInfoPrint(__log); }
-        // If nothing applied because we're below min lot but still have tiny remainder, close fully to complete elastic sequence
-        if (g_elasticPositions[posIndex].remainingLots > 0 && g_elasticPositions[posIndex].remainingLots <= minLot + 1e-8 && currentLotsOnMT5 > 0) {
-            CloseElasticHedgeFully(baseId, g_elasticPositions[posIndex].positionTicket, "elastic_completion");
+        else
+        {
+            { string __no=""; StringConcatenate(__no, "ELASTIC_HEDGE: No reduction applied at level ", lvl, " (below min lot or none remaining) for BaseID: ", baseId); Print(__no); ULogInfoPrint(__no); }
+            if (g_elasticPositions[posIndex].remainingLots > 0 && g_elasticPositions[posIndex].remainingLots <= minLotIter + 1e-8 && liveLots > 0)
+            {
+                CloseElasticHedgeFully(baseId, g_elasticPositions[posIndex].positionTicket, "elastic_completion");
+                break;
+            }
         }
     }
 }
@@ -3392,7 +3464,8 @@ int FindPositionByBaseId(string baseId)
 //+------------------------------------------------------------------+
 //| Partial close position function                                 |
 //+------------------------------------------------------------------+
-bool PartialClosePosition(ulong ticket, double lotsToClose)
+// Include profitLevel so we can emit a distinct hedge_close per level
+bool PartialClosePosition(ulong ticket, double lotsToClose, int profitLevel)
 {
     // Safety: only allow partial closes when Elastic mode is active
     if(!ElasticHedging_Enabled || LotSizingMode != Elastic_Hedging) {
@@ -3475,12 +3548,42 @@ bool PartialClosePosition(ulong ticket, double lotsToClose)
     }
     
     Print("ELASTIC_HEDGE: Successfully closed ", lotsToClose, " lots of position ", ticket);
+    
+    // CRITICAL FIX: Preserve the position mapping after partial close
+    // MT5 partial closes don't change the position ticket, but we need to ensure mapping persists
+    if(baseId != "" && g_map_position_id_to_base_id != NULL)
+    {
+        // Re-confirm mapping exists after partial close (defensive programming)
+        CString *existingMapping = NULL;
+        if(!g_map_position_id_to_base_id.TryGetValue((long)ticket, existingMapping) || existingMapping == NULL)
+        {
+            // Mapping was lost during partial close - restore it
+            CString *restoredBaseId = new CString();
+            restoredBaseId.Assign(baseId);
+            if(g_map_position_id_to_base_id.Add((long)ticket, restoredBaseId))
+            {
+                { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Restored lost mapping after partial close - Ticket: ", ticket, " -> BaseID: ", baseId); Print(__log); ULogWarnPrint(__log); }
+            }
+            else
+            {
+                delete restoredBaseId;
+                { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Failed to restore mapping after partial close for ticket: ", ticket); Print(__log); ULogErrorPrint(__log); }
+            }
+        }
+        else
+        {
+            { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Position mapping verified intact after partial close - Ticket: ", ticket, " -> BaseID: ", baseId); Print(__log); ULogInfoPrint(__log); }
+        }
+    }
 
     // Send specific hedge_close for partial reduction so NT can skip auto-close while trailing+profit
     if(baseId != "")
     {
-        SendHedgeCloseNotification(baseId, _Symbol, "MT5_Account", lotsToClose, action, TimeCurrent(), "elastic_partial_close");
-        // Mark as notified to avoid duplicate generic notification for this (baseId,ticket)
+        // Per-level notification (unique per ticket+level)
+        SendHedgeCloseNotification(baseId, _Symbol, "MT5_Account", lotsToClose, action, TimeCurrent(), "elastic_partial_close", profitLevel);
+        // Mark both per-level and base ticket keys so generic CLOSURE_DETECTION is suppressed
+        MarkNotificationSent(baseId + ":" + tkStr + ":lvl" + IntegerToString(profitLevel), "hedge_close");
+        // Preserve legacy suppression key (no level) to avoid generic MT5_position_closed emissions
         MarkNotificationSent(baseId + ":" + tkStr, "hedge_close");
         // Clear pending
         RemoveNotificationMark(pendingKey, "hedge_close_pending");
@@ -3674,13 +3777,15 @@ void RemoveNotificationMark(string baseId, string eventType)
 //+------------------------------------------------------------------+
 //| Send hedge close notification to Bridge via gRPC               |
 //+------------------------------------------------------------------+
+// Add optional profit_level to deduplicate per level (enables multiple partials per ticket)
 void SendHedgeCloseNotification(string base_id,
                                 string nt_instrument_symbol,
                                 string nt_account_name,
                                 double closed_hedge_quantity,
                                 string closed_hedge_action,
                                 datetime timestamp_dt,
-                                string closure_reason)
+                                string closure_reason,
+                                int profit_level = -1)
 {
     // Try to resolve the associated MT5 ticket (per-ticket fidelity)
     ulong mt5Ticket = 0;
@@ -3694,6 +3799,11 @@ void SendHedgeCloseNotification(string base_id,
     if (mt5Ticket > 0) {
         string tkStr = StringFormat("%I64u", mt5Ticket);
         dedupEntity = base_id + ":" + tkStr;
+    }
+    // If profit_level is provided, include it to allow one notification per level
+    if (profit_level >= 0)
+    {
+        dedupEntity = dedupEntity + ":lvl" + IntegerToString(profit_level);
     }
 
     // Check for duplicate notification for this specific (base_id,ticket,event)

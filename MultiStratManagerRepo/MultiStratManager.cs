@@ -51,6 +51,76 @@ namespace NinjaTrader.NinjaScript.AddOns
         private bool connectionsStarted = false;
         private System.Windows.Threading.DispatcherTimer autoLaunchTimer;
 
+        // ✅ RECOMPILATION SAFETY: Track if we've already cleaned up to prevent multiple cleanup attempts
+        private static bool hasPerformedStaticCleanup = false;
+
+        /// <summary>
+        /// Aggressive cleanup of static resources to handle NinjaScript recompilation scenarios
+        /// </summary>
+        private static void PerformStaticCleanup()
+        {
+            try
+            {
+                System.Console.WriteLine("[NT_ADDON][DEBUG] PerformStaticCleanup: Starting aggressive cleanup for recompilation safety");
+
+                // 1. Close and dispose existing UI window
+                if (window != null)
+                {
+                    try
+                    {
+                        System.Console.WriteLine("[NT_ADDON][DEBUG] PerformStaticCleanup: Closing existing UI window");
+                        if (window.Dispatcher.CheckAccess())
+                        {
+                            window.Close();
+                        }
+                        else
+                        {
+                            window.Dispatcher.BeginInvoke(new Action(() => window.Close()));
+                        }
+                        window = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Console.WriteLine($"[NT_ADDON][ERROR] PerformStaticCleanup: Error closing window: {ex.Message}");
+                    }
+                }
+
+                // 2. Clear monitored strategies list
+                if (monitoredStrategies != null)
+                {
+                    System.Console.WriteLine($"[NT_ADDON][DEBUG] PerformStaticCleanup: Clearing {monitoredStrategies.Count} monitored strategies");
+                    monitoredStrategies.Clear();
+                }
+
+                // 3. Clean up previous instance
+                if (Instance != null)
+                {
+                    try
+                    {
+                        System.Console.WriteLine("[NT_ADDON][DEBUG] PerformStaticCleanup: Disposing previous instance");
+                        Instance.DisconnectGrpcAndStopAll();
+                        Instance = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Console.WriteLine($"[NT_ADDON][ERROR] PerformStaticCleanup: Error disposing instance: {ex.Message}");
+                    }
+                }
+
+                // 4. Force garbage collection to clean up resources
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+
+                hasPerformedStaticCleanup = true;
+                System.Console.WriteLine("[NT_ADDON][DEBUG] PerformStaticCleanup: Cleanup completed successfully");
+            }
+            catch (Exception ex)
+            {
+                System.Console.WriteLine($"[NT_ADDON][ERROR] PerformStaticCleanup: Critical error during cleanup: {ex.Message}");
+            }
+        }
+
         // Bridge connection monitoring removed - manual connection only
         private bool lastBridgeConnectionStatus = false;
         private DateTime lastBridgeConnectionCheck = DateTime.MinValue;
@@ -95,13 +165,33 @@ namespace NinjaTrader.NinjaScript.AddOns
         public TrailingActivationType TrailingTriggerType 
         { 
             get => trailingAndElasticManager?.TrailingTriggerType ?? TrailingActivationType.Dollars; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.TrailingTriggerType = value; OnPropertyChanged(nameof(TrailingTriggerType)); } } 
+            set 
+            { 
+                if (trailingAndElasticManager != null) 
+                { 
+                    trailingAndElasticManager.TrailingTriggerType = value; 
+                    // Mirror to Elastic trigger for unified control
+                    trailingAndElasticManager.ElasticTriggerType = value; 
+                    OnPropertyChanged(nameof(TrailingTriggerType)); 
+                    OnPropertyChanged(nameof(ElasticTriggerType)); 
+                } 
+            } 
         }
         
         public double TrailingTriggerValue 
         { 
             get => trailingAndElasticManager?.TrailingTriggerValue ?? 100.0; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.TrailingTriggerValue = value; OnPropertyChanged(nameof(TrailingTriggerValue)); } } 
+            set 
+            { 
+                if (trailingAndElasticManager != null) 
+                { 
+                    trailingAndElasticManager.TrailingTriggerValue = value; 
+                    // Mirror to Elastic threshold
+                    trailingAndElasticManager.ProfitUpdateThreshold = value; 
+                    OnPropertyChanged(nameof(TrailingTriggerValue)); 
+                    OnPropertyChanged(nameof(ProfitUpdateThreshold)); 
+                } 
+            } 
         }
         
         public TrailingActivationType TrailingStopType 
@@ -119,13 +209,33 @@ namespace NinjaTrader.NinjaScript.AddOns
         public TrailingActivationType TrailingIncrementsType 
         { 
             get => trailingAndElasticManager?.TrailingIncrementsType ?? TrailingActivationType.Dollars; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.TrailingIncrementsType = value; OnPropertyChanged(nameof(TrailingIncrementsType)); } } 
+            set 
+            { 
+                if (trailingAndElasticManager != null) 
+                { 
+                    trailingAndElasticManager.TrailingIncrementsType = value; 
+                    // Mirror to Elastic increments units for unified control
+                    trailingAndElasticManager.ElasticProfitUnits = value; 
+                    OnPropertyChanged(nameof(TrailingIncrementsType)); 
+                    OnPropertyChanged(nameof(ElasticProfitUnits)); 
+                } 
+            } 
         }
         
         public double TrailingIncrementsValue 
         { 
             get => trailingAndElasticManager?.TrailingIncrementsValue ?? 10.0; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.TrailingIncrementsValue = value; OnPropertyChanged(nameof(TrailingIncrementsValue)); } } 
+            set 
+            { 
+                if (trailingAndElasticManager != null) 
+                { 
+                    trailingAndElasticManager.TrailingIncrementsValue = value; 
+                    // Mirror to Elastic increments value for unified control
+                    trailingAndElasticManager.ElasticIncrementValue = value; 
+                    OnPropertyChanged(nameof(TrailingIncrementsValue)); 
+                    OnPropertyChanged(nameof(ElasticIncrementValue)); 
+                } 
+            } 
         }
         
         // Missing properties that UI expects
@@ -141,23 +251,48 @@ namespace NinjaTrader.NinjaScript.AddOns
             set { if (trailingAndElasticManager != null) { trailingAndElasticManager.TrailingActivationValue = value; OnPropertyChanged(nameof(TrailingActivationValue)); } } 
         }
         
-        // Elastic hedging properties that UI binds to
+        // Elastic hedging properties (actively used by Elastic monitor and Alternative Trailing activation)
+        // Keep these in sync with the unified UI fields as well as the trailing equivalents.
         public TrailingActivationType ElasticTriggerType 
         { 
             get => trailingAndElasticManager?.ElasticTriggerType ?? TrailingActivationType.Dollars; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.ElasticTriggerType = value; OnPropertyChanged(nameof(ElasticTriggerType)); } } 
+            set 
+            { 
+                if (trailingAndElasticManager != null) 
+                { 
+                    // Set Elastic trigger and mirror to Trailing trigger to keep the unified semantics
+                    trailingAndElasticManager.ElasticTriggerType = value; 
+                    trailingAndElasticManager.TrailingTriggerType = value; 
+                    OnPropertyChanged(nameof(ElasticTriggerType)); 
+                    OnPropertyChanged(nameof(TrailingTriggerType)); 
+                } 
+            } 
         }
         public double ProfitUpdateThreshold 
         { 
             get => trailingAndElasticManager?.ProfitUpdateThreshold ?? 50.0; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.ProfitUpdateThreshold = value; OnPropertyChanged(nameof(ProfitUpdateThreshold)); } } 
+            set 
+            { 
+                if (trailingAndElasticManager != null) 
+                { 
+                    // Set Elastic threshold and mirror to Trailing trigger value
+                    trailingAndElasticManager.ProfitUpdateThreshold = value; 
+                    trailingAndElasticManager.TrailingTriggerValue = value; 
+                    OnPropertyChanged(nameof(ProfitUpdateThreshold)); 
+                    OnPropertyChanged(nameof(TrailingTriggerValue)); 
+                } 
+            } 
         }
         
-        public int ElasticUpdateIntervalSeconds 
-        { 
-            get => trailingAndElasticManager?.ElasticUpdateIntervalSeconds ?? 1; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.ElasticUpdateIntervalSeconds = value; OnPropertyChanged(nameof(ElasticUpdateIntervalSeconds)); } } 
-        }
+        // UI compatibility: this value is no longer used at runtime (timer fixed to 100ms),
+        // but we keep a local setting so existing UI bindings don't break.
+    // Legacy UI-only knob; no longer used (monitor fixed at 100ms). Kept for binding compatibility.
+    // private int _elasticUpdateIntervalSecondsCompat = 1;
+    // public int ElasticUpdateIntervalSeconds 
+    // {
+    //     get => _elasticUpdateIntervalSecondsCompat; 
+    //     set { _elasticUpdateIntervalSecondsCompat = value; OnPropertyChanged(nameof(ElasticUpdateIntervalSeconds)); } 
+    // }
         public TrailingActivationType ElasticProfitUnits
         {
             get => trailingAndElasticManager?.ElasticProfitUnits ?? TrailingActivationType.Dollars;
@@ -165,11 +300,10 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 if (trailingAndElasticManager != null)
                 {
-                    // Keep Alternative Trailing increments in sync with Elastic increment units
+                    // Set Elastic increments units and mirror to Trailing increments units
                     trailingAndElasticManager.ElasticProfitUnits = value;
                     trailingAndElasticManager.TrailingIncrementsType = value;
                     OnPropertyChanged(nameof(ElasticProfitUnits));
-                    // Also notify in case any UI or logic observes TrailingIncrementsType
                     OnPropertyChanged(nameof(TrailingIncrementsType));
                 }
             }
@@ -181,11 +315,10 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 if (trailingAndElasticManager != null)
                 {
-                    // Keep Alternative Trailing increments in sync with Elastic increment value
+                    // Set Elastic increments value and mirror to Trailing increments value
                     trailingAndElasticManager.ElasticIncrementValue = value;
                     trailingAndElasticManager.TrailingIncrementsValue = value;
                     OnPropertyChanged(nameof(ElasticIncrementValue));
-                    // Also notify in case any UI or logic observes TrailingIncrementsValue
                     OnPropertyChanged(nameof(TrailingIncrementsValue));
                 }
             }
@@ -238,6 +371,35 @@ namespace NinjaTrader.NinjaScript.AddOns
         { 
             get => trailingAndElasticManager?.DEMA_ATR_Multiplier ?? 1.5; 
             set { if (trailingAndElasticManager != null) { trailingAndElasticManager.DEMA_ATR_Multiplier = value; OnPropertyChanged(nameof(DEMA_ATR_Multiplier)); } } 
+        }
+
+        // Expose unified trailing order semantics to UI (local backing fields; TrailingAndElasticManager does not define these)
+        private bool _useLimitOrdersForStops = true; // default hedge-style LIMIT
+        public bool UseLimitOrdersForStops
+        {
+            get => _useLimitOrdersForStops;
+            set { if (_useLimitOrdersForStops != value) { _useLimitOrdersForStops = value; OnPropertyChanged(nameof(UseLimitOrdersForStops)); } }
+        }
+
+        private bool _useStopMarketOnActivation = true;
+        public bool UseStopMarketOnActivation
+        {
+            get => _useStopMarketOnActivation;
+            set { if (_useStopMarketOnActivation != value) { _useStopMarketOnActivation = value; OnPropertyChanged(nameof(UseStopMarketOnActivation)); } }
+        }
+
+        private int _placementMinTicksBuffer = 6;
+        public int PlacementMinTicksBuffer
+        {
+            get => _placementMinTicksBuffer;
+            set { if (_placementMinTicksBuffer != value) { _placementMinTicksBuffer = value; OnPropertyChanged(nameof(PlacementMinTicksBuffer)); } }
+        }
+
+        private int _trailingTimeBufferMs = 15;
+        public int TrailingTimeBufferMs
+        {
+            get => _trailingTimeBufferMs;
+            set { if (_trailingTimeBufferMs != value) { _trailingTimeBufferMs = value; OnPropertyChanged(nameof(TrailingTimeBufferMs)); } }
         }
         
     // Internal trailing has been removed. No InternalStops exposed.
@@ -345,7 +507,7 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             if (monitoredAccount != null)
             {
-                _sessionStartTime = DateTime.Now;
+                _sessionStartTime = DateTime.UtcNow;
                 _dailyStartPnL = TotalPnL;
                 _sessionTradeCount = 0;
                 _lastTradeResult = "";
@@ -424,7 +586,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         private int heartbeatFailureCount = 0;
         private DateTime lastHeartbeatFailure = DateTime.MinValue;
     private readonly TimeSpan heartbeatBackoffDuration = TimeSpan.FromSeconds(20); // Short backoff (~one tick) after repeated failures
-        private System.Windows.Threading.DispatcherTimer heartbeatTimer;
+    private System.Windows.Threading.DispatcherTimer heartbeatTimer;
+    // Keep a reference to the heartbeat tick handler so we can properly unsubscribe on stop
+    private EventHandler heartbeatTickHandler;
 
         // Logging infrastructure
         // Auto-logging queue removed - using local NinjaScript output only
@@ -434,6 +598,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         
         // Trailing and Elastic Manager
         private TrailingAndElasticManager trailingAndElasticManager;
+    // Disconnect lifecycle guard
+    private readonly object grpcDisconnectLock = new object();
+    private bool grpcDisconnectInProgress = false;
         
         // Public properties to expose needed resources to TrailingAndElasticManager
         public Account MonitoredAccount => monitoredAccount;
@@ -533,8 +700,10 @@ private HashSet<string> trackedHedgeClosingOrderIds;
 
         public void LogAndPrint(string message)
         {
-            // Direct NinjaTrader output - no bridge communication
+            // Direct NinjaTrader output
             NinjaTrader.Code.Output.Process($"[NT_ADDON] {message}", PrintTo.OutputTab1);
+            // Also forward to Bridge so JSONL contains UNIFIED_/TRAILING_/ELASTIC_ diagnostics
+            try { TryBridgeLog("INFO", "nt_addon", message); } catch { /* best-effort logging */ }
         }
         
         /// <summary>
@@ -901,7 +1070,7 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                         LogInfo("GRPC", $"Creating close order: Action={closeAction}, Quantity={quantityToClose}");
                         
                         // Create market order to close the position
-                        string closeName = $"MT5_CLOSE_{baseId}_{DateTime.Now:HHmmss}";
+                        string closeName = $"MT5_CLOSE_{baseId}_{DateTime.UtcNow:HHmmss}";
                         var closeOrder = account.CreateOrder(
                             position.Instrument,
                             closeAction, // Fixed: Use calculated close action
@@ -948,7 +1117,7 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                                             if (od.RemainingQuantity <= 0)
                                             {
                                                 od.IsClosed = true;
-                                                od.ClosedTimestamp = DateTime.Now;
+                                                od.ClosedTimestamp = DateTime.UtcNow;
                                                 LogInfo("GRPC", $"SEQ_TRACK: BaseID {baseId} fully closed");
                                             }
                                             activeNtTrades[baseId] = od;
@@ -1013,7 +1182,9 @@ private HashSet<string> trackedHedgeClosingOrderIds;
             {
                 heartbeatTimer = new System.Windows.Threading.DispatcherTimer();
                 heartbeatTimer.Interval = heartbeatInterval;
-                heartbeatTimer.Tick += async (sender, e) => await SendHeartbeatAsync();
+                // store handler so we can unsubscribe exactly later
+                heartbeatTickHandler = async (sender, e) => await SendHeartbeatAsync();
+                heartbeatTimer.Tick += heartbeatTickHandler;
                 heartbeatTimer.Start();
                 LogInfo("GRPC", "Keepalive heartbeat system started");
             }
@@ -1027,7 +1198,11 @@ private HashSet<string> trackedHedgeClosingOrderIds;
             if (heartbeatTimer != null)
             {
                 heartbeatTimer.Stop();
-                heartbeatTimer.Tick -= async (sender, e) => await SendHeartbeatAsync();
+                if (heartbeatTickHandler != null)
+                {
+                    heartbeatTimer.Tick -= heartbeatTickHandler;
+                    heartbeatTickHandler = null;
+                }
                 heartbeatTimer = null;
                 LogInfo("GRPC", "Keepalive heartbeat system stopped");
             }
@@ -1048,6 +1223,11 @@ private HashSet<string> trackedHedgeClosingOrderIds;
         {
             try
             {
+                // Skip if UI is not open (manual connection mode)
+                if (!IsUiOpen)
+                {
+                    return;
+                }
                 // Circuit breaker: Skip if we've had recent failures
                 if (heartbeatFailureCount >= 3 && DateTime.UtcNow - lastHeartbeatFailure < heartbeatBackoffDuration)
                 {
@@ -1078,12 +1258,19 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                 {
                     heartbeatFailureCount++;
                     lastHeartbeatFailure = DateTime.UtcNow;
-                    
+
                     // Only log error once every 3 failures to reduce spam
                     if (heartbeatFailureCount == 1 || heartbeatFailureCount % 3 == 0)
                     {
                         string error = TradingGrpcClient.LastError;
                         LogWarn("SYSTEM", $"Heartbeat failed ({heartbeatFailureCount} failures): {error}");
+                    }
+
+                    // Circuit breaker: after sustained failures, disconnect fully to release resources
+                    if (heartbeatFailureCount >= 6)
+                    {
+                        LogWarn("GRPC", $"Heartbeat has failed {heartbeatFailureCount} times — disconnecting gRPC and stopping timers to avoid hangs");
+                        DisconnectGrpcAndStopAll();
                     }
                 }
             }
@@ -1297,6 +1484,87 @@ private HashSet<string> trackedHedgeClosingOrderIds;
             }
         }
 
+        // Helper: whether the UI window is currently open
+        public bool IsUiOpen => window != null && window.IsVisible;
+
+        // Centralized cleanup for gRPC and timers
+        public void DisconnectGrpcAndStopAll()
+        {
+            // Idempotent guard to prevent re-entrant/disposed access during disconnect
+            lock (grpcDisconnectLock)
+            {
+                if (grpcDisconnectInProgress)
+                {
+                    LogInfo("GRPC", "Disconnect already in progress; skipping duplicate call");
+                    return;
+                }
+                grpcDisconnectInProgress = true;
+            }
+
+            try
+            {
+                // Stop all strategy-local timers/monitors first to avoid races during gRPC teardown
+                try
+                {
+                    // First cancel any working managed stops to avoid orphan orders closing future trades
+                    // Note: stable TrailingAndElasticManager does not expose CancelAllManagedStops; proceed with available cleanup
+                    trailingAndElasticManager?.StopElasticMonitoring();
+                    trailingAndElasticManager?.CleanupBarsRequests();
+                    LogInfo("GRPC", "Cancelled managed stops and stopped trailing/elastic monitors prior to gRPC disconnect");
+                }
+                catch (Exception ex)
+                {
+                    LogWarn("GRPC", $"Error stopping trailing monitors: {ex.Message}");
+                }
+
+                // Stop heartbeat first to avoid reconnect attempts
+                StopHeartbeatSystem();
+
+                // Stop MT5 trade stream if running (with timeout)
+                try
+                {
+                    var stopTask = Task.Run(() => TradingGrpcClient.StopTradingStream());
+                    if (!stopTask.Wait(2000)) // 2 second timeout
+                    {
+                        LogWarn("GRPC", "StopTradingStream timed out");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogWarn("GRPC", $"Error stopping trading stream: {ex.Message}");
+                }
+
+                // Dispose gRPC client (with timeout)
+                try
+                {
+                    var disposeTask = Task.Run(() => TradingGrpcClient.Dispose());
+                    if (!disposeTask.Wait(2000)) // 2 second timeout
+                    {
+                        LogWarn("GRPC", "gRPC client dispose timed out");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogWarn("GRPC", $"Error disposing gRPC client: {ex.Message}");
+                }
+
+                grpcInitialized = false;
+                grpcInitializing = false;
+                LogInfo("GRPC", "Disconnected gRPC and stopped timers");
+            }
+            catch (Exception ex)
+            {
+                LogWarn("GRPC", $"DisconnectGrpcAndStopAll encountered: {ex.Message}");
+            }
+            finally
+            {
+                lock (grpcDisconnectLock)
+                {
+                    grpcDisconnectInProgress = false;
+                }
+            }
+        }
+
         /// <summary>
         /// Handles state changes in the add-on lifecycle
         /// </summary>
@@ -1307,6 +1575,10 @@ private HashSet<string> trackedHedgeClosingOrderIds;
             if (State == State.SetDefaults)
             {
                 Print("[NT_ADDON][DEBUG] Setting defaults...");
+
+                // ✅ RECOMPILATION SAFETY: Aggressive cleanup of static resources before initialization
+                PerformStaticCleanup();
+
                 try
                 {
                     Description = "Multi-Strategy Manager for hedging";
@@ -1330,17 +1602,9 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                 
                 // Setup assembly resolver for gRPC dependencies
                 AppDomain.CurrentDomain.AssemblyResolve += OnAssemblyResolve;
-                
-                // Initialize gRPC client (pure gRPC mode)
-                grpcInitialized = TradingGrpcClient.Initialize(grpcServerAddress);
-                if (!grpcInitialized)
-                {
-                    LogError("GRPC", $"Failed to initialize gRPC: {TradingGrpcClient.LastError}");
-                }
-                else
-                {
-                    LogInfo("GRPC", "gRPC client initialized successfully");
-                }
+                // Defer gRPC initialization until the UI is opened or user explicitly connects
+                grpcInitialized = false;
+                LogInfo("GRPC", "Deferred gRPC initialization until UI opens or user connects");
                 // Other default settings can be initialized here
             }
             else if (State == State.Configure)
@@ -1353,44 +1617,69 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                 Print("[NT_ADDON][DEBUG] State.Active reached");
                 if (isFirstRun)
                 {
-                    Print("[NT_ADDON][DEBUG] First run - starting auto launch timer");
+                    Print("[NT_ADDON][DEBUG] First run - auto launch disabled (manual only)");
                     isFirstRun = false;
-                    StartAutoLaunchTimer();
+                    // Auto-launch disabled per user request; window opens only via menu
                 }
                 Print("[NT_ADDON][DEBUG] OnStateChange Active completed");
             }
             else if (State == State.Terminated)
             {
-                LogInfo("SYSTEM", "MultiStratManager Terminated");
-                // HTTP listener removed - using gRPC streaming instead
-                StopAutoLaunchTimer();
-                StopBridgeConnectionMonitoring();
-                // WebSocket removed - using gRPC only
-                trailingAndElasticManager?.StopElasticMonitoring(); // Stop elastic monitoring
-                trailingAndElasticManager?.CleanupBarsRequests(); // Clean up trailing stop bar subscriptions
-                // Unsubscribe from SLTP events
-                SLTPRemovalLogic.SLTPCleanupCompleted -= OnSLTPCleanupComplete;
-                sltpRemovalLogic?.Cleanup(); // Cleanup SLTP logic
-                SetMonitoredAccount(null); // ADDED FOR CLEANUP
-                
-                // Cleanup gRPC client
-                if (grpcInitialized)
+                LogInfo("SYSTEM", "MultiStratManager Terminated - performing aggressive cleanup");
+
+                try
                 {
-                    TradingGrpcClient.StopTradingStream();
-                    TradingGrpcClient.Dispose();
-                    grpcInitialized = false;
+                    // ✅ AGGRESSIVE CLEANUP: Stop all timers first
+                    StopAutoLaunchTimer();
+                    StopBridgeConnectionMonitoring();
+
+                    // ✅ AGGRESSIVE CLEANUP: Stop all managers and monitoring
+                    trailingAndElasticManager?.StopElasticMonitoring();
+                    trailingAndElasticManager?.CleanupBarsRequests();
+
+                    // ✅ AGGRESSIVE CLEANUP: Unsubscribe from all events
+                    try { SLTPRemovalLogic.SLTPCleanupCompleted -= OnSLTPCleanupComplete; } catch { }
+                    try { AppDomain.CurrentDomain.AssemblyResolve -= OnAssemblyResolve; } catch { }
+
+                    // ✅ AGGRESSIVE CLEANUP: Dispose all resources
+                    sltpRemovalLogic?.Cleanup();
+                    SetMonitoredAccount(null);
+                    DisconnectGrpcAndStopAll();
+
+                    // ✅ AGGRESSIVE CLEANUP: Force close UI window
+                    if (window != null)
+                    {
+                        try
+                        {
+                            if (window.Dispatcher.CheckAccess())
+                            {
+                                window.Close();
+                            }
+                            else
+                            {
+                                window.Dispatcher.BeginInvoke(new Action(() => window.Close()));
+                            }
+                            window = null;
+                        }
+                        catch (Exception ex)
+                        {
+                            Print($"[NT_ADDON][ERROR] Error closing window during termination: {ex.Message}");
+                        }
+                    }
+
+                    // ✅ AGGRESSIVE CLEANUP: Clear static resources
+                    monitoredStrategies?.Clear();
+                    Instance = null;
+
+                    // ✅ AGGRESSIVE CLEANUP: Force garbage collection
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+
+                    LogInfo("SYSTEM", "MultiStratManager termination cleanup completed");
                 }
-                
-                // Unsubscribe from assembly resolver
-                AppDomain.CurrentDomain.AssemblyResolve -= OnAssemblyResolve;
-                LogInfo("GRPC", "gRPC client disposed");
-                
-                // Auto-logging cleanup removed
-                Instance = null;
-                if (window != null)
+                catch (Exception ex)
                 {
-                    // Close the window if still open when NinjaTrader is shutting down
-                    window.Dispatcher.BeginInvoke(new Action(delegate() { window.Close(); }));
+                    Print($"[NT_ADDON][ERROR] Error during termination cleanup: {ex.Message}");
                 }
             }
             // State.Terminated already handles StopHttpListener.
@@ -1419,11 +1708,22 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                             LogDebug("UI", "Creating new window");
                             window = new UIForManager();
                             
-                            // Handle window closed event
+                            // Handle window closed event - ensure full cleanup so addon can be reopened/edited without restarting NT
                             window.Closed += new EventHandler(delegate(object o, EventArgs e)
                             {
-                                LogDebug("UI", "Window closed");
+                                LogDebug("UI", "Window closed - performing cleanup");
+                                try
+                                {
+                                    DisconnectGrpcAndStopAll();
+                                    SetMonitoredAccount(null);
+                                }
+                                catch (Exception ex)
+                                {
+                                    LogWarn("UI", $"Cleanup on window close encountered: {ex.Message}");
+                                }
                                 window = null;
+                                // Allow services to start again when reopened
+                                connectionsStarted = false;
                             });
                             
                             // Handle window loaded event to ensure content is visible
@@ -1512,11 +1812,8 @@ private HashSet<string> trackedHedgeClosingOrderIds;
         {
             try
             {
-                autoLaunchTimer = new System.Windows.Threading.DispatcherTimer();
-                autoLaunchTimer.Interval = TimeSpan.FromSeconds(5);
-                autoLaunchTimer.Tick += new EventHandler(OnAutoLaunchTimerTick);
-                autoLaunchTimer.Start();
-                LogDebug("SYSTEM", "Auto launch timer started");
+                // Auto-launch disabled
+                LogDebug("SYSTEM", "Auto launch timer not started (manual mode)");
             }
             catch (Exception ex)
             {
@@ -1582,21 +1879,7 @@ private HashSet<string> trackedHedgeClosingOrderIds;
         {
             try
             {
-                LogDebug("UI", "Auto launch timer tick");
-                
-                // Only auto-launch if no window exists yet
-                if (window == null && NinjaTrader.Core.Globals.ActiveWorkspace != null)
-                {
-                    LogDebug("UI", "Auto launching window");
-
-                    // Use Application.Current.Dispatcher to show window on UI thread
-                    Application.Current.Dispatcher.BeginInvoke(new Action(delegate()
-                    {
-                        ShowWindow();
-                    }));
-                }
-
-                // Stop the timer after attempting auto-launch
+                // Auto-launch disabled; just stop timer if somehow invoked
                 StopAutoLaunchTimer();
             }
             catch (Exception ex)
@@ -1614,8 +1897,7 @@ private HashSet<string> trackedHedgeClosingOrderIds;
         /// <param name="window">The window that was created.</param>
         protected override void OnWindowCreated(Window window)
         {
-            // Use direct Print to bypass any logging issues
-            Print($"[NT_ADDON][UI] OnWindowCreated called - Window type: {window?.GetType()?.Name ?? "null"}");
+            // Quiet noisy per-window logging; only act when ControlCenter is detected
             
             try
             {
@@ -1623,7 +1905,6 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                 ControlCenter cc = window as ControlCenter;
                 if (cc == null)
                 {
-                    Print($"[NT_ADDON][UI] Window is not ControlCenter, it's: {window?.GetType()?.Name}");
                     return;
                 }
 
@@ -2383,7 +2664,7 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                             {
                                 // Mark as closed but keep in tracking for MT5 closure coordination
                                 tradeDetails.IsClosed = true;
-                                tradeDetails.ClosedTimestamp = DateTime.Now;
+                                tradeDetails.ClosedTimestamp = DateTime.UtcNow;
                                 LogAndPrint($"NT_CLOSURE: Marked trade {originalBaseId} as closed in activeNtTrades tracking. Will cleanup later. Total entries: {activeNtTrades.Count}");
                                 
                                 // Schedule cleanup after delay to allow MT5 notifications to process
@@ -2750,7 +3031,7 @@ private HashSet<string> trackedHedgeClosingOrderIds;
         }
     }
     
-    // Handle trailing stop orders
+    // Handle trailing stop orders (canonical prefix)
     if (order.Name != null && order.Name.StartsWith("MSM_TRAIL_STOP_"))
     {
         // Delegate trailing stop order handling to TrailingAndElasticManager
@@ -3118,7 +3399,11 @@ private HashSet<string> trackedHedgeClosingOrderIds;
             // Initialize gRPC if needed (on background thread)
             if (!grpcInitialized)
             {
-                await Task.Run(() => InitializeGrpcClient());
+                // Only initialize on explicit user action (UI open/ping button)
+                if (IsUiOpen)
+                    await Task.Run(() => InitializeGrpcClient());
+                else
+                    return Tuple.Create(false, "UI not open; connection is manual. Open Multi-Strategy Manager to connect.");
             }
 
             // Ping bridge via gRPC health check (removed spammy log - only logs when status changes)
@@ -3780,14 +4065,14 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                 nt_account_name = accountName,
                 closed_hedge_quantity = (double) quantity,
                 closed_hedge_action = "CLOSE_HEDGE",
-                timestamp = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 // Legacy/compat fields retained for MT5 JSON consumers
                 price = 0.0,  // Not critical for closure
                 total_quantity = quantity,
                 contract_num = 1,
                 instrument_name = instrumentName,
                 account_name = accountName,
-                time = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                time = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 nt_balance = 0,  // Not critical for closure
                 nt_daily_pnl = 0,  // Not critical for closure
                 nt_trade_result = "closed",
@@ -3831,7 +4116,7 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                     if (tradeDetails.RemainingQuantity <= 0)
                     {
                         // RemainingQuantity-based completion. Avoid setting IsClosed here; cleanup will remove tracking entry shortly.
-                        tradeDetails.ClosedTimestamp = DateTime.Now;
+                        tradeDetails.ClosedTimestamp = DateTime.UtcNow;
                         
                         // Internal trailing removed: no per-BaseID cleanup required
                         

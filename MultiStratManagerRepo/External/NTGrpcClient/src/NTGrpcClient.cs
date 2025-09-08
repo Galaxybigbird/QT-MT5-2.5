@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using Trading.Proto;
 using Grpc.Core;
@@ -12,6 +13,8 @@ namespace NTGrpcClient
     public static class TradingGrpcClient
     {
         private static ITradingClient _client;
+        private static TextWriter _originalConsoleOut;
+        private static UnifiedLogWriter _unifiedLogWriter;
         // Correlation tracking (base_id -> correlation_id)
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string,string> _corrByBaseId = new System.Collections.Concurrent.ConcurrentDictionary<string,string>();
         private static string GetOrCreateCorrelation(string baseId)
@@ -38,8 +41,9 @@ namespace NTGrpcClient
                 // Redirect all Console output to Bridge logging, preserving original output
                 try
                 {
-                    var current = Console.Out;
-                    Console.SetOut(new Trading.Proto.UnifiedLogWriter(current, serverAddress, source: "nt", component: "nt_addon"));
+                    _originalConsoleOut = Console.Out;
+                    _unifiedLogWriter = new Trading.Proto.UnifiedLogWriter(_originalConsoleOut, serverAddress, source: "nt", component: "nt_addon");
+                    Console.SetOut(_unifiedLogWriter);
                     // Emit a quick test line to verify console redirection + LoggingService path
                     Console.WriteLine("[NT_ADDON][INFO][GRPC] Unified logging initialized.");
                 }
@@ -334,8 +338,26 @@ namespace NTGrpcClient
         /// </summary>
         public static void Dispose()
         {
-            _client?.Dispose();
+            try { _client?.StopTradingStream(); } catch { /* ignore */ }
+            try { _client?.Dispose(); } catch { /* ignore */ }
+            _client = null;
             _initialized = false;
+
+            // Restore Console.Out and dispose unified log writer to stop background thread
+            try
+            {
+                if (_unifiedLogWriter != null)
+                {
+                    Console.SetOut(_originalConsoleOut ?? Console.Out);
+                    _unifiedLogWriter.Dispose();
+                }
+            }
+            catch { /* ignore */ }
+            finally
+            {
+                _unifiedLogWriter = null;
+                _originalConsoleOut = null;
+            }
         }
     }
     

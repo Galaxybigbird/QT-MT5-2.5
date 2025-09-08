@@ -67,6 +67,10 @@ type App struct {
 	elasticMux            sync.Mutex
 	recentElasticByBase   map[string]elasticMark // BaseID -> last elastic close marker
 	recentElasticByTicket map[uint64]elasticMark // MT5 ticket -> last elastic close marker
+
+	// Sequence counter for unique elastic event IDs
+	elasticSeqMux   sync.Mutex
+	elasticSeqCount uint64
 }
 
 // elasticMark captures an elastic close signal context for short-lived correlation
@@ -1538,9 +1542,15 @@ func (a *App) HandleElasticUpdate(update interface{}) error {
 		}
 	}
 
+	// Generate unique ID using sequence counter to prevent duplicate rejection
+	a.elasticSeqMux.Lock()
+	a.elasticSeqCount++
+	uniqueID := fmt.Sprintf("elastic_evt_%d_%d", time.Now().UnixNano(), a.elasticSeqCount)
+	a.elasticSeqMux.Unlock()
+
 	// Enqueue a lightweight event trade carrying enrichment so EA can branch on event_type
 	ct := Trade{
-		ID:                   fmt.Sprintf("elastic_evt_%d", time.Now().UnixNano()),
+		ID:                   uniqueID,
 		BaseID:               baseID,
 		Time:                 time.Now(),
 		Action:               "EVENT",

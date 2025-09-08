@@ -390,6 +390,19 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 MultiStratManager.Instance?.LogDebug("UI", "UIForManager constructor started");
 
+                // ✅ RECOMPILATION SAFETY: Prevent multiple UI instances
+                if (strategyStatePollTimer != null)
+                {
+                    MultiStratManager.Instance?.LogDebug("UI", "Disposing existing timer from previous instance");
+                    try
+                    {
+                        strategyStatePollTimer.Stop();
+                        strategyStatePollTimer.Tick -= StrategyStatePollTimer_Tick;
+                        strategyStatePollTimer = null;
+                    }
+                    catch { }
+                }
+
                 // Add PnL to Brush Converter to resources
                 if (!this.Resources.Contains("PnlColorConverter"))
                 {
@@ -586,10 +599,16 @@ namespace NinjaTrader.NinjaScript.AddOns
 
         private void StrategyStatePollTimer_Tick(object sender, EventArgs e)
         {
+            // ✅ FIX: Add safety check to prevent timer from running during cleanup
+            if (strategyStatePollTimer == null)
+                return;
+
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (strategyGrid == null || activeStrategies == null)
-                    return;
+                try
+                {
+                    if (strategyGrid == null || activeStrategies == null || strategyStatePollTimer == null)
+                        return;
 
                 // Original strategy state polling logic
                 foreach (StrategyDisplayInfo stratInfo in activeStrategies)
@@ -806,6 +825,12 @@ namespace NinjaTrader.NinjaScript.AddOns
                     {
                         LogToBridge("ERROR", "PNL", $"[UIForManager] Error in P&L check: {ex.Message}\n{ex.StackTrace}");
                     }
+                }
+                }
+                catch (Exception timerEx)
+                {
+                    LogToBridge("ERROR", "UI", $"[UIForManager] Error in timer tick: {timerEx.Message}");
+                    // Don't rethrow - let timer continue
                 }
             }));
         }
@@ -1531,17 +1556,38 @@ namespace NinjaTrader.NinjaScript.AddOns
                 Grid.SetColumnSpan(enableTrailingCheckBoxInline, 2);
                 elasticHedgingGrid.Children.Add(enableTrailingCheckBoxInline);
 
-                // Profit Update TRIGGER (Type + Value) - Row 2
+                // UNIFIED SYSTEM: All settings now under Elastic Hedging Settings
+
+                // Profit Update TRIGGER (Type + Value) - Row 2 - UNIFIED TRIGGER for both trailing and elastic
                 AddTypeValueSetting(elasticHedgingGrid, 2, "Profit Update TRIGGER Type:", "Profit Update TRIGGER Value:",
-                                    "ElasticTriggerType", "ProfitUpdateThreshold");
+                                    "TrailingTriggerType", "TrailingTriggerValue");
 
-                // Incremental Profit Updates (Type + Value) - Row 3 (Update Interval removed)
-                AddTypeValueSetting(elasticHedgingGrid, 3, "Increment Type:", "Increment Value:",
-                                    "ElasticProfitUnits", "ElasticIncrementValue");
-
-                // Trailing STOP (Type + Value) - Row 4
-                AddTypeValueSetting(elasticHedgingGrid, 4, "Trailing STOP Type:", "Trailing STOP Value:",
+                // Trailing STOP (Type + Value) - Row 3 - Where to place initial stop when triggered
+                AddTypeValueSetting(elasticHedgingGrid, 3, "Trailing STOP Type:", "Trailing STOP Value:",
                                     "TrailingStopType", "TrailingStopValue");
+
+                // Increment Updates (Type + Value) - Row 4 - How both systems move together
+                AddTypeValueSetting(elasticHedgingGrid, 4, "Increment Type:", "Increment Value:",
+                                    "TrailingIncrementsType", "TrailingIncrementsValue");
+
+                // Add info text to explain the unified system
+                RowDefinition infoRow = new RowDefinition();
+                infoRow.Height = GridLength.Auto;
+                elasticHedgingGrid.RowDefinitions.Add(infoRow);
+
+                TextBlock infoText = new TextBlock();
+                infoText.Text = "ℹ️ UNIFIED SYSTEM: These settings control BOTH trailing stop loss AND elastic hedging together.\n" +
+                               "• Profit Update TRIGGER: When to activate both systems\n" +
+                               "• Trailing STOP: Where to place initial stop when triggered\n" +
+                               "• Increment: How both systems move together in synchronized steps";
+                infoText.TextWrapping = TextWrapping.Wrap;
+                infoText.Foreground = new SolidColorBrush(Color.FromRgb(100, 150, 255));
+                infoText.FontSize = 10;
+                infoText.Margin = new Thickness(10, 10, 10, 5);
+                Grid.SetRow(infoText, 5);
+                Grid.SetColumn(infoText, 0);
+                Grid.SetColumnSpan(infoText, 4);
+                elasticHedgingGrid.Children.Add(infoText);
 
                 elasticHedgingGroup.Content = elasticHedgingGrid;
                 controlsGrid.Children.Add(elasticHedgingGroup);
@@ -3201,12 +3247,29 @@ private void ResetDailyStatusButton_Click(object sender, RoutedEventArgs e)
             {
                 LogToBridge("INFO", "UI", "UIForManager window closed. Cleaning up resources.");
                 
-                // Stop the polling timer
+                // ✅ AGGRESSIVE FIX: Stop and dispose the polling timer completely
                 if (strategyStatePollTimer != null)
                 {
-                    strategyStatePollTimer.Stop();
-                    strategyStatePollTimer.Tick -= StrategyStatePollTimer_Tick;
-                    LogToBridge("DEBUG", "UI", "Strategy state polling timer stopped.");
+                    try
+                    {
+                        strategyStatePollTimer.Stop();
+                        strategyStatePollTimer.Tick -= StrategyStatePollTimer_Tick;
+
+                        // ✅ FORCE DISPOSAL: Use reflection to ensure complete cleanup
+                        try
+                        {
+                            var disposeMethod = strategyStatePollTimer.GetType().GetMethod("Dispose", new Type[0]);
+                            disposeMethod?.Invoke(strategyStatePollTimer, null);
+                        }
+                        catch { }
+
+                        strategyStatePollTimer = null;
+                        LogToBridge("DEBUG", "UI", "Strategy state polling timer aggressively stopped and disposed.");
+                    }
+                    catch (Exception timerEx)
+                    {
+                        LogToBridge("ERROR", "UI", $"Error stopping timer: {timerEx.Message}");
+                    }
                 }
 
                 // Unsubscribe from global account events
@@ -3244,22 +3307,33 @@ private void ResetDailyStatusButton_Click(object sender, RoutedEventArgs e)
                     LogToBridge("DEBUG", "UI", "[UIForManager] Unsubscribed from PingReceivedFromBridge event.");
                 }
 
-                // Disconnect gRPC when window closes (as requested by user)
-                try
+                // ✅ FIX: Disconnect gRPC asynchronously to prevent UI freezing
+                Task.Run(async () =>
                 {
-                    // Stop heartbeat system first to prevent connection spam
-                    if (MultiStratManager.Instance != null)
+                    try
                     {
-                        MultiStratManager.Instance.StopHeartbeatSystemPublic();
+                        LogToBridge("INFO", "UI", "[UIForManager] Starting async gRPC cleanup...");
+
+                        // Use a timeout to prevent hanging
+                        var timeoutTask = Task.Delay(5000); // 5 second timeout
+                        var cleanupTask = Task.Run(() => MultiStratManager.Instance?.DisconnectGrpcAndStopAll());
+
+                        var completedTask = await Task.WhenAny(cleanupTask, timeoutTask);
+
+                        if (completedTask == timeoutTask)
+                        {
+                            LogToBridge("WARN", "UI", "[UIForManager] gRPC cleanup timed out after 5 seconds - continuing anyway");
+                        }
+                        else
+                        {
+                            LogToBridge("INFO", "UI", "[UIForManager] gRPC client disconnected successfully");
+                        }
                     }
-                    
-                    NTGrpcClient.TradingGrpcClient.Dispose();
-                    LogToBridge("INFO", "UI", "[UIForManager] gRPC client disconnected on window close.");
-                }
-                catch (Exception grpcEx)
-                {
-                    LogToBridge("ERROR", "UI", $"[UIForManager] Error disconnecting gRPC: {grpcEx.Message}");
-                }
+                    catch (Exception grpcEx)
+                    {
+                        LogToBridge("ERROR", "UI", $"[UIForManager] Error in async gRPC cleanup: {grpcEx.Message}");
+                    }
+                });
                 
                 // Nullify UI elements to help with garbage collection, though not strictly necessary with WPF's GC.
                 accountComboBox = null;
@@ -3430,6 +3504,9 @@ private void ResetDailyStatusButton_Click(object sender, RoutedEventArgs e)
             return mainGrid;
         }
         
+        // Prevent repetitive warning spam when data context isn't ready
+        private static bool s_loggedNullTrailingOnce = false;
+
         /// <summary>
         /// Update trailing stops display with current data
         /// </summary>
@@ -3439,9 +3516,16 @@ private void ResetDailyStatusButton_Click(object sender, RoutedEventArgs e)
             {
                 if (MultiStratManager.Instance == null || activeTrailingStops == null)
                 {
-                    LogToBridge("WARN", "UI", "[UIForManager] UpdateTrailingStopsDisplay: MultiStratManager.Instance or activeTrailingStops is null");
+                    if (!s_loggedNullTrailingOnce)
+                    {
+                        s_loggedNullTrailingOnce = true;
+                        LogToBridge("WARN", "UI", "[UIForManager] UpdateTrailingStopsDisplay: MultiStratManager.Instance or activeTrailingStops is null (will suppress repeats)");
+                    }
                     return;
                 }
+                // Reset once the UI has valid data
+                if (s_loggedNullTrailingOnce)
+                    s_loggedNullTrailingOnce = false;
                 
                 // Internal trailing has been removed. Display broker-side traditional trailing stops instead.
                 var traditionalStops = MultiStratManager.Instance.TraditionalTrailingStops;
@@ -3538,7 +3622,7 @@ private void ResetDailyStatusButton_Click(object sender, RoutedEventArgs e)
                     StopDistancePoints = 50.0,
                     StopDistancePercent = 0.23,
                     Status = "Active",
-                    ActivationTime = DateTime.Now.AddMinutes(-5),
+                    ActivationTime = DateTime.UtcNow.AddMinutes(-5),
                     UpdateCount = 3,
                     MaxProfit = 150.0
                 };
