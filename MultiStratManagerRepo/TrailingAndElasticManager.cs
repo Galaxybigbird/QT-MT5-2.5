@@ -30,7 +30,7 @@ namespace NinjaTrader.NinjaScript.AddOns
         public double LowWaterMarkPrice { get; set; }
         public bool IsTrailingActive { get; set; }
         public int ProfitUpdatesSent { get; set; }
-        public int LastReportedProfitLevel { get; set; }
+        public double LastReportedProfitLevel { get; set; }
         public int LastReportedIncrement { get; set; }
         public DateTime LastUpdateTime { get; set; }
         public bool IsSLTPLogicCompleteForEntry { get; set; }
@@ -171,7 +171,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 BaseId = baseId,
                 EntryPrice = entryPrice,
-                LastReportedProfitLevel = 0,
+                LastReportedProfitLevel = 0.0,
                 ProfitUpdatesSent = 0,
                 LastUpdateTime = DateTime.Now,
                 LastReportedIncrement = 0,
@@ -389,7 +389,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                             InstrumentName = position.Instrument.FullName,
                             MarketPosition = position.MarketPosition,
                             EntryPrice = currentPrice,
-                            LastReportedProfitLevel = 0,
+                            LastReportedProfitLevel = 0.0,
                             LastUpdateTime = DateTime.Now
                         };
                         if (!elasticPositions.ContainsKey(syntheticBaseId))
@@ -491,6 +491,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                             if (tracker.ManagedStopOrder == null) SubmitTrailingStopOrder(tracker, position, newStopPrice);
                             else UpdateTrailingStopOrder(tracker, newStopPrice);
                             tracker.CurrentTrailedStopPrice = newStopPrice;
+                            // Reset PnL baseline for dollar-based increment gating
+                            try { tracker.LastReportedProfitLevel = currentPnL; } catch { }
                         }
                         else
                         {
@@ -515,6 +517,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                             {
                                 LogAndPrint($"ERROR sending profit update on trailing increment: {sendEx.Message}");
                             }
+                            // Reset PnL baseline for dollar-based increment gating
+                            try { tracker.LastReportedProfitLevel = currentPnL; } catch { }
                         }
                     }
                     else
@@ -546,8 +550,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                 {
                     case TrailingActivationType.Dollars:
                         {
-                            double initialLockedProfit = TrailingStopValue; // dollars from entry
-                            double trailingIncrement = Math.Max(TrailingIncrementsValue, 1e-9); // dollars
+                            // Treat dollars as per-contract amounts (e.g., $5 = 1 tick for many US futures)
+                            double initialLockedProfit = TrailingStopValue; // dollars per contract from entry
+                            double trailingIncrement = Math.Max(TrailingIncrementsValue, 1e-9); // dollars per contract
                             double triggerLevel = uiTriggerType == TrailingActivationType.Dollars
                                 ? uiTriggerValue
                                 : uiTriggerType == TrailingActivationType.Ticks
@@ -556,22 +561,22 @@ namespace NinjaTrader.NinjaScript.AddOns
                                         ? (uiTriggerValue * GetPipValueForInstrument(position.Instrument)) * (pointValuePerContract * position.Quantity)
                                         : // Percent
                                           ((uiTriggerValue / 100.0) * entryPrice) * (pointValuePerContract * position.Quantity);
-                            // Conversion debug: show how many price units and ticks one increment represents
-                            double priceIncrementFromDollars = (trailingIncrement / (position.Quantity * pointValuePerContract));
+                            // Conversion: one per-contract dollar step to price units and ticks
+                            double priceIncrementFromDollars = (trailingIncrement / pointValuePerContract);
                             double ticksPerIncrementDollars = priceIncrementFromDollars / tickSizeGlobal;
                             LogAndPrint($"TRAILING_CONVERSION_DEBUG: Dollars mode — tickSize={tickSizeGlobal}, incDollars={trailingIncrement}, priceIncrement={priceIncrementFromDollars:F4} (~{ticksPerIncrementDollars:F2} ticks)");
                             if (currentPnL < triggerLevel) return tracker.CurrentTrailedStopPrice;
                             double extraProfit = Math.Max(0, currentPnL - triggerLevel);
-                            int additional = (int)Math.Floor(extraProfit / trailingIncrement);
+                            int additional = (int)Math.Floor(extraProfit / (trailingIncrement * position.Quantity));
                             earnedLevel = 1 + additional;
                             // Compute candidate stop from cumulative levels
-                            double totalLockedProfit = initialLockedProfit + (additional * trailingIncrement);
-                            double lockedProfitInPoints = totalLockedProfit / (position.Quantity * pointValuePerContract);
+                            double totalLockedPerContract = initialLockedProfit + (additional * trailingIncrement);
+                            double lockedProfitInPoints = totalLockedPerContract / pointValuePerContract;
                             double candidate = position.MarketPosition == MarketPosition.Long ? entryPrice + lockedProfitInPoints : entryPrice - lockedProfitInPoints;
                             // Initial placement: strictly initial distance only
                             if (tracker.CurrentTrailedStopPrice <= 0)
                             {
-                                double initPoints = initialLockedProfit / (position.Quantity * pointValuePerContract);
+                                double initPoints = initialLockedProfit / pointValuePerContract;
                                 candidate = position.MarketPosition == MarketPosition.Long ? entryPrice + initPoints : entryPrice - initPoints;
                             }
                             // Cap to one increment per update
@@ -783,8 +788,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                         double freqCurrentPrice = GetCurrentPrice(position.Instrument);
                         double currentPnL = position.GetUnrealizedProfitLoss(PerformanceUnit.Currency, freqCurrentPrice);
                         double pnlChange = Math.Abs(currentPnL - tracker.LastReportedProfitLevel);
-                        bool shouldUpdateDollar = pnlChange >= frequencyValue;
-                        LogAndPrint($"TRAILING_INCREMENTS_DEBUG: Dollar-based increments - PnL change: ${pnlChange:F2}, Required: ${frequencyValue}, Should update: {shouldUpdateDollar}");
+                        double perPositionThreshold = frequencyValue * Math.Max(1, position.Quantity);
+                        bool shouldUpdateDollar = pnlChange >= perPositionThreshold;
+                        LogAndPrint($"TRAILING_INCREMENTS_DEBUG: Dollar-based increments - PnL change: ${pnlChange:F2}, Required (pos): ${perPositionThreshold}, Should update: {shouldUpdateDollar}");
                         return shouldUpdateDollar;
                     case TrailingActivationType.Ticks:
                         double currentPrice = GetCurrentPrice(position.Instrument);
@@ -1046,7 +1052,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 BaseId = baseId,
                 EntryPrice = execution.Price,
-                LastReportedProfitLevel = 0,
+                LastReportedProfitLevel = 0.0,
                 ProfitUpdatesSent = 0,
                 LastUpdateTime = DateTime.Now,
                 LastReportedIncrement = 0,
