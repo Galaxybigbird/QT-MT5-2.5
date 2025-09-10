@@ -15,10 +15,10 @@ export namespace main {
 	    raw_measurement: number;
 	    instrument: string;
 	    account_name: string;
-	    nt_balance: number;
-	    nt_daily_pnl: number;
-	    nt_trade_result: string;
-	    nt_session_trades: number;
+	    nt_balance?: number;
+	    nt_daily_pnl?: number;
+	    nt_trade_result?: string;
+	    nt_session_trades?: number;
 	    mt5_ticket: number;
 	    nt_points_per_1k_loss?: number;
 	    event_type?: string;

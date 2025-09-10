@@ -21,10 +21,10 @@ type Trade struct {
 	RawMeasurement    float64   `json:"raw_measurement"`
 	Instrument        string    `json:"instrument"`
 	AccountName       string    `json:"account_name"`
-	NTBalance         float64   `json:"nt_balance"`
-	NTDailyPnL        float64   `json:"nt_daily_pnl"`
-	NTTradeResult     string    `json:"nt_trade_result"`
-	NTSessionTrades   int       `json:"nt_session_trades"`
+	NTBalance         float64   `json:"nt_balance,omitempty"`
+	NTDailyPnL        float64   `json:"nt_daily_pnl,omitempty"`
+	NTTradeResult     string    `json:"nt_trade_result,omitempty"`
+	NTSessionTrades   int       `json:"nt_session_trades,omitempty"`
 	MT5Ticket         uint64    `json:"mt5_ticket"`
 	NTPointsPer1kLoss float64   `json:"nt_points_per_1k_loss,omitempty"`
 }

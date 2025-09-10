@@ -245,7 +245,18 @@ void StreamingThreadFunction() {
                     // Critical for deterministic CLOSE_HEDGE when multiple hedges exist
                     {"mt5_ticket", trade.mt5_ticket()}
                 };
-                
+
+                // SAFEGUARD: Omit nt_daily_pnl from JSON for non-entry actions when the value is zero (proto default)
+                try {
+                    std::string act = trade.action();
+                    std::transform(act.begin(), act.end(), act.begin(), ::tolower);
+                    if (act != "buy" && act != "sell" && trade.nt_daily_pnl() == 0.0) {
+                        trade_json.erase("nt_daily_pnl");
+                    }
+                } catch (...) {
+                    // Non-fatal: if anything goes wrong, proceed with full JSON
+                }
+
                 g_client_state.EnqueueTrade(trade_json.dump());
             }
             

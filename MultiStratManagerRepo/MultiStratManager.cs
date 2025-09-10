@@ -590,6 +590,13 @@ namespace NinjaTrader.NinjaScript.AddOns
     // Keep a reference to the heartbeat tick handler so we can properly unsubscribe on stop
     private EventHandler heartbeatTickHandler;
 
+    // Lightweight NT PnL streaming (separate from elastic/trailing)
+    private System.Windows.Threading.DispatcherTimer pnlStreamTimer;
+    private EventHandler pnlStreamTickHandler;
+    private readonly TimeSpan pnlStreamInterval = TimeSpan.FromSeconds(3); // emit every ~3s
+    private double lastPnLSent = double.NaN;
+    private DateTime lastPnLSentAt = DateTime.MinValue;
+
         // Logging infrastructure
         // Auto-logging queue removed - using local NinjaScript output only
         // Auto-logging timer removed
@@ -1187,6 +1194,9 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                 heartbeatTimer.Tick += heartbeatTickHandler;
                 heartbeatTimer.Start();
                 LogInfo("GRPC", "Keepalive heartbeat system started");
+
+                // Begin lightweight periodic PnL streaming alongside heartbeat
+                StartPnLStreamingTimer();
             }
         }
 
@@ -1203,9 +1213,13 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                     heartbeatTimer.Tick -= heartbeatTickHandler;
                     heartbeatTickHandler = null;
                 }
+
                 heartbeatTimer = null;
                 LogInfo("GRPC", "Keepalive heartbeat system stopped");
             }
+
+            // Also stop PnL streaming timer
+            StopPnLStreamingTimer();
         }
 
         /// <summary>
@@ -1214,6 +1228,135 @@ private HashSet<string> trackedHedgeClosingOrderIds;
         public void StopHeartbeatSystemPublic()
         {
             StopHeartbeatSystem();
+        }
+
+        /// <summary>
+        /// Start periodic NT PnL streaming to MT5 via SubmitTrade(EVENT) without touching elastic/trailing.
+        /// EA already parses nt_daily_pnl from any incoming message and updates tier state accordingly.
+        /// </summary>
+        private void StartPnLStreamingTimer()
+        {
+            try
+            {
+                if (pnlStreamTimer == null)
+                {
+                    pnlStreamTimer = new System.Windows.Threading.DispatcherTimer();
+                    pnlStreamTimer.Interval = pnlStreamInterval;
+                    pnlStreamTickHandler = (s, e) => EmitPnLUpdateIfNeeded();
+                    pnlStreamTimer.Tick += pnlStreamTickHandler;
+                    pnlStreamTimer.Start();
+                    LogAndPrint("PNL_STREAM: Started periodic NT PnL streaming timer (~3s)");
+
+                    // Try an immediate emit (may be skipped if not yet connected / no account)
+                    EmitPnLUpdateIfNeeded();
+
+                    // Schedule a second attempt shortly after startup to catch post-connect state
+                    Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(2000);
+                            EmitPnLUpdateIfNeeded();
+                        }
+                        catch (Exception ex)
+                        {
+                            LogAndPrint($"PNL_STREAM_ERROR: Delayed initial emit failed: {ex.Message}");
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                LogAndPrint($"PNL_STREAM_ERROR: Failed to start PnL streaming timer: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Stop the periodic NT PnL streaming timer.
+        /// </summary>
+        private void StopPnLStreamingTimer()
+        {
+            try
+            {
+                if (pnlStreamTimer != null)
+                {
+                    pnlStreamTimer.Stop();
+                    if (pnlStreamTickHandler != null)
+                    {
+                        pnlStreamTimer.Tick -= pnlStreamTickHandler;
+                        pnlStreamTickHandler = null;
+                    }
+                    pnlStreamTimer = null;
+                    LogAndPrint("PNL_STREAM: Stopped periodic NT PnL streaming timer");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogAndPrint($"PNL_STREAM_ERROR: Failed to stop PnL streaming timer: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Emit a PnL update as an EVENT over SubmitTrade. Includes nt_daily_pnl and counters.
+        /// Uses a small change filter to avoid spamming identical values.
+        /// </summary>
+        private void EmitPnLUpdateIfNeeded()
+        {
+            try
+            {
+                // Only when connected and account available
+                if (!TradingGrpcClient.IsConnected)
+                {
+                    // Diagnostic skip log only every ~10s to avoid spam
+                    if ((DateTime.UtcNow - lastPnLSentAt) > TimeSpan.FromSeconds(10))
+                        LogAndPrint("PNL_STREAM_SKIP: Not connected yet");
+                    return;
+                }
+
+                var account = this.monitoredAccount;
+                if (account == null)
+                {
+                    if ((DateTime.UtcNow - lastPnLSentAt) > TimeSpan.FromSeconds(10))
+                        LogAndPrint("PNL_STREAM_SKIP: monitoredAccount null");
+                    return;
+                }
+
+                double currentPnL = DailyPnL;
+
+                // Change filter: send if first time or changed by >= $5 or at least every 15s
+                bool shouldSend = double.IsNaN(lastPnLSent) || Math.Abs(currentPnL - lastPnLSent) >= 5.0 || (DateTime.UtcNow - lastPnLSentAt) >= TimeSpan.FromSeconds(15);
+                if (!shouldSend)
+                {
+                    // Lightweight trace for suppression (every 15s window only)
+                    if ((DateTime.UtcNow - lastPnLSentAt) >= TimeSpan.FromSeconds(15))
+                        LogAndPrint($"PNL_STREAM_SUPPRESS: currentPnL=${currentPnL:F2} unchanged (<$5 delta)");
+                    return;
+                }
+
+                var data = new Dictionary<string, object>
+                {
+                    { "action", "EVENT" },
+                    { "event_type", "nt_pnl_update" },
+                    { "time", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture) },
+                    { "account_name", account.Name },
+                    { "nt_balance", (float)_sessionStartBalance },
+                    { "nt_daily_pnl", (float)currentPnL },
+                    { "nt_trade_result", _lastTradeResult },
+                    { "nt_session_trades", _sessionTradeCount }
+                };
+
+                // Fire-and-forget submit
+                Task.Run(async () => await SendToBridge(data));
+
+                lastPnLSent = currentPnL;
+                lastPnLSentAt = DateTime.UtcNow;
+
+                LogAndPrint($"PNL_STREAM_EMIT: Sent nt_daily_pnl=${currentPnL:F2} (acct={account.Name})");
+            }
+            catch (Exception ex)
+            {
+                LogAndPrint($"PNL_STREAM_ERROR: Exception in EmitPnLUpdateIfNeeded: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -2644,10 +2787,10 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                                 { "instrument_name", e.Execution.Instrument.FullName },
                                 { "account_name", e.Execution.Account.Name },
                                 { "time", e.Execution.Time.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture) },
-                                { "nt_balance", 0 },  // Not critical for closure
-                                { "nt_daily_pnl", 0 },  // Not critical for closure
+                                { "nt_balance", (float)SessionStartBalance },
+                                { "nt_daily_pnl", (float)DailyPnL },
                                 { "nt_trade_result", "closed" },
-                                { "nt_session_trades", 0 },
+                                { "nt_session_trades", SessionTradeCount },
                                 { "closure_reason", "NT_ORIGINAL_TRADE_CLOSED" }, // This will NOT trigger whack-a-mole
                                 { "mt5_ticket", mt5Ticket } // Include MT5 ticket for reliable closure
                             };
@@ -4073,10 +4216,10 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                 instrument_name = instrumentName,
                 account_name = accountName,
                 time = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                nt_balance = 0,  // Not critical for closure
-                nt_daily_pnl = 0,  // Not critical for closure
+                nt_balance = SessionStartBalance,
+                nt_daily_pnl = DailyPnL,
                 nt_trade_result = "closed",
-                nt_session_trades = 0,
+                nt_session_trades = SessionTradeCount,
                 closure_reason = "NT_ORIGINAL_TRADE_CLOSED",
                 mt5_ticket = mt5Ticket // Include MT5 ticket for reliable closure
             };

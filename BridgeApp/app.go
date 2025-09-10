@@ -173,11 +173,11 @@ type Trade struct {
 	Instrument      string    `json:"instrument"`
 	AccountName     string    `json:"account_name"`
 
-	// Enhanced NT Performance Data
-	NTBalance       float64 `json:"nt_balance"`
-	NTDailyPnL      float64 `json:"nt_daily_pnl"`
-	NTTradeResult   string  `json:"nt_trade_result"` // "win", "loss", "pending"
-	NTSessionTrades int     `json:"nt_session_trades"`
+    // Enhanced NT Performance Data (omit when not provided to avoid resetting EA state)
+    NTBalance       float64 `json:"nt_balance,omitempty"`
+    NTDailyPnL      float64 `json:"nt_daily_pnl,omitempty"`
+    NTTradeResult   string  `json:"nt_trade_result,omitempty"` // "win", "loss", "pending"
+    NTSessionTrades int     `json:"nt_session_trades,omitempty"`
 
 	// MT5 position tracking
 	MT5Ticket         uint64  `json:"mt5_ticket"`                      // MT5 position ticket number (always include, even if 0)
