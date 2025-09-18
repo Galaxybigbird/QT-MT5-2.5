@@ -125,6 +125,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         private bool lastBridgeConnectionStatus = false;
         private DateTime lastBridgeConnectionCheck = DateTime.MinValue;
 
+        private ContinuousTrailingType priorNonAtrTrailingType = ContinuousTrailingType.DollarAmountTrail;
+        private bool priorUseAlternativeTrailing = true;
+
         public static MultiStratManager Instance { get; private set; }
         public event Action PingReceivedFromBridge;
 
@@ -150,51 +153,71 @@ namespace NinjaTrader.NinjaScript.AddOns
             set { if (trailingAndElasticManager != null) { trailingAndElasticManager.EnableTrailing = value; OnPropertyChanged(nameof(EnableTrailing)); } } 
         }
         
-        public bool UseAlternativeTrailing 
-        { 
-            get => trailingAndElasticManager?.UseAlternativeTrailing ?? true; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.UseAlternativeTrailing = value; OnPropertyChanged(nameof(UseAlternativeTrailing)); } } 
+        public bool UseAlternativeTrailing
+        {
+            get => trailingAndElasticManager?.UseAlternativeTrailing ?? true;
+            set
+            {
+                if (trailingAndElasticManager == null)
+                    return;
+
+                if (trailingAndElasticManager.UseATRTrailing && value)
+                {
+                    LogInfo("TRAILING", "Ignoring request to enable alternative trailing while DEMA-ATR trailing is active.");
+                    return;
+                }
+
+                trailingAndElasticManager.UseAlternativeTrailing = value;
+                if (!trailingAndElasticManager.UseATRTrailing)
+                    priorUseAlternativeTrailing = value;
+                OnPropertyChanged(nameof(UseAlternativeTrailing));
+            }
         }
-        
         public bool UseTraditionalTrailing 
         { 
             get => trailingAndElasticManager?.UseTraditionalTrailing ?? false; 
             set { if (trailingAndElasticManager != null) { trailingAndElasticManager.UseTraditionalTrailing = value; OnPropertyChanged(nameof(UseTraditionalTrailing)); } } 
         }
         
-        public TrailingActivationType TrailingTriggerType 
-        { 
-            get => trailingAndElasticManager?.TrailingTriggerType ?? TrailingActivationType.Dollars; 
-            set 
-            { 
-                if (trailingAndElasticManager != null) 
-                { 
-                    trailingAndElasticManager.TrailingTriggerType = value; 
-                    // Mirror to Elastic trigger for unified control
-                    trailingAndElasticManager.ElasticTriggerType = value; 
-                    OnPropertyChanged(nameof(TrailingTriggerType)); 
-                    OnPropertyChanged(nameof(ElasticTriggerType)); 
-                } 
-            } 
+        public TrailingActivationType TrailingTriggerType
+        {
+            get => trailingAndElasticManager?.TrailingTriggerType ?? TrailingActivationType.Dollars;
+            set
+            {
+                if (trailingAndElasticManager != null)
+                {
+                    trailingAndElasticManager.TrailingTriggerType = value;
+                    OnPropertyChanged(nameof(TrailingTriggerType));
+
+                    if (trailingAndElasticManager.ElasticTriggerType != value)
+                    {
+                        trailingAndElasticManager.ElasticTriggerType = value;
+                        OnPropertyChanged(nameof(ElasticTriggerType));
+                    }
+                }
+            }
         }
-        
-        public double TrailingTriggerValue 
-        { 
-            get => trailingAndElasticManager?.TrailingTriggerValue ?? 100.0; 
-            set 
-            { 
-                if (trailingAndElasticManager != null) 
-                { 
-                    trailingAndElasticManager.TrailingTriggerValue = value; 
-                    // Mirror to Elastic threshold
-                    trailingAndElasticManager.ProfitUpdateThreshold = value; 
-                    OnPropertyChanged(nameof(TrailingTriggerValue)); 
-                    OnPropertyChanged(nameof(ProfitUpdateThreshold)); 
-                } 
-            } 
+
+        public double TrailingTriggerValue
+        {
+            get => trailingAndElasticManager?.TrailingTriggerValue ?? 100.0;
+            set
+            {
+                if (trailingAndElasticManager != null)
+                {
+                    trailingAndElasticManager.TrailingTriggerValue = value;
+                    OnPropertyChanged(nameof(TrailingTriggerValue));
+
+                    if (System.Math.Abs(trailingAndElasticManager.ProfitUpdateThreshold - value) > 1e-9)
+                    {
+                        trailingAndElasticManager.ProfitUpdateThreshold = value;
+                        OnPropertyChanged(nameof(ProfitUpdateThreshold));
+                    }
+                }
+            }
         }
-        
-        public TrailingActivationType TrailingStopType 
+
+public TrailingActivationType TrailingStopType 
         { 
             get => trailingAndElasticManager?.TrailingStopType ?? TrailingActivationType.Dollars; 
             set { if (trailingAndElasticManager != null) { trailingAndElasticManager.TrailingStopType = value; OnPropertyChanged(nameof(TrailingStopType)); } } 
@@ -206,39 +229,44 @@ namespace NinjaTrader.NinjaScript.AddOns
             set { if (trailingAndElasticManager != null) { trailingAndElasticManager.TrailingStopValue = value; OnPropertyChanged(nameof(TrailingStopValue)); } } 
         }
         
-        public TrailingActivationType TrailingIncrementsType 
-        { 
-            get => trailingAndElasticManager?.TrailingIncrementsType ?? TrailingActivationType.Dollars; 
-            set 
-            { 
-                if (trailingAndElasticManager != null) 
-                { 
-                    trailingAndElasticManager.TrailingIncrementsType = value; 
-                    // Mirror to Elastic increments units for unified control
-                    trailingAndElasticManager.ElasticProfitUnits = value; 
-                    OnPropertyChanged(nameof(TrailingIncrementsType)); 
-                    OnPropertyChanged(nameof(ElasticProfitUnits)); 
-                } 
-            } 
+        public TrailingActivationType TrailingIncrementsType
+        {
+            get => trailingAndElasticManager?.TrailingIncrementsType ?? TrailingActivationType.Dollars;
+            set
+            {
+                if (trailingAndElasticManager != null)
+                {
+                    trailingAndElasticManager.TrailingIncrementsType = value;
+                    OnPropertyChanged(nameof(TrailingIncrementsType));
+
+                    if (trailingAndElasticManager.ElasticProfitUnits != value)
+                    {
+                        trailingAndElasticManager.ElasticProfitUnits = value;
+                        OnPropertyChanged(nameof(ElasticProfitUnits));
+                    }
+                }
+            }
         }
-        
-        public double TrailingIncrementsValue 
-        { 
-            get => trailingAndElasticManager?.TrailingIncrementsValue ?? 10.0; 
-            set 
-            { 
-                if (trailingAndElasticManager != null) 
-                { 
-                    trailingAndElasticManager.TrailingIncrementsValue = value; 
-                    // Mirror to Elastic increments value for unified control
-                    trailingAndElasticManager.ElasticIncrementValue = value; 
-                    OnPropertyChanged(nameof(TrailingIncrementsValue)); 
-                    OnPropertyChanged(nameof(ElasticIncrementValue)); 
-                } 
-            } 
+
+        public double TrailingIncrementsValue
+        {
+            get => trailingAndElasticManager?.TrailingIncrementsValue ?? 10.0;
+            set
+            {
+                if (trailingAndElasticManager != null)
+                {
+                    trailingAndElasticManager.TrailingIncrementsValue = value;
+                    OnPropertyChanged(nameof(TrailingIncrementsValue));
+
+                    if (System.Math.Abs(trailingAndElasticManager.ElasticIncrementValue - value) > 1e-9)
+                    {
+                        trailingAndElasticManager.ElasticIncrementValue = value;
+                        OnPropertyChanged(nameof(ElasticIncrementValue));
+                    }
+                }
+            }
         }
-        
-        // Missing properties that UI expects
+
         public TrailingActivationType TrailingActivationMode 
         { 
             get => trailingAndElasticManager?.TrailingActivationMode ?? TrailingActivationType.Percent; 
@@ -253,46 +281,53 @@ namespace NinjaTrader.NinjaScript.AddOns
         
         // Elastic hedging properties (actively used by Elastic monitor and Alternative Trailing activation)
         // Keep these in sync with the unified UI fields as well as the trailing equivalents.
-        public TrailingActivationType ElasticTriggerType 
-        { 
-            get => trailingAndElasticManager?.ElasticTriggerType ?? TrailingActivationType.Dollars; 
-            set 
-            { 
-                if (trailingAndElasticManager != null) 
-                { 
-                    // Set Elastic trigger and mirror to Trailing trigger to keep the unified semantics
-                    trailingAndElasticManager.ElasticTriggerType = value; 
-                    trailingAndElasticManager.TrailingTriggerType = value; 
-                    OnPropertyChanged(nameof(ElasticTriggerType)); 
-                    OnPropertyChanged(nameof(TrailingTriggerType)); 
-                } 
-            } 
+        public TrailingActivationType ElasticTriggerType
+        {
+            get => trailingAndElasticManager?.ElasticTriggerType ?? TrailingActivationType.Dollars;
+            set
+            {
+                if (trailingAndElasticManager != null)
+                {
+                    trailingAndElasticManager.ElasticTriggerType = value;
+                    OnPropertyChanged(nameof(ElasticTriggerType));
+
+                    if (!trailingAndElasticManager.UseATRTrailing)
+                    {
+                        trailingAndElasticManager.TrailingTriggerType = value;
+                        OnPropertyChanged(nameof(TrailingTriggerType));
+                    }
+                }
+            }
         }
-        public double ProfitUpdateThreshold 
-        { 
-            get => trailingAndElasticManager?.ProfitUpdateThreshold ?? 50.0; 
-            set 
-            { 
-                if (trailingAndElasticManager != null) 
-                { 
-                    // Set Elastic threshold and mirror to Trailing trigger value
-                    trailingAndElasticManager.ProfitUpdateThreshold = value; 
-                    trailingAndElasticManager.TrailingTriggerValue = value; 
-                    OnPropertyChanged(nameof(ProfitUpdateThreshold)); 
-                    OnPropertyChanged(nameof(TrailingTriggerValue)); 
-                } 
-            } 
+
+        public double ProfitUpdateThreshold
+        {
+            get => trailingAndElasticManager?.ProfitUpdateThreshold ?? 100.0;
+            set
+            {
+                if (trailingAndElasticManager != null)
+                {
+                    trailingAndElasticManager.ProfitUpdateThreshold = value;
+                    OnPropertyChanged(nameof(ProfitUpdateThreshold));
+
+                    if (!trailingAndElasticManager.UseATRTrailing)
+                    {
+                        trailingAndElasticManager.TrailingTriggerValue = value;
+                        OnPropertyChanged(nameof(TrailingTriggerValue));
+                    }
+                }
+            }
         }
-        
+
         // UI compatibility: this value is no longer used at runtime (timer fixed to 100ms),
         // but we keep a local setting so existing UI bindings don't break.
-    // Legacy UI-only knob; no longer used (monitor fixed at 100ms). Kept for binding compatibility.
-    // private int _elasticUpdateIntervalSecondsCompat = 1;
-    // public int ElasticUpdateIntervalSeconds 
-    // {
-    //     get => _elasticUpdateIntervalSecondsCompat; 
-    //     set { _elasticUpdateIntervalSecondsCompat = value; OnPropertyChanged(nameof(ElasticUpdateIntervalSeconds)); } 
-    // }
+        // Legacy UI-only knob; no longer used (monitor fixed at 100ms). Kept for binding compatibility.
+        // private int _elasticUpdateIntervalSecondsCompat = 1;
+        // public int ElasticUpdateIntervalSeconds 
+        // {
+        //     get => _elasticUpdateIntervalSecondsCompat; 
+        //     set { _elasticUpdateIntervalSecondsCompat = value; OnPropertyChanged(nameof(ElasticUpdateIntervalSeconds)); } 
+        // }
         public TrailingActivationType ElasticProfitUnits
         {
             get => trailingAndElasticManager?.ElasticProfitUnits ?? TrailingActivationType.Dollars;
@@ -300,11 +335,14 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 if (trailingAndElasticManager != null)
                 {
-                    // Set Elastic increments units and mirror to Trailing increments units
                     trailingAndElasticManager.ElasticProfitUnits = value;
-                    trailingAndElasticManager.TrailingIncrementsType = value;
                     OnPropertyChanged(nameof(ElasticProfitUnits));
-                    OnPropertyChanged(nameof(TrailingIncrementsType));
+
+                    if (!trailingAndElasticManager.UseATRTrailing)
+                    {
+                        trailingAndElasticManager.TrailingIncrementsType = value;
+                        OnPropertyChanged(nameof(TrailingIncrementsType));
+                    }
                 }
             }
         }
@@ -315,15 +353,19 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 if (trailingAndElasticManager != null)
                 {
-                    // Set Elastic increments value and mirror to Trailing increments value
                     trailingAndElasticManager.ElasticIncrementValue = value;
-                    trailingAndElasticManager.TrailingIncrementsValue = value;
                     OnPropertyChanged(nameof(ElasticIncrementValue));
-                    OnPropertyChanged(nameof(TrailingIncrementsValue));
+
+                    if (!trailingAndElasticManager.UseATRTrailing)
+                    {
+                        trailingAndElasticManager.TrailingIncrementsValue = value;
+                        OnPropertyChanged(nameof(TrailingIncrementsValue));
+                    }
                 }
             }
         }
-        
+
+
         // Legacy trailing properties that UI still binds to
         public bool EnableTrailingStop 
         { 
@@ -355,10 +397,38 @@ namespace NinjaTrader.NinjaScript.AddOns
             set { if (trailingAndElasticManager != null) { trailingAndElasticManager.AtrMultiplier = value; OnPropertyChanged(nameof(AtrMultiplier)); } } 
         }
         
-        public bool UseATRTrailing 
-        { 
-            get => trailingAndElasticManager?.UseATRTrailing ?? false; 
-            set { if (trailingAndElasticManager != null) { trailingAndElasticManager.UseATRTrailing = value; OnPropertyChanged(nameof(UseATRTrailing)); } } 
+        public bool UseATRTrailing
+        {
+            get => trailingAndElasticManager?.UseATRTrailing ?? false;
+            set
+            {
+                if (trailingAndElasticManager == null)
+                    return;
+
+                if (value)
+                {
+                    priorNonAtrTrailingType = trailingAndElasticManager.TrailingType;
+                    priorUseAlternativeTrailing = trailingAndElasticManager.UseAlternativeTrailing;
+
+                    trailingAndElasticManager.UseATRTrailing = true;
+                    trailingAndElasticManager.UseAlternativeTrailing = false;
+                    trailingAndElasticManager.TrailingType = ContinuousTrailingType.DEMAAtrTrail;
+
+                    LogInfo("TRAILING", "DEMA-ATR trailing enabled. Switching trailing type to DEMA-ATR and disabling alternative trailing.");
+                    OnPropertyChanged(nameof(UseAlternativeTrailing));
+                }
+                else
+                {
+                    trailingAndElasticManager.UseATRTrailing = false;
+                    trailingAndElasticManager.TrailingType = priorNonAtrTrailingType;
+                    trailingAndElasticManager.UseAlternativeTrailing = priorUseAlternativeTrailing;
+
+                    LogInfo("TRAILING", "DEMA-ATR trailing disabled. Restoring previous trailing configuration.");
+                    OnPropertyChanged(nameof(UseAlternativeTrailing));
+                }
+
+                OnPropertyChanged(nameof(UseATRTrailing));
+            }
         }
         
         public int DEMA_ATR_Period 
@@ -1739,6 +1809,12 @@ private HashSet<string> trackedHedgeClosingOrderIds;
                 
                 // Initialize TrailingAndElasticManager
                 trailingAndElasticManager = new TrailingAndElasticManager(this);
+
+                // Keep default Elastic settings aligned with trailing defaults so UI matches runtime values
+                trailingAndElasticManager.ProfitUpdateThreshold = trailingAndElasticManager.TrailingTriggerValue;
+                trailingAndElasticManager.ElasticTriggerType = trailingAndElasticManager.TrailingTriggerType;
+                trailingAndElasticManager.ElasticProfitUnits = trailingAndElasticManager.TrailingIncrementsType;
+                trailingAndElasticManager.ElasticIncrementValue = trailingAndElasticManager.TrailingIncrementsValue;
                 
                 // Subscribe to SLTP cleanup completion event
                 SLTPRemovalLogic.SLTPCleanupCompleted += OnSLTPCleanupComplete;

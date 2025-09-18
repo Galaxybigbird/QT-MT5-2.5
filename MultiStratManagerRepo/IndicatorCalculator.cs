@@ -63,36 +63,31 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             try
             {
-                // Require at least 3×N or 2×N+100 for convergence (as per Skender.Stock.Indicators)
-                int minRequired = Math.Max(period * 3, (period * 2) + 100);
+                // Allow faster warmup by using roughly half-period of data (minimum 5 quotes)
+                int minRequired = Math.Max(period / 2 + 3, Math.Min(period, 10));
                 if (quotes == null || quotes.Count < minRequired)
                 {
                     LogToBridge("WARN", "INDICATOR", $"[IndicatorCalculator] DEMA requires at least {minRequired} quotes for period {period}, but only {quotes?.Count} available");
                     return null;
                 }
 
-                // Extract closing prices
                 var closePrices = quotes.Select(q => q.Close).ToList();
 
-                // Calculate EMA1 (first exponential moving average of closing prices)
                 var ema1Values = CalculateEma(closePrices, period);
-                if (ema1Values == null || ema1Values.Count < period)
+                if (ema1Values == null || ema1Values.Count == 0)
                     return null;
 
-                // Calculate EMA2 (exponential moving average of EMA1)
                 var ema2Values = CalculateEma(ema1Values, period);
                 if (ema2Values == null || ema2Values.Count == 0)
                     return null;
 
-                // DEMA = (2 × EMA1) - EMA2
-                // This formula creates a "faster" smoothed average as per Patrick Mulloy
                 double currentEma1 = ema1Values.Last();
                 double currentEma2 = ema2Values.Last();
-                
+
                 double demaValue = (2.0 * currentEma1) - currentEma2;
-                
+
                 LogToBridge("DEBUG", "INDICATOR", $"[IndicatorCalculator] DEMA calculated: EMA1={currentEma1:F4}, EMA2={currentEma2:F4}, DEMA={demaValue:F4}");
-                
+
                 return demaValue;
             }
             catch (Exception ex)
@@ -112,8 +107,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             try
             {
-                // Require at least period + 100 for convergence (as per Skender.Stock.Indicators)
-                if (quotes == null || quotes.Count < Math.Max(period + 1, period + 100))
+                // Allow ATR to stabilize with roughly half-period warmup while still requiring multiple bars
+                int minRequired = Math.Max(period / 2 + 3, Math.Min(period + 1, 10));
+                if (quotes == null || quotes.Count < minRequired)
                     return null;
 
                 var trueRanges = new List<double>();
@@ -124,10 +120,6 @@ namespace NinjaTrader.NinjaScript.AddOns
                     var current = quotes[i];
                     var previous = quotes[i - 1];
 
-                    // True Range is the maximum of:
-                    // 1. Current High - Current Low
-                    // 2. Abs(Current High - Previous Close)
-                    // 3. Abs(Current Low - Previous Close)
                     double tr1 = current.High - current.Low;
                     double tr2 = Math.Abs(current.High - previous.Close);
                     double tr3 = Math.Abs(current.Low - previous.Close);
@@ -136,16 +128,15 @@ namespace NinjaTrader.NinjaScript.AddOns
                     trueRanges.Add(trueRange);
                 }
 
-                if (trueRanges.Count < period)
+                if (trueRanges.Count == 0)
                     return null;
 
-                // Calculate ATR using Wilder's smoothing (SMMA - Smoothed Moving Average)
-                // First ATR value is the simple average of first N true ranges
+                if (trueRanges.Count < period)
+                    return trueRanges.Average();
+
                 double firstAtr = trueRanges.Take(period).Average();
                 double currentAtr = firstAtr;
 
-                // Apply Wilder's smoothing for subsequent values
-                // ATR = ((Prior ATR × (n-1)) + Current TR) / n
                 for (int i = period; i < trueRanges.Count; i++)
                 {
                     currentAtr = ((currentAtr * (period - 1)) + trueRanges[i]) / period;
@@ -170,21 +161,34 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             try
             {
-                if (values == null || values.Count < period)
+                if (values == null || values.Count == 0)
                     return null;
 
                 var emaValues = new List<double>();
+
                 double multiplier = 2.0 / (period + 1);
 
-                // Start with Simple Moving Average for the first EMA value
-                double sma = values.Take(period).Average();
-                emaValues.Add(sma);
-
-                // Calculate subsequent EMA values
-                for (int i = period; i < values.Count; i++)
+                if (values.Count >= period)
                 {
-                    double ema = (values[i] * multiplier) + (emaValues.Last() * (1 - multiplier));
+                    double sma = values.Take(period).Average();
+                    emaValues.Add(sma);
+
+                    for (int i = period; i < values.Count; i++)
+                    {
+                        double ema = (values[i] * multiplier) + (emaValues.Last() * (1 - multiplier));
+                        emaValues.Add(ema);
+                    }
+                }
+                else
+                {
+                    double ema = values[0];
                     emaValues.Add(ema);
+
+                    for (int i = 1; i < values.Count; i++)
+                    {
+                        ema = (values[i] * multiplier) + (ema * (1 - multiplier));
+                        emaValues.Add(ema);
+                    }
                 }
 
                 return emaValues;

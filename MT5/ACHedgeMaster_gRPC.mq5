@@ -75,6 +75,17 @@ double CalculateACLotSize(double ntQuantity);
 double CalculateElasticLotSize(double ntQuantity);
 void AddElasticPosition(string baseId, ulong positionTicket, double lots);
 bool IsTradingPermitted(string &reason); // Forward declaration for trading permission preflight
+
+// Map trade mode integer to readable string (MQL5 requires top-level, cannot nest functions)
+string TradeModeName(const long mode)
+{
+    if(mode == SYMBOL_TRADE_MODE_DISABLED)   return "DISABLED";
+    if(mode == SYMBOL_TRADE_MODE_CLOSEONLY)  return "CLOSEONLY";
+    if(mode == SYMBOL_TRADE_MODE_FULL)       return "FULL";
+    if(mode == SYMBOL_TRADE_MODE_LONGONLY)   return "LONGONLY";
+    if(mode == SYMBOL_TRADE_MODE_SHORTONLY)  return "SHORTONLY";
+    return StringFormat("UNKNOWN(%d)", (int)mode);
+}
 double AdjustLotForMargin(double desiredLot, ENUM_ORDER_TYPE orderType); // Downscale lot to fit free margin
 
 // Forward declarations for JSON helpers used before their definitions
@@ -2070,6 +2081,8 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
 //+------------------------------------------------------------------+
 bool IsTradingPermitted(string &reason)
 {
+    // (Helper moved to top-level: TradeModeName)
+
     // Global terminal AutoTrading toggle
     if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
     {
@@ -2095,14 +2108,32 @@ bool IsTradingPermitted(string &reason)
 
     // Symbol trade mode checks
     long tradeMode = (long)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE);
-    if(tradeMode == SYMBOL_TRADE_MODE_DISABLED)
+    if(tradeMode == SYMBOL_TRADE_MODE_DISABLED || tradeMode == SYMBOL_TRADE_MODE_CLOSEONLY)
     {
-        reason = "Symbol trade mode is DISABLED.";
-        return false;
-    }
-    if(tradeMode == SYMBOL_TRADE_MODE_CLOSEONLY)
-    {
-        reason = "Symbol trade mode is CLOSE-ONLY (new positions not allowed).";
+        string initialState = TradeModeName(tradeMode);
+        // Attempt recovery: ensure symbol is selected (sometimes new accounts hide symbols)
+        bool wasSelected = SymbolSelect(_Symbol, true);
+        long refreshedMode = (long)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE);
+        if(refreshedMode != tradeMode)
+        {
+            string __rlog = StringFormat("ACHM_RECOVERY: Symbol %s trade mode changed %s -> %s after SymbolSelect(%d)", (string)_Symbol, (string)initialState, (string)TradeModeName(refreshedMode), (int)wasSelected); Print(__rlog); ULogWarnPrint(__rlog);
+            // Re-evaluate if now tradable
+            if(refreshedMode == SYMBOL_TRADE_MODE_FULL || refreshedMode == SYMBOL_TRADE_MODE_LONGONLY || refreshedMode == SYMBOL_TRADE_MODE_SHORTONLY)
+            {
+                return true; // recovered
+            }
+        }
+
+        if(tradeMode == SYMBOL_TRADE_MODE_DISABLED)
+        {
+            reason = StringFormat("Symbol trade mode is DISABLED (mode=%s). Verify instrument permissions on this account or choose a different symbol.", (string)initialState);
+        }
+        else
+        {
+            reason = StringFormat("Symbol trade mode is CLOSE-ONLY (mode=%s, new positions not allowed).", (string)initialState);
+        }
+        // Emit detailed hint once per failure path
+        string __hint = StringFormat("ACHM_HINT: %s | Check: Market Watch > Symbols > %s > Specifications. Ensure trading sessions are open, account type allows this symbol, and AutoTrading + EA algo trading are enabled.", (string)reason, (string)_Symbol); Print(__hint); ULogWarnPrint(__hint);
         return false;
     }
 

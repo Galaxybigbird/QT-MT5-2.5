@@ -38,6 +38,11 @@ namespace NinjaTrader.NinjaScript.AddOns
         public double CurrentAtrValue { get; set; }
         public double CurrentDemaValue { get; set; }
         public DateTime LastBarTimeProcessed { get; set; }
+        public DateTime PendingBarStart { get; set; } = DateTime.MinValue;
+        public double PendingBarOpen { get; set; }
+        public double PendingBarHigh { get; set; }
+        public double PendingBarLow { get; set; }
+        public double PendingBarClose { get; set; }
         public Order ManagedStopOrder { get; set; }
         // Elastic trigger/increment runtime
         public bool Triggered { get; set; }
@@ -76,6 +81,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly Dictionary<string, ElasticPositionTracker> elasticPositions = new Dictionary<string, ElasticPositionTracker>();
         private readonly Dictionary<string, TraditionalTrailingStop> traditionalTrailingStops = new Dictionary<string, TraditionalTrailingStop>();
         private readonly Dictionary<string, BarsRequest> barsRequests = new Dictionary<string, BarsRequest>();
+        private static readonly TimeSpan IndicatorAggregationPeriod = TimeSpan.FromMilliseconds(250);
+        private const int MaxIndicatorQuotes = 600;
+
 
         // Flags
         public bool EnableElasticHedging { get; set; } = true;
@@ -84,7 +92,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 
         // Elastic hedging trigger/increment settings
         public TrailingActivationType ElasticTriggerType { get; set; } = TrailingActivationType.Dollars;
-        public double ProfitUpdateThreshold { get; set; } = 50.0;
+        public double ProfitUpdateThreshold { get; set; } = 100.0;
         public int ElasticUpdateIntervalSeconds { get; set; } = 1; // retained for UI, unused (fixed 500ms)
         public TrailingActivationType ElasticProfitUnits { get; set; } = TrailingActivationType.Dollars;
         public double ElasticIncrementValue { get; set; } = 10.0;
@@ -182,6 +190,11 @@ namespace NinjaTrader.NinjaScript.AddOns
                 CurrentTrailedStopPrice = 0,
                 HighWaterMarkPrice = entryPrice,
                 LowWaterMarkPrice = entryPrice,
+                PendingBarStart = DateTime.UtcNow,
+                PendingBarOpen = entryPrice,
+                PendingBarHigh = entryPrice,
+                PendingBarLow = entryPrice,
+                PendingBarClose = entryPrice,
                 IsSLTPLogicCompleteForEntry = false
             };
             elasticPositions[baseId] = tracker;
@@ -251,6 +264,60 @@ namespace NinjaTrader.NinjaScript.AddOns
         #endregion
 
         #region Private Methods - Elastic Hedging
+        private void UpdateIndicatorSeries(ElasticPositionTracker tracker, double currentPrice)
+        {
+            try
+            {
+                if (tracker == null || currentPrice <= 0)
+                    return;
+
+                DateTime now = DateTime.UtcNow;
+
+                if (tracker.PendingBarStart == DateTime.MinValue)
+                {
+                    tracker.PendingBarStart = now;
+                    tracker.PendingBarOpen = currentPrice;
+                    tracker.PendingBarHigh = currentPrice;
+                    tracker.PendingBarLow = currentPrice;
+                    tracker.PendingBarClose = currentPrice;
+                    return;
+                }
+
+                tracker.PendingBarHigh = Math.Max(tracker.PendingBarHigh, currentPrice);
+                tracker.PendingBarLow = Math.Min(tracker.PendingBarLow, currentPrice);
+                tracker.PendingBarClose = currentPrice;
+
+                if (now - tracker.PendingBarStart < IndicatorAggregationPeriod)
+                    return;
+
+                tracker.QuoteBuffer.Add(new Quote
+                {
+                    Date = now,
+                    Open = tracker.PendingBarOpen,
+                    High = tracker.PendingBarHigh,
+                    Low = tracker.PendingBarLow,
+                    Close = tracker.PendingBarClose,
+                    Volume = 0
+                });
+
+                if (tracker.QuoteBuffer.Count > MaxIndicatorQuotes)
+                    tracker.QuoteBuffer.RemoveRange(0, tracker.QuoteBuffer.Count - MaxIndicatorQuotes);
+
+                tracker.PendingBarStart = now;
+                tracker.PendingBarOpen = currentPrice;
+                tracker.PendingBarHigh = currentPrice;
+                tracker.PendingBarLow = currentPrice;
+                tracker.PendingBarClose = currentPrice;
+                tracker.LastBarTimeProcessed = now;
+
+                CalculateIndicators(tracker);
+            }
+            catch (Exception ex)
+            {
+                LogAndPrint($"Error updating indicator series: {ex.Message}");
+            }
+        }
+
         private void MonitorPositionsForElasticHedging(Account monitoredAccount)
         {
             if (monitoredAccount == null || !EnableElasticHedging) return;
@@ -263,6 +330,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     if (position != null)
                     {
                         double currentPrice = GetCurrentPrice(position.Instrument);
+                        UpdateIndicatorSeries(tracker, currentPrice);
                         double currentProfitDollars = position.GetUnrealizedProfitLoss(PerformanceUnit.Currency, currentPrice);
 
                         // Compute trigger progress in trigger units
@@ -390,7 +458,12 @@ namespace NinjaTrader.NinjaScript.AddOns
                             MarketPosition = position.MarketPosition,
                             EntryPrice = currentPrice,
                             LastReportedProfitLevel = 0.0,
-                            LastUpdateTime = DateTime.Now
+                            LastUpdateTime = DateTime.Now,
+                            PendingBarStart = DateTime.UtcNow,
+                            PendingBarOpen = currentPrice,
+                            PendingBarHigh = currentPrice,
+                            PendingBarLow = currentPrice,
+                            PendingBarClose = currentPrice
                         };
                         if (!elasticPositions.ContainsKey(syntheticBaseId))
                         {
@@ -476,6 +549,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                     double newStopPrice = UseAlternativeTrailing ?
                         CalculateAlternativeTrailingStopPrice(tracker, position, out earnedLevel) :
                         CalculateTrailingStopPrice(tracker, position);
+
+                    if (!UseAlternativeTrailing && TrailingType == ContinuousTrailingType.DEMAAtrTrail &&
+                        (tracker.CurrentAtrValue <= 0 || tracker.CurrentDemaValue <= 0))
+                    {
+                        if (tracker.CurrentTrailedStopPrice <= 0)
+                            LogAndPrint($"DEMA_TRAIL_WAIT: {tracker.BaseId} waiting for indicator warmup (quotes={tracker.QuoteBuffer.Count}).");
+                        return;
+                    }
 
                     bool shouldUpdate = ShouldUpdateTrailingStop(tracker, position);
                     bool significantChange = Math.Abs(newStopPrice - tracker.CurrentTrailedStopPrice) >= position.Instrument.MasterInstrument.TickSize;
@@ -758,7 +839,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     case ContinuousTrailingType.DEMAAtrTrail:
                         if (tracker.CurrentAtrValue > 0 && tracker.CurrentDemaValue > 0)
                         {
-                            double atrOffset = tracker.CurrentAtrValue * AtrMultiplier;
+                            double atrOffset = tracker.CurrentAtrValue * DEMA_ATR_Multiplier;
                             stopPrice = isLong ? tracker.CurrentDemaValue - atrOffset : tracker.CurrentDemaValue + atrOffset;
                         }
                         break;
@@ -1000,7 +1081,11 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             try
             {
-                if (!IndicatorCalculator.ValidateQuoteData(tracker.QuoteBuffer, Math.Max(AtrPeriod, DEMA_ATR_Period))) return;
+                int minBarsForAtr = Math.Max(AtrPeriod / 2 + 3, Math.Min(AtrPeriod + 1, 10));
+                int minBarsForDema = Math.Max(DEMA_ATR_Period / 2 + 3, Math.Min(DEMA_ATR_Period, 10));
+                int minQuotesRequired = Math.Max(minBarsForAtr, minBarsForDema);
+                if (!IndicatorCalculator.ValidateQuoteData(tracker.QuoteBuffer, minQuotesRequired)) return;
+
                 double? atrValue = IndicatorCalculator.CalculateAtr(tracker.QuoteBuffer, AtrPeriod);
                 if (atrValue.HasValue) tracker.CurrentAtrValue = atrValue.Value;
                 double? demaValue = IndicatorCalculator.CalculateDema(tracker.QuoteBuffer, DEMA_ATR_Period);
@@ -1063,6 +1148,11 @@ namespace NinjaTrader.NinjaScript.AddOns
                 CurrentTrailedStopPrice = 0,
                 HighWaterMarkPrice = execution.Price,
                 LowWaterMarkPrice = execution.Price,
+                PendingBarStart = DateTime.UtcNow,
+                PendingBarOpen = execution.Price,
+                PendingBarHigh = execution.Price,
+                PendingBarLow = execution.Price,
+                PendingBarClose = execution.Price,
                 IsSLTPLogicCompleteForEntry = false
             };
             elasticPositions[baseId] = tracker;
