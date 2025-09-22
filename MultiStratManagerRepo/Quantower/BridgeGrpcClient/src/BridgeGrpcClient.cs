@@ -241,13 +241,13 @@ namespace Quantower.Bridge.Client
 
         public static void Log(string level, string component, string message, string tradeId = "", string errorCode = "", string baseId = "")
         {
-            if (!TryGetClient(out var client, setError: false) || client is not TradingClient impl)
+            if (!TryGetClient(out var client, setError: false))
             {
                 return;
             }
 
             var correlation = GetOrCreateCorrelation(baseId);
-            impl.LogFireAndForget(level, component, message, tradeId, errorCode, baseId, correlation);
+            client!.LogFireAndForget(level, component, message, tradeId, errorCode, baseId, correlation);
         }
 
         public static void LogDebug(string component, string message, string tradeId = "", string baseId = "") => Log("DEBUG", component, message, tradeId, "", baseId);

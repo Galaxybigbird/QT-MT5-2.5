@@ -14,5 +14,6 @@ namespace Quantower.Bridge.Client
         Task<OperationResult> CloseHedgeAsync(string notificationJson);
         void StartTradingStream(Action<string>? onTradeReceived);
         void StopTradingStream();
+        void LogFireAndForget(string level, string component, string message, string tradeId = "", string errorCode = "", string baseId = "", string? correlationId = null);
     }
 }
