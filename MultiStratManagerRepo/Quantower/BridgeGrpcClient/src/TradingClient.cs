@@ -281,7 +281,7 @@ namespace Quantower.Bridge.Client
                 NtTradeResult = GetStringValue(root, "nt_trade_result"),
                 NtSessionTrades = GetInt32Value(root, "nt_session_trades"),
                 NtPointsPer1KLoss = GetDoubleValue(root, "nt_points_per_1k_loss"),
-                QtTradeId = GetStringValue(root, "qt_trade_id", "quantower_trade_id", "id"),
+                QtTradeId = GetStringValue(root, "qt_trade_id", "quantower_trade_id"),
                 QtPositionId = GetStringValue(root, "qt_position_id", "quantower_position_id", "position_id"),
                 StrategyTag = GetStringValue(root, "strategy_tag", "strategy"),
                 OriginPlatform = GetStringValue(root, "origin_platform", "source_platform", "platform", "origin")
