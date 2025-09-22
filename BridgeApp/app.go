@@ -195,6 +195,25 @@ type Trade struct {
 	Origin       string `json:"origin_platform,omitempty"`
 }
 
+func normalizeTrade(t *Trade) {
+	t.ID = strings.TrimSpace(t.ID)
+	t.BaseID = strings.TrimSpace(t.BaseID)
+	t.QTTradeID = strings.TrimSpace(t.QTTradeID)
+	t.QTPositionID = strings.TrimSpace(t.QTPositionID)
+	t.StrategyTag = strings.TrimSpace(t.StrategyTag)
+	t.Origin = strings.TrimSpace(t.Origin)
+
+	if t.Origin == "" && t.QTTradeID != "" {
+		t.Origin = "quantower"
+	}
+
+	if t.QTTradeID != "" {
+		t.ID = t.QTTradeID
+	} else if t.ID == "" && t.BaseID != "" {
+		t.ID = t.BaseID
+	}
+}
+
 // pendingClose tracks a queued NT-initiated close request waiting for ticket resolution
 type pendingClose struct {
 	qty        int
@@ -601,6 +620,8 @@ func (a *App) AddToTradeQueue(trade interface{}) error {
 	}
 
 	log.Printf("AddToTradeQueue: Successfully converted trade - ID: %s, Action: %s", t.ID, t.Action)
+	normalizeTrade(&t)
+	log.Printf("AddToTradeQueue: Normalized trade - canonical_id: %s (qt_trade_id=%s base_id=%s)", t.ID, t.QTTradeID, t.BaseID)
 
 	// If this is an EVENT trade, emit a concise debug snapshot of the enrichment payload
 	if strings.EqualFold(strings.TrimSpace(t.Action), "EVENT") {
