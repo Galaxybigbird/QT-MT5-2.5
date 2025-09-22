@@ -163,9 +163,15 @@ namespace Quantower.MultiStrat.Infrastructure
 
                 AddStrategyTag(payload, position.Comment, position.AdditionalInfo);
                 AddClosureInstrumentAndAccount(payload, position.Symbol, position.Account);
-                payload["closed_hedge_quantity"] = Math.Abs(position.Quantity);
+                payload["closed_hedge_quantity"] = position.Quantity;
                 payload["closed_hedge_action"] = ResolveAction(position.Side, position.Quantity);
-                payload["timestamp"] = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+
+                var closeTime = position.CloseTime;
+                if (closeTime == default)
+                {
+                    closeTime = DateTime.UtcNow;
+                }
+                payload["timestamp"] = DateTime.SpecifyKind(closeTime, DateTimeKind.Utc).ToString("o", CultureInfo.InvariantCulture);
 
                 json = JsonSerializer.Serialize(payload, SerializerOptions);
                 return true;

@@ -11,7 +11,7 @@ namespace Quantower.MultiStrat.Infrastructure
         private readonly Core _core;
         private readonly Action<Trade> _tradeHandler;
         private readonly Action<Position>? _positionClosedHandler;
-        private bool _disposed;
+        private volatile bool _disposed;
 
         private QuantowerEventBridge(Core core, Action<Trade> onTrade, Action<Position>? onPositionClosed)
         {
