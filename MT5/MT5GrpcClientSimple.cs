@@ -120,7 +120,37 @@ namespace MT5GrpcClient
                             try
                             {
                                 var call = _client.GetTrades(cancellationToken: _cancellationTokenSource.Token);
-                                
+
+                                // Send initial request and keep the stream alive with heartbeats
+                                var heartbeatTask = Task.Run(async () =>
+                                {
+                                    try
+                                    {
+                                        while (!_cancellationTokenSource?.Token.IsCancellationRequested ?? false)
+                                        {
+                                            await call.RequestStream.WriteAsync(new GetTradesRequest
+                                            {
+                                                Source = "MT5_EA",
+                                                OpenPositions = 0
+                                            }).ConfigureAwait(false);
+
+                                            await Task.Delay(1000, _cancellationTokenSource.Token).ConfigureAwait(false);
+                                        }
+                                    }
+                                    catch (OperationCanceledException)
+                                    {
+                                        // expected on shutdown
+                                    }
+                                    catch
+                                    {
+                                        // swallow other transient errors; the outer loop will reconnect
+                                    }
+                                    finally
+                                    {
+                                        try { await call.RequestStream.CompleteAsync().ConfigureAwait(false); } catch { }
+                                    }
+                                }, _cancellationTokenSource.Token);
+
                                 while (await call.ResponseStream.MoveNext(_cancellationTokenSource.Token))
                                 {
                                     var trade = call.ResponseStream.Current;
@@ -149,6 +179,8 @@ namespace MT5GrpcClient
 
                                     _tradeQueue.Enqueue(tradeJson);
                                 }
+
+                                try { await heartbeatTask.ConfigureAwait(false); } catch { }
                             }
                             catch (Exception)
                             {
