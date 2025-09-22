@@ -21,13 +21,18 @@ Quantower Add-on (.NET 6) ── gRPC ──> BridgeApp (Go) ── gRPC ──>
 
 ## 3. Success Criteria
 
-1. Quantower add-on builds and runs against Quantower SDK (document tested version) on .NET 6.0-windows.
+1. Quantower add-on builds and runs against Quantower SDK (tested with Quantower v1.144.9 stable and v1.144.10 Beta) on net8.0-windows.
 2. Bridge dispatches trades keyed by Quantower TradeId without `baseIdCrossRef` / `pendingCloses` heuristics.
 3. MT5 EA opens/closes hedges using Quantower identifiers with <100ms additional latency compared to current flow.
 4. Unified logging identifies source `qt` and correlates trades end-to-end.
 5. `coderabbit review --plain` executed and addressed after each major implementation PR.
 
 ## 4. Workstreams & Detailed Tasks
+
+### Minimum Development Requirements
+- Windows 10 or Windows 11 (64-bit).
+- .NET 8 SDK and runtime installed.
+- Visual Studio 2022 v17.8 or newer (with .NET desktop development workload).
 
 ### 4.1 Discovery & Tooling
 - [ ] Confirm Quantower SDK version and API surface (Core, Accounts, Orders, Trades, Portfolio).
