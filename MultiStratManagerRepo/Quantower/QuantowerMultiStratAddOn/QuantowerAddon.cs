@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Quantower.Bridge.Client;
+using Quantower.MultiStrat.Infrastructure;
 
 namespace Quantower.MultiStrat
 {
@@ -13,6 +14,7 @@ namespace Quantower.MultiStrat
     public class QuantowerAddon
     {
         private readonly ConcurrentDictionary<string, byte> _pendingTrades = new();
+        private QuantowerEventBridge? _eventBridge;
         private readonly string _grpcAddress;
 
         public QuantowerAddon(string grpcAddress)
@@ -30,6 +32,23 @@ namespace Quantower.MultiStrat
             }
 
             BridgeGrpcClient.StartTradingStream(OnBridgeTradeReceived);
+
+            if (QuantowerEventBridge.TryCreate(OnQuantowerTrade, null, out var bridge) && bridge != null)
+            {
+                _eventBridge = bridge;
+
+                foreach (var position in bridge.SnapshotPositions())
+                {
+                    TryPublishPositionSnapshot(position);
+                }
+
+                Console.WriteLine("[QT][INFO] Attached to Quantower Core trade stream.");
+            }
+            else
+            {
+                Console.WriteLine("[QT][WARN] Quantower Core instance not detected. Running without native event hooks.");
+            }
+
             return true;
         }
 
@@ -91,12 +110,39 @@ namespace Quantower.MultiStrat
         {
             BridgeGrpcClient.StopTradingStream();
             BridgeGrpcClient.Shutdown();
+            _eventBridge?.Dispose();
+            _eventBridge = null;
         }
 
         private void OnBridgeTradeReceived(string tradeJson)
         {
             // Placeholder: Quantower-specific logic will ingest MT5 responses here.
             Console.WriteLine($"[QT][STREAM] {tradeJson}");
+        }
+
+        private void OnQuantowerTrade(object trade)
+        {
+            if (!QuantowerTradeMapper.TryBuildTradeEnvelope(trade, out var payload, out var tradeId))
+            {
+                Console.WriteLine("[QT][WARN] Unable to translate Quantower trade event into bridge payload.");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(tradeId))
+            {
+                _pendingTrades.TryRemove(tradeId, out _);
+            }
+
+            _ = BridgeGrpcClient.SubmitTradeAsync(payload);
+        }
+
+        private void TryPublishPositionSnapshot(object position)
+        {
+            if (QuantowerTradeMapper.TryBuildTradeEnvelope(position, out var payload, out var positionId))
+            {
+                Console.WriteLine($"[QT][INFO] Found open position ({positionId ?? "n/a"}), broadcasting snapshot to bridge.");
+                _ = BridgeGrpcClient.SubmitTradeAsync(payload);
+            }
         }
     }
 }

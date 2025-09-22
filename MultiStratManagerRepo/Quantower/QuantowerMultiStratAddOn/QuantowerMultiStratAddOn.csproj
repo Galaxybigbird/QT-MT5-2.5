@@ -8,4 +8,9 @@
   <ItemGroup>
     <ProjectReference Include="..\BridgeGrpcClient\BridgeGrpcClient.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Infrastructure\QuantowerEventBridge.cs" />
+    <Compile Include="..\Infrastructure\QuantowerTradeMapper.cs" />
+  </ItemGroup>
 </Project>
