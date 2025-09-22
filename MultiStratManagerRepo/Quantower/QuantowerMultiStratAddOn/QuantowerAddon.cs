@@ -24,9 +24,9 @@ namespace Quantower.MultiStrat
             _grpcAddress = grpcAddress;
         }
 
-        public bool Start() => StartAsync().GetAwaiter().GetResult();
+        public Task<bool> StartAsync() => StartInternalAsync();
 
-        public async Task<bool> StartAsync()
+        private async Task<bool> StartInternalAsync()
         {
             var ok = await BridgeGrpcClient.Initialize(_grpcAddress, source: "qt", component: LogComponent).ConfigureAwait(false);
             if (!ok)
