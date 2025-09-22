@@ -366,7 +366,7 @@ namespace MT5GrpcClient
                                     {
                     while (!token.IsCancellationRequested)
                                         {
-                                            await call.RequestStream.WriteAsync(new HealthRequest
+                                            await call.RequestStream.WriteAsync(new GetTradesRequest
                                             {
                                                 Source = "MT5_EA",
                                                 OpenPositions = 0

@@ -199,13 +199,13 @@ void GrpcClientImpl::StreamingWorker() {
                 continue;
             }
             
-            // Send initial health request to start receiving trades
-            trading::HealthRequest health_req;
-            health_req.set_source("hedgebot");
-            health_req.set_open_positions(0);
-            
-            if (!trade_stream_->Write(health_req)) {
-                SetError(-6, "Failed to write health request to stream");
+            // Send initial stream request to start receiving trades
+            trading::GetTradesRequest stream_req;
+            stream_req.set_source("hedgebot");
+            stream_req.set_open_positions(0);
+
+            if (!trade_stream_->Write(stream_req)) {
+                SetError(-6, "Failed to write trade stream request");
                 trade_stream_->WritesDone();
                 grpc::Status status = trade_stream_->Finish();
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));

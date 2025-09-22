@@ -78,6 +78,8 @@ message HedgeCloseNotification {
   string timestamp = 7;
   string closure_reason = 8;
   uint64 mt5_ticket = 9;  // MT5 position ticket number
+  string qt_position_id = 10; // Quantower position identifier
+  string qt_trade_id = 11;    // Quantower trade identifier (if applicable)
 }
 
 // Elastic hedge update
@@ -115,6 +117,12 @@ message MT5TradeResult {
 message HealthRequest {
   string source = 1;  // "hedgebot", "addon", etc.
   int32 open_positions = 2;  // Optional for hedgebot
+}
+
+// Streaming request for GetTrades; carries heartbeat metadata from MT5
+message GetTradesRequest {
+  string source = 1;
+  int32 open_positions = 2;
 }
 
 message HealthResponse {
@@ -161,7 +169,7 @@ service TradingService {
   rpc SubmitTrade(Trade) returns (GenericResponse);
   
   // Trade polling for MT5 (streaming)
-  rpc GetTrades(stream HealthRequest) returns (stream Trade);
+  rpc GetTrades(stream GetTradesRequest) returns (stream Trade);
   
   // Trade result from MT5
   rpc SubmitTradeResult(MT5TradeResult) returns (GenericResponse);

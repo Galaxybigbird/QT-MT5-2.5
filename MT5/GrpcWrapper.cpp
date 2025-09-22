@@ -174,8 +174,8 @@ std::string CreateGrpcMessage(const std::string& data, bool compressed = false) 
     return frame;
 }
 
-// Create protobuf-encoded HealthRequest message
-std::string CreateHealthRequestProto(const std::string& source = "hedgebot", int openPositions = 0) {
+// Create protobuf-encoded GetTradesRequest message
+std::string CreateGetTradesRequestProto(const std::string& source = "hedgebot", int openPositions = 0) {
     std::string proto;
     
     // Field 1 (source): tag=0x0A (field 1, wire type 2=length-delimited)
@@ -459,8 +459,8 @@ void StreamPollingThread() {
                 continue;
             }
 
-            // Send initial HealthRequest to establish the stream
-            std::string healthProto = CreateHealthRequestProto("hedgebot", 0);
+            // Send initial GetTradesRequest to establish the stream
+            std::string healthProto = CreateGetTradesRequestProto("hedgebot", 0);
             std::string healthMessage = CreateGrpcMessage(healthProto);
             
             if (!SendGrpcMessage(streamSock, healthMessage)) {
@@ -477,7 +477,7 @@ void StreamPollingThread() {
                 // Send periodic health requests to keep stream alive (every 5 seconds)
                 auto now = std::chrono::steady_clock::now();
                 if (std::chrono::duration_cast<std::chrono::seconds>(now - lastHealthCheck).count() >= 5) {
-                    std::string healthProto = CreateHealthRequestProto("hedgebot", 0);
+                    std::string healthProto = CreateGetTradesRequestProto("hedgebot", 0);
                     std::string healthMessage = CreateGrpcMessage(healthProto);
                     
                     if (!SendGrpcMessage(streamSock, healthMessage)) {

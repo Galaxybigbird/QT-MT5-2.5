@@ -57,7 +57,7 @@ private:
     std::unique_ptr<trading::StreamingService::Stub> streaming_stub_;
 
     // Streaming management
-    std::unique_ptr<grpc::ClientReaderWriter<trading::HealthRequest, trading::Trade>> trade_stream_;
+    std::unique_ptr<grpc::ClientReaderWriter<trading::GetTradesRequest, trading::Trade>> trade_stream_;
     std::thread streaming_thread_;
     std::atomic<bool> streaming_active_;
     std::atomic<bool> should_stop_streaming_;

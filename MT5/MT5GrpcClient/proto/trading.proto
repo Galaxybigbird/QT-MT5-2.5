@@ -82,6 +82,11 @@ message HealthRequest {
   int32 open_positions = 2;  // Optional for hedgebot
 }
 
+message GetTradesRequest {
+  string source = 1;
+  int32 open_positions = 2;
+}
+
 message HealthResponse {
   string status = 1;
   int32 queue_size = 2;
@@ -126,7 +131,7 @@ service TradingService {
   rpc SubmitTrade(Trade) returns (GenericResponse);
   
   // Trade polling for MT5 (streaming)
-  rpc GetTrades(stream HealthRequest) returns (stream Trade);
+  rpc GetTrades(stream GetTradesRequest) returns (stream Trade);
   
   // Trade result from MT5
   rpc SubmitTradeResult(MT5TradeResult) returns (GenericResponse);
