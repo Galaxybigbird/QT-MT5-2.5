@@ -29,26 +29,7 @@ namespace NTGrpcClient
             try
             {
                 _source = string.IsNullOrWhiteSpace(source) ? "nt" : source;
-
-                if (string.IsNullOrWhiteSpace(component))
-                {
-                    if (_source.Equals("nt", StringComparison.OrdinalIgnoreCase))
-                    {
-                        _component = "nt_addon";
-                    }
-                    else if (_source.Equals("qt", StringComparison.OrdinalIgnoreCase))
-                    {
-                        _component = "qt_addon";
-                    }
-                    else
-                    {
-                        _component = "addon";
-                    }
-                }
-                else
-                {
-                    _component = component;
-                }
+                _component = ComponentResolver.Derive(_source, component);
 
                 // Extract host and port, normalize localhost to 127.0.0.1 for Grpc.Core
                 var address = serverAddress.Replace("http://", "").Replace("https://", "");

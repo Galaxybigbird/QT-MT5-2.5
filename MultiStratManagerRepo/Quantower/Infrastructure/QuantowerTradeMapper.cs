@@ -68,12 +68,79 @@ namespace Quantower.MultiStrat.Infrastructure
                 json = JsonSerializer.Serialize(payload, SerializerOptions);
                 return true;
             }
-            catch
+            catch (JsonException ex)
             {
-                json = string.Empty;
-                tradeId = null;
+                Console.Error.WriteLine($"[QT][ERROR] Failed to serialize Quantower trade payload: {ex.Message}\n{ex}");
+            }
+            catch (FormatException ex)
+            {
+                Console.Error.WriteLine($"[QT][ERROR] Invalid numeric/date format in Quantower trade object: {ex.Message}\n{ex}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[QT][ERROR] Unexpected error while mapping Quantower trade: {ex.Message}\n{ex}");
+            }
+
+            json = string.Empty;
+            tradeId = null;
+            return false;
+        }
+
+        public static bool TryBuildPositionClosure(object position, out string json, out string? positionId)
+        {
+            json = string.Empty;
+            positionId = null;
+
+            if (position == null)
+            {
                 return false;
             }
+
+            try
+            {
+                var payload = new Dictionary<string, object?>
+                {
+                    ["event_type"] = "quantower_position_closed",
+                    ["origin_platform"] = "quantower",
+                    ["closure_reason"] = "qt_position_removed"
+                };
+
+                positionId = GetString(position, "PositionId", "StrategyId", "Id", "BaseId");
+                if (!string.IsNullOrWhiteSpace(positionId))
+                {
+                    payload["base_id"] = positionId;
+                    payload["qt_position_id"] = positionId;
+                }
+
+                payload["nt_instrument_symbol"] = ExtractInstrumentName(position);
+                payload["nt_account_name"] = ExtractAccountName(position);
+
+                var quantity = GetDouble(position, "ClosedQuantity", "Quantity", "Volume");
+                payload["closed_hedge_quantity"] = Math.Abs(quantity);
+                payload["closed_hedge_action"] = DetermineAction(position, quantity);
+
+                var time = GetDateTime(position, "CloseTime", "ExecutionTime", "Time", "DateTime", "Timestamp") ?? DateTime.UtcNow;
+                payload["timestamp"] = new DateTimeOffset(time).ToString("o", CultureInfo.InvariantCulture);
+
+                json = JsonSerializer.Serialize(payload, SerializerOptions);
+                return true;
+            }
+            catch (JsonException ex)
+            {
+                Console.Error.WriteLine($"[QT][ERROR] Failed to serialize Quantower position closure: {ex.Message}\n{ex}");
+            }
+            catch (FormatException ex)
+            {
+                Console.Error.WriteLine($"[QT][ERROR] Invalid format while mapping Quantower position closure: {ex.Message}\n{ex}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[QT][ERROR] Unexpected error while mapping Quantower position closure: {ex.Message}\n{ex}");
+            }
+
+            json = string.Empty;
+            positionId = null;
+            return false;
         }
 
         private static string DetermineAction(object trade, double quantity)

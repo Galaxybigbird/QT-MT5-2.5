@@ -52,8 +52,9 @@ namespace Quantower.MultiStrat.Infrastructure
                 bridge = new QuantowerEventBridge(instance, subscriptions, positionsProvider);
                 return subscriptions.Count > 0;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine($"[QT][ERROR] Failed to attach Quantower event bridge: {ex.Message}\n{ex}");
                 bridge = null;
                 return false;
             }
@@ -123,19 +124,30 @@ namespace Quantower.MultiStrat.Infrastructure
                 parameterExpressions[i] = Expression.Parameter(parameters[i].ParameterType, parameters[i].Name);
             }
 
-            Expression payloadExpression;
             if (parameterExpressions.Length == 0)
             {
-                payloadExpression = Expression.Constant(null, typeof(object));
+                Console.Error.WriteLine($"[QT][WARN] Event {eventInfo.Name} has no payload parameters; skipping subscription.");
+                return null;
             }
-            else if (parameterExpressions.Length == 1)
+
+            var candidate = FindPayloadParameter(parameterExpressions, new[] { "trade", "position", "payload", "args", "eventargs", "e" });
+
+            if (candidate == null)
             {
-                payloadExpression = Expression.Convert(parameterExpressions[0], typeof(object));
+                var fallback = parameterExpressions[^1];
+                if (!fallback.Type.IsValueType || Nullable.GetUnderlyingType(fallback.Type) != null)
+                {
+                    candidate = fallback;
+                }
             }
-            else
+
+            if (candidate == null)
             {
-                payloadExpression = Expression.Convert(parameterExpressions[1], typeof(object));
+                Console.Error.WriteLine($"[QT][WARN] Unable to determine payload parameter for event {eventInfo.Name}; skipping subscription.");
+                return null;
             }
+
+            Expression payloadExpression = Expression.Convert(candidate, typeof(object));
 
             var callbackExpression = Expression.Constant(callback);
             var body = Expression.Invoke(callbackExpression, payloadExpression);
@@ -152,6 +164,27 @@ namespace Quantower.MultiStrat.Infrastructure
             }
 
             return () => EnumerateObjects(positionsProp.GetValue(instance));
+        }
+
+        private static ParameterExpression? FindPayloadParameter(IEnumerable<ParameterExpression> parameters, IEnumerable<string> nameHints)
+        {
+            foreach (var parameter in parameters)
+            {
+                if (string.IsNullOrWhiteSpace(parameter.Name))
+                {
+                    continue;
+                }
+
+                foreach (var hint in nameHints)
+                {
+                    if (parameter.Name.Equals(hint, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return parameter;
+                    }
+                }
+            }
+
+            return null;
         }
 
         private static IEnumerable<object> EnumerateObjects(object? source)

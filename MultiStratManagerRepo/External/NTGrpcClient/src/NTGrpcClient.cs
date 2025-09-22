@@ -32,26 +32,31 @@ namespace NTGrpcClient
         /// Initialize the gRPC client
         /// </summary>
         /// <param name="serverAddress">gRPC server address (e.g., "localhost:50051")</param>
+        /// <param name="source">Logical source tag, e.g. "nt" (default) or "qt"</param>
+        /// <param name="component">Optional component label. Defaults to "nt_addon" for nt, "qt_addon" for qt, else "addon"</param>
         /// <returns>True if successful</returns>
-        public static bool Initialize(string serverAddress)
+        public static bool Initialize(string serverAddress, string source = "nt", string component = null)
         {
             try
             {
-                _client = new TradingClient(serverAddress);
+                var comp = ComponentResolver.Derive(source, component);
+
+                _client = new TradingClient(serverAddress, source, comp);
                 // Redirect all Console output to Bridge logging, preserving original output
                 try
                 {
                     _originalConsoleOut = Console.Out;
-                    _unifiedLogWriter = new Trading.Proto.UnifiedLogWriter(_originalConsoleOut, serverAddress, source: "nt", component: "nt_addon");
+                    _unifiedLogWriter = new Trading.Proto.UnifiedLogWriter(_originalConsoleOut, serverAddress, source: source ?? "nt", component: comp);
                     Console.SetOut(_unifiedLogWriter);
                     // Emit a quick test line to verify console redirection + LoggingService path
-                    Console.WriteLine("[NT_ADDON][INFO][GRPC] Unified logging initialized.");
+                    Console.WriteLine($"[{comp.ToUpper()}][INFO][GRPC] Unified logging initialized.");
                 }
                 catch { /* non-fatal */ }
                 // Perform a quick blocking health check to verify server is reachable
                 try
                 {
-                    var health = _client.HealthCheckAsync("NT_ADDON_INIT");
+                    // Use generic 'addon' to ensure Bridge recognizes and marks addon connected regardless of platform
+                    var health = _client.HealthCheckAsync("addon");
                     if (!health.Wait(TimeSpan.FromSeconds(2)))
                     {
                         LastError = "HealthCheck timeout";

@@ -33,7 +33,7 @@ namespace Quantower.MultiStrat
 
             BridgeGrpcClient.StartTradingStream(OnBridgeTradeReceived);
 
-            if (QuantowerEventBridge.TryCreate(OnQuantowerTrade, null, out var bridge) && bridge != null)
+            if (QuantowerEventBridge.TryCreate(OnQuantowerTrade, OnQuantowerPositionClosed, out var bridge) && bridge != null)
             {
                 _eventBridge = bridge;
 
@@ -138,11 +138,29 @@ namespace Quantower.MultiStrat
 
         private void TryPublishPositionSnapshot(object position)
         {
-            if (QuantowerTradeMapper.TryBuildTradeEnvelope(position, out var payload, out var positionId))
+            if (QuantowerTradeMapper.TryBuildTradeEnvelope(position, out var tradePayload, out var positionTradeId))
             {
-                Console.WriteLine($"[QT][INFO] Found open position ({positionId ?? "n/a"}), broadcasting snapshot to bridge.");
-                _ = BridgeGrpcClient.SubmitTradeAsync(payload);
+                Console.WriteLine($"[QT][INFO] Streaming existing position as trade snapshot ({positionTradeId ?? "n/a"}).");
+                _ = BridgeGrpcClient.SubmitTradeAsync(tradePayload);
             }
+
+            if (QuantowerTradeMapper.TryBuildPositionClosure(position, out var closurePayload, out var closureId))
+            {
+                Console.WriteLine($"[QT][INFO] Broadcasting position state ({closureId ?? "n/a"}) to bridge for reconciliation.");
+                _ = BridgeGrpcClient.CloseHedgeAsync(closurePayload);
+            }
+        }
+
+        private void OnQuantowerPositionClosed(object position)
+        {
+            if (!QuantowerTradeMapper.TryBuildPositionClosure(position, out var payload, out var closureId))
+            {
+                Console.WriteLine("[QT][WARN] Unable to map Quantower position closure to bridge notification.");
+                return;
+            }
+
+            Console.WriteLine($"[QT][INFO] Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge.");
+            _ = BridgeGrpcClient.CloseHedgeAsync(payload);
         }
     }
 }
