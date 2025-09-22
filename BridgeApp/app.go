@@ -45,7 +45,6 @@ type App struct {
 	mt5TicketToBaseId map[uint64]string   // MT5 ticket -> BaseID
 	baseIdToMT5Ticket map[string]uint64   // BaseID -> last seen MT5 ticket (compat)
 	baseIdToTickets   map[string][]uint64 // BaseID -> all MT5 tickets for this base
-	baseIdCrossRef    map[string]string   // BaseID -> Related BaseID (for NT inconsistencies)
 
 	// Quantower tracking
 	qtMux            sync.RWMutex
@@ -54,7 +53,7 @@ type App struct {
 
 	// Metadata to aid resolution when BaseID mismatches occur
 	baseIdToInstrument map[string]string // BaseID -> instrument symbol
-	baseIdToAccount    map[string]string // BaseID -> NT account name
+	baseIdToAccount    map[string]string // BaseID -> account name
 
 	// Pending NT-initiated CLOSE_HEDGE requests when no MT5 ticket is known yet
 	pendingCloses map[string][]pendingClose // BaseID -> queued close intents
@@ -64,9 +63,7 @@ type App struct {
 	ntInitiatedTickets map[uint64]time.Time // ticket -> time marked
 
 	// Cache NT sizing hints per BaseID so elastic events can carry them
-	baseIdToNtPoints map[string]float64 // BaseID -> nt_points_per_1k_loss
-	// Fallback cache per instrument to cover early elastic events before Buy/Sell caching
-	instrumentToNtPts map[string]float64 // instrument -> nt_points_per_1k_loss
+	baseIdToElastic map[string]elasticInfo // BaseID -> elastic sizing and context
 
 	// Recent elastic-close context to align/suppress subsequent generic MT5TradeResult closes
 	elasticMux            sync.Mutex
@@ -76,6 +73,12 @@ type App struct {
 	// Sequence counter for unique elastic event IDs
 	elasticSeqMux   sync.Mutex
 	elasticSeqCount uint64
+}
+
+type elasticInfo struct {
+	NtPoints   float64
+	Instrument string
+	Account    string
 }
 
 // elasticMark captures an elastic close signal context for short-lived correlation
@@ -140,26 +143,12 @@ func (a *App) recentElasticFor(baseID string, ticket uint64, within time.Duratio
 }
 
 // bestInstAcctFor returns the best-known instrument and account for a given BaseID.
-// It first checks direct mappings, then falls back to cross-referenced BaseIDs if present.
 func (a *App) bestInstAcctFor(baseID string) (string, string) {
 	a.mt5TicketMux.RLock()
 	defer a.mt5TicketMux.RUnlock()
 
 	inst := strings.TrimSpace(a.baseIdToInstrument[baseID])
 	acct := strings.TrimSpace(a.baseIdToAccount[baseID])
-	if inst != "" && acct != "" {
-		return inst, acct
-	}
-
-	// Try cross-referenced BaseID (NT inconsistencies)
-	if rel, ok := a.baseIdCrossRef[baseID]; ok && rel != "" {
-		if inst == "" {
-			inst = strings.TrimSpace(a.baseIdToInstrument[rel])
-		}
-		if acct == "" {
-			acct = strings.TrimSpace(a.baseIdToAccount[rel])
-		}
-	}
 	return inst, acct
 }
 
@@ -250,24 +239,6 @@ type pendingClose struct {
 	account    string
 }
 
-// addCrossRef safely records a bidirectional BaseID cross-reference.
-// It is tolerant to empty/identical inputs and preserves existing mappings.
-func (a *App) addCrossRef(aBase, bBase string) {
-	if strings.TrimSpace(aBase) == "" || strings.TrimSpace(bBase) == "" || aBase == bBase {
-		return
-	}
-	a.mt5TicketMux.Lock()
-	defer a.mt5TicketMux.Unlock()
-	if _, exists := a.baseIdCrossRef[aBase]; !exists {
-		a.baseIdCrossRef[aBase] = bBase
-		log.Printf("gRPC: Created cross-reference mapping: %s -> %s (on alignment)", aBase, bBase)
-	}
-	if _, exists := a.baseIdCrossRef[bBase]; !exists {
-		a.baseIdCrossRef[bBase] = aBase
-		log.Printf("gRPC: Created reverse cross-reference mapping: %s -> %s (on alignment)", bBase, aBase)
-	}
-}
-
 // waitForTickets polls the in-memory ticket map for a BaseID until tickets appear or timeout.
 // Returns the discovered tickets (may be empty) and does not mutate state.
 func (a *App) waitForTickets(baseID string, maxWait time.Duration, poll time.Duration) []uint64 {
@@ -302,57 +273,6 @@ func (a *App) resolveBaseIDToTickets(requestedBaseID string) ([]uint64, string) 
 	return nil, ""
 }
 
-// detectAndStoreCrossReferences looks for related base_ids and creates cross-references for NT inconsistencies.
-// Must be called with mt5TicketMux already locked.
-func (a *App) detectAndStoreCrossReferences(newBaseID string) {
-	// Look for existing base_ids that might be related
-	// Common pattern: TRD_<UUID> where UUID might be truncated or completely different
-	if len(newBaseID) < 8 {
-		return // Too short to analyze
-	}
-
-	// First try: Extract potential common prefix/suffix patterns (UUID-based matching)
-	if strings.HasPrefix(newBaseID, "TRD_") {
-		newSuffix := newBaseID[4:] // Remove "TRD_" prefix
-
-		// Look for existing base_ids with similar UUID patterns
-		for existingBaseID := range a.baseIdToTickets {
-			if existingBaseID == newBaseID {
-				continue // Skip self
-			}
-
-			if strings.HasPrefix(existingBaseID, "TRD_") {
-				existingSuffix := existingBaseID[4:]
-
-				// Check if one is a prefix of the other (common with UUID truncation)
-				if len(newSuffix) >= 8 && len(existingSuffix) >= 8 {
-					shorterLen := min(len(newSuffix), len(existingSuffix))
-					if shorterLen >= 8 && newSuffix[:shorterLen] == existingSuffix[:shorterLen] {
-						// Found potential related base_ids
-						if _, exists := a.baseIdCrossRef[newBaseID]; !exists {
-							a.baseIdCrossRef[newBaseID] = existingBaseID
-							log.Printf("gRPC: Created UUID-based cross-reference mapping: %s -> %s", newBaseID, existingBaseID)
-						}
-						if _, exists := a.baseIdCrossRef[existingBaseID]; !exists {
-							a.baseIdCrossRef[existingBaseID] = newBaseID
-							log.Printf("gRPC: Created reverse UUID-based cross-reference mapping: %s -> %s", existingBaseID, newBaseID)
-						}
-						return // Found UUID-based match, no need for temporal matching
-					}
-				}
-			}
-		}
-	}
-}
-
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // NewApp creates a new App application struct
 func NewApp() *App {
 
@@ -371,13 +291,11 @@ func NewApp() *App {
 		mt5TicketToBaseId:  make(map[uint64]string),
 		baseIdToMT5Ticket:  make(map[string]uint64),
 		baseIdToTickets:    make(map[string][]uint64),
-		baseIdCrossRef:     make(map[string]string),
 		baseIdToInstrument: make(map[string]string),
 		baseIdToAccount:    make(map[string]string),
 		pendingCloses:      make(map[string][]pendingClose),
 		ntInitiatedTickets: make(map[uint64]time.Time),
-		baseIdToNtPoints:   make(map[string]float64),
-		instrumentToNtPts:  make(map[string]float64),
+		baseIdToElastic:    make(map[string]elasticInfo),
 		qtTradeToBase:      make(map[string]string),
 		qtPositionToBase:   make(map[string]string),
 	}
@@ -664,21 +582,29 @@ func (a *App) AddToTradeQueue(trade interface{}) error {
 	if b := strings.TrimSpace(t.BaseID); b != "" {
 		actLower := strings.ToLower(strings.TrimSpace(t.Action))
 		if actLower == "buy" || actLower == "sell" {
+			inst := strings.TrimSpace(t.Instrument)
+			acct := strings.TrimSpace(t.AccountName)
+			points := t.NTPointsPer1kLoss
+
 			a.mt5TicketMux.Lock()
-			if inst := strings.TrimSpace(t.Instrument); inst != "" {
+			if inst != "" {
 				a.baseIdToInstrument[b] = inst
 			}
-			if acct := strings.TrimSpace(t.AccountName); acct != "" {
+			if acct != "" {
 				a.baseIdToAccount[b] = acct
 			}
-			// Cache NT sizing hint if present and > 0
-			if t.NTPointsPer1kLoss > 0 {
-				a.baseIdToNtPoints[b] = t.NTPointsPer1kLoss
-				if inst := strings.TrimSpace(t.Instrument); inst != "" {
-					// Also cache per instrument as a fallback for early elastic events
-					a.instrumentToNtPts[inst] = t.NTPointsPer1kLoss
-				}
+
+			info := a.baseIdToElastic[b]
+			if points > 0 {
+				info.NtPoints = points
 			}
+			if inst != "" {
+				info.Instrument = inst
+			}
+			if acct != "" {
+				info.Account = acct
+			}
+			a.baseIdToElastic[b] = info
 			a.mt5TicketMux.Unlock()
 		}
 	}
@@ -1075,45 +1001,9 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 					a.baseIdToTickets[mt5Result.ID] = append(list, mt5Result.Ticket)
 				}
 
-				// Auto-detect potential cross-references for related base_ids
-				a.detectAndStoreCrossReferences(mt5Result.ID)
-
-				// Capture available tickets and any pending closes (including correlated) before unlocking
+				// Capture available tickets and any pending closes before unlocking
 				available := append([]uint64(nil), a.baseIdToTickets[mt5Result.ID]...)
 				pend := append([]pendingClose(nil), a.pendingCloses[mt5Result.ID]...)
-				// Also absorb pending closes from correlated BaseIDs (crossref or same inst/acct)
-				if len(a.pendingCloses) > 0 {
-					base := mt5Result.ID
-					instB := a.baseIdToInstrument[base]
-					acctB := a.baseIdToAccount[base]
-					for pBase, plist := range a.pendingCloses {
-						if pBase == base || len(plist) == 0 {
-							continue
-						}
-						// Crossref relation
-						rel := a.baseIdCrossRef[pBase]
-						rev := a.baseIdCrossRef[base]
-						sameRel := (rel == base) || (rev == pBase)
-						// Instrument/account correlation (when available for both)
-						instP, hasInstP := a.baseIdToInstrument[pBase]
-						acctP, hasAcctP := a.baseIdToAccount[pBase]
-						sameIA := false
-						if instB != "" && acctB != "" && hasInstP && hasAcctP {
-							sameIA = (instP == instB && acctP == acctB)
-						}
-						if sameRel || sameIA {
-							pend = append(pend, plist...)
-							delete(a.pendingCloses, pBase)
-							log.Printf("gRPC: Merged %d pending close(s) from BaseID %s into %s (reason=%s)", len(plist), pBase, base, func() string {
-								if sameRel {
-									return "crossref"
-								} else {
-									return "inst_acct"
-								}
-							}())
-						}
-					}
-				}
 				a.mt5TicketMux.Unlock()
 
 				log.Printf("gRPC: Stored MT5 ticket mapping - Ticket: %d -> BaseID: %s (count=%d)", mt5Result.Ticket, mt5Result.ID, len(available))
@@ -1301,42 +1191,9 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 						a.baseIdToTickets[baseId] = append(list, ticket)
 					}
 
-					// Auto-detect potential cross-references for related base_ids
-					a.detectAndStoreCrossReferences(baseId)
-
-					// Capture available tickets and pending (including correlated) before unlock
+					// Capture available tickets and pending before unlock
 					available := append([]uint64(nil), a.baseIdToTickets[baseId]...)
 					pend := append([]pendingClose(nil), a.pendingCloses[baseId]...)
-					if len(a.pendingCloses) > 0 {
-						base := baseId
-						instB := a.baseIdToInstrument[base]
-						acctB := a.baseIdToAccount[base]
-						for pBase, plist := range a.pendingCloses {
-							if pBase == base || len(plist) == 0 {
-								continue
-							}
-							rel := a.baseIdCrossRef[pBase]
-							rev := a.baseIdCrossRef[base]
-							sameRel := (rel == base) || (rev == pBase)
-							instP, hasInstP := a.baseIdToInstrument[pBase]
-							acctP, hasAcctP := a.baseIdToAccount[pBase]
-							sameIA := false
-							if instB != "" && acctB != "" && hasInstP && hasAcctP {
-								sameIA = (instP == instB && acctP == acctB)
-							}
-							if sameRel || sameIA {
-								pend = append(pend, plist...)
-								delete(a.pendingCloses, pBase)
-								log.Printf("gRPC: Merged %d pending close(s) from BaseID %s into %s (reason=%s)", len(plist), pBase, base, func() string {
-									if sameRel {
-										return "crossref"
-									} else {
-										return "inst_acct"
-									}
-								}())
-							}
-						}
-					}
 					a.mt5TicketMux.Unlock()
 
 					log.Printf("gRPC: Stored MT5 ticket mapping - Ticket: %d -> BaseID: %s (count=%d)", ticket, baseId, len(available))
@@ -1401,59 +1258,45 @@ func (a *App) HandleElasticUpdate(update interface{}) error {
 	mt5tk := getMT5TicketFromRequest(update)
 	log.Printf("DEBUG: Elastic extract base_id=%s profit_level=%d current_profit=%.4f mt5_ticket=%d", baseID, profitLvl, curProfit, mt5tk)
 
-	// Inject cached NT sizing hint and enrichment where possible
-	// Try BaseID first, then instrument fallback, and a brief wait to catch just-enqueued Buy
+	// Inject cached Quantower sizing hint and enrichment where possible
 	a.mt5TicketMux.RLock()
-	ntPts := a.baseIdToNtPoints[baseID]
-	inst, acct := a.baseIdToInstrument[baseID], a.baseIdToAccount[baseID]
-	// Instrument-level fallback if BaseID not yet cached
-	if ntPts <= 0 && inst != "" {
-		if v, ok := a.instrumentToNtPts[inst]; ok && v > 0 {
-			ntPts = v
-		}
+	info := a.baseIdToElastic[baseID]
+	ntPts := info.NtPoints
+	inst := strings.TrimSpace(a.baseIdToInstrument[baseID])
+	acct := strings.TrimSpace(a.baseIdToAccount[baseID])
+	if inst == "" {
+		inst = strings.TrimSpace(info.Instrument)
 	}
-	// Cross-reference fallback: if this base has a mapped related base, try its cached hints
-	if ntPts <= 0 {
-		if rel, ok := a.baseIdCrossRef[baseID]; ok && rel != "" {
-			if v, ok2 := a.baseIdToNtPoints[rel]; ok2 && v > 0 {
-				ntPts = v
-			}
-			// Backfill instrument/account from related base if missing
-			if inst == "" {
-				if v, ok2 := a.baseIdToInstrument[rel]; ok2 && strings.TrimSpace(v) != "" {
-					inst = v
-				}
-			}
-			if acct == "" {
-				if v, ok2 := a.baseIdToAccount[rel]; ok2 && strings.TrimSpace(v) != "" {
-					acct = v
-				}
-			}
-		}
+	if acct == "" {
+		acct = strings.TrimSpace(info.Account)
 	}
 	a.mt5TicketMux.RUnlock()
 
-	// If still missing, wait briefly for Buy/Sell caching to land
-	if ntPts <= 0 {
-		for i := 0; i < 10; i++ { // up to ~150ms
+	// If essentials missing, wait briefly for originating trade to populate caches
+	if ntPts <= 0 || inst == "" || acct == "" {
+		for i := 0; i < 10; i++ {
 			time.Sleep(15 * time.Millisecond)
 			a.mt5TicketMux.RLock()
-			ntPts = a.baseIdToNtPoints[baseID]
-			if ntPts <= 0 && inst == "" && acct == "" {
-				// Re-resolve best instrument/account (could have been cached meanwhile)
-				inst, acct = a.bestInstAcctFor(baseID)
+			info = a.baseIdToElastic[baseID]
+			if ntPts <= 0 {
+				ntPts = info.NtPoints
+			}
+			if inst == "" {
+				inst = strings.TrimSpace(a.baseIdToInstrument[baseID])
+				if inst == "" {
+					inst = strings.TrimSpace(info.Instrument)
+				}
+			}
+			if acct == "" {
+				acct = strings.TrimSpace(a.baseIdToAccount[baseID])
+				if acct == "" {
+					acct = strings.TrimSpace(info.Account)
+				}
 			}
 			a.mt5TicketMux.RUnlock()
-			if ntPts > 0 {
+			if ntPts > 0 && inst != "" && acct != "" {
 				break
 			}
-		}
-		if ntPts <= 0 && inst != "" {
-			a.mt5TicketMux.RLock()
-			if v, ok := a.instrumentToNtPts[inst]; ok && v > 0 {
-				ntPts = v
-			}
-			a.mt5TicketMux.RUnlock()
 		}
 	}
 

@@ -113,14 +113,9 @@ func TestRemainderBecomesPendingOnly(t *testing.T) {
 	}
 }
 
-// New tests to validate BaseID alignment for base_id-only CLOSE_HEDGE
-func TestBaseIdAlignmentAffectsPending_CrossRef(t *testing.T) {
+// Pending closes should remain scoped to the requested BaseID when no tickets are available
+func TestPendingCloseRecordedOnRequestedBase(t *testing.T) {
 	a := NewApp()
-
-	// Prepopulate cross-reference: requested -> related
-	a.mt5TicketMux.Lock()
-	a.baseIdCrossRef["TRD_A"] = "TRD_B"
-	a.mt5TicketMux.Unlock()
 
 	req := map[string]interface{}{
 		"BaseID":              "TRD_A",
@@ -134,48 +129,14 @@ func TestBaseIdAlignmentAffectsPending_CrossRef(t *testing.T) {
 		t.Fatalf("HandleNTCloseHedgeRequest error: %v", err)
 	}
 
-	// No trade enqueued; pending should be recorded under aligned BaseID (TRD_B)
 	if _, ok := drainOne(a); ok {
 		t.Fatalf("expected no base_id-only trade enqueued; pending-only policy")
 	}
+
 	a.mt5TicketMux.RLock()
-	pend := a.pendingCloses["TRD_B"]
+	pend := a.pendingCloses["TRD_A"]
 	a.mt5TicketMux.RUnlock()
 	if len(pend) != 1 || pend[0].qty != 1 || pend[0].instrument != "NQ" || pend[0].account != "Sim101" {
-		t.Fatalf("expected pending recorded under TRD_B with qty=1; got: %+v", pend)
-	}
-}
-
-func TestBaseIdAlignmentAffectsPending_ByInstrumentAccount(t *testing.T) {
-	a := NewApp()
-
-	// Prepopulate instrument/account metadata under a different BaseID
-	a.mt5TicketMux.Lock()
-	a.baseIdToInstrument["TRD_B"] = "NQ"
-	a.baseIdToAccount["TRD_B"] = "Sim101"
-	a.mt5TicketMux.Unlock()
-
-	// No tickets known anywhere forces pending-only path
-	req := map[string]interface{}{
-		"BaseID":              "TRD_A",
-		"ClosedHedgeQuantity": 1.0,
-		"NTInstrumentSymbol":  "NQ",
-		"NTAccountName":       "Sim101",
-		"ClosureReason":       "NT_initiated",
-	}
-
-	if err := a.HandleNTCloseHedgeRequest(req); err != nil {
-		t.Fatalf("HandleNTCloseHedgeRequest error: %v", err)
-	}
-
-	// No trade enqueued; pending should be recorded under aligned BaseID (TRD_B)
-	if _, ok := drainOne(a); ok {
-		t.Fatalf("expected no base_id-only trade enqueued; pending-only policy")
-	}
-	a.mt5TicketMux.RLock()
-	pend := a.pendingCloses["TRD_B"]
-	a.mt5TicketMux.RUnlock()
-	if len(pend) != 1 || pend[0].qty != 1 || pend[0].instrument != "NQ" || pend[0].account != "Sim101" {
-		t.Fatalf("expected pending recorded under TRD_B with qty=1; got: %+v", pend)
+		t.Fatalf("expected pending recorded under TRD_A with qty=1; got: %+v", pend)
 	}
 }
