@@ -1,5 +1,6 @@
 using System;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Quantower.Bridge.Client;
 
@@ -11,7 +12,7 @@ namespace Quantower.MultiStrat
     /// </summary>
     public class QuantowerAddon
     {
-        private readonly List<string> _pendingTrades = new();
+        private readonly ConcurrentDictionary<string, byte> _pendingTrades = new();
         private readonly string _grpcAddress;
 
         public QuantowerAddon(string grpcAddress)
@@ -34,13 +35,56 @@ namespace Quantower.MultiStrat
 
         public async Task<bool> SubmitTradeAsync(string tradeJson)
         {
-            _pendingTrades.Add(tradeJson);
-            var success = await BridgeGrpcClient.SubmitTradeAsync(tradeJson).ConfigureAwait(false);
-            if (success)
+            string? tradeId = null;
+            try
             {
-                _pendingTrades.Remove(tradeJson);
+                // Extract a stable unique identifier from the trade JSON
+                var doc = JsonDocument.Parse(tradeJson);
+                var root = doc.RootElement;
+
+                // Try various ID fields in order of preference
+                tradeId = GetStringValue(root, "id") ?? 
+                         GetStringValue(root, "trade_id") ?? 
+                         GetStringValue(root, "base_id") ?? 
+                         GetStringValue(root, "qt_position_id") ?? 
+                         GetStringValue(root, "position_id");
+
+                if (string.IsNullOrWhiteSpace(tradeId))
+                {
+                    Console.WriteLine("[QT][ERROR] Trade JSON missing unique identifier");
+                    return false;
+                }
+
+                _pendingTrades.TryAdd(tradeId, 0);
+                var success = await BridgeGrpcClient.SubmitTradeAsync(tradeJson).ConfigureAwait(false);
+
+                _pendingTrades.TryRemove(tradeId, out _);
+
+                return success;
             }
-            return success;
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[QT][ERROR] Exception in SubmitTradeAsync: {ex.Message}");
+                if (!string.IsNullOrWhiteSpace(tradeId))
+                {
+                    _pendingTrades.TryRemove(tradeId, out _);
+                }
+                return false;
+            }
+        }
+
+        private static string? GetStringValue(JsonElement element, string propertyName)
+        {
+            if (!element.TryGetProperty(propertyName, out var value))
+                return null;
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
+                JsonValueKind.True or JsonValueKind.False => value.GetBoolean().ToString(),
+                _ => null
+            };
         }
 
         public void Stop()

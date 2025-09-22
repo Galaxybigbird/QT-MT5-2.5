@@ -174,13 +174,19 @@ namespace Quantower.Bridge.Client
             try
             {
                 var request = JsonToProtoHedgeClose(notificationJson);
-                var response = await _client.NTCloseHedgeAsync(request).ConfigureAwait(false);
+                var response = await CloseHedgeInternalAsync(request).ConfigureAwait(false);
                 return response.Status == "success" ? OperationResult.Ok() : OperationResult.Failure(response.Message);
             }
             catch (Exception ex)
             {
                 return OperationResult.Failure(ex.Message);
             }
+        }
+
+        private async Task<GenericResponse> CloseHedgeInternalAsync(HedgeCloseNotification request)
+        {
+            var call = _client.NTCloseHedgeAsync(request);
+            return await call.ResponseAsync.ConfigureAwait(false);
         }
 
         public void StartTradingStream(Action<string>? onTradeReceived)

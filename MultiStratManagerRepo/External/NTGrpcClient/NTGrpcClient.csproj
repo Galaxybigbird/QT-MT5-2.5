@@ -26,6 +26,6 @@
   </ItemGroup>
   
   <ItemGroup>
-    <Protobuf Include="proto\trading.proto" GrpcServices="Client" />
+    <Protobuf Include="..\..\..\BridgeApp\proto\trading.proto" GrpcServices="Client" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net6.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Quantower.Bridge.Client</RootNamespace>
@@ -12,11 +12,11 @@
     <PackageReference Include="Grpc.Core.Api" Version="2.62.0" />
     <PackageReference Include="Google.Protobuf" Version="3.25.1" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\External\Proto\Trading.cs" />
-    <Compile Include="..\..\External\Proto\TradingGrpc.cs" />
+    <Protobuf Include="..\..\..\BridgeApp\proto\trading.proto" GrpcServices="Client" />
   </ItemGroup>
 
 </Project>

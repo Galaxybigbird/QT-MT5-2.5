@@ -32,6 +32,13 @@
     <NuGetPackageImportStamp>
     </NuGetPackageImportStamp>
   </PropertyGroup>
+  <!-- Platform selection: set UseQuantower=true to build against Quantower SDK instead of NinjaTrader -->
+  <PropertyGroup>
+    <UseQuantower>false</UseQuantower>
+    <!-- Adjust QuantowerSdkDir to your local Quantower installation if needed -->
+    <QuantowerSdkDir>$(ProgramFiles)\Quantower\</QuantowerSdkDir>
+  </PropertyGroup>
+
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
@@ -78,6 +85,29 @@
     <Reference Include="System.Xml" />
     <Reference Include="System.Xaml, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
     <Reference Include="WindowsBase, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Styles\MainTheme.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Styles\UIStyles.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Resource>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="MultiStratManager.cs" />
+    <Compile Include="UIForManager.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseQuantower)' == 'true'">
+    <Compile Include="MultiStratManager_QT.cs" />
+  </ItemGroup>
+
+
+  <!-- NinjaTrader references (default). Disabled when UseQuantower=true -->
+  <ItemGroup Condition="'$(UseQuantower)' != 'true'">
     <Reference Include="InfragisticsWPF4.v15.1, Version=15.1.20151.2055, Culture=neutral, PublicKeyToken=7dd5c3163f2cd0cb, processorArchitecture=MSIL">
       <HintPath>C:\Program Files\NinjaTrader 8\bin\InfragisticsWPF4.v15.1.dll</HintPath>
       <Private>False</Private>
@@ -107,27 +137,28 @@
       <Private>True</Private>
     </Reference>
   </ItemGroup>
-  <ItemGroup>
-    <Resource Include="Styles\MainTheme.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Resource>
-    <Resource Include="Styles\UIStyles.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Resource>
+
+  <!-- Quantower references. Enabled when UseQuantower=true -->
+  <ItemGroup Condition="'$(UseQuantower)' == 'true'">
+    <Reference Include="TradingPlatform.BusinessLayer">
+      <HintPath>$(QuantowerSdkDir)TradingPlatform.BusinessLayer.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="TradingPlatform.Common">
+      <HintPath>$(QuantowerSdkDir)TradingPlatform.Common.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
+
   <ItemGroup>
-    <Compile Include="MultiStratManager.cs" />
-    <Compile Include="UIForManager.cs" />
-  </ItemGroup>
-  <ItemGroup>
+
     <None Include="app.config">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="packages.config" />
+
   </ItemGroup>
+
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.8">
       <Visible>False</Visible>
@@ -141,6 +172,17 @@
     </BootstrapperPackage>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  
+  <!-- Validate Quantower SDK exists before compilation when UseQuantower=true -->
+  <Target Name="ValidateQuantowerSdk" BeforeTargets="CoreCompile" Condition="'$(UseQuantower)' == 'true'">
+    <Error Condition="'$(QuantowerSdkDir)' == ''"
+           Text="QuantowerSdkDir property is not set. Please set it to your Quantower installation path (e.g., C:\\Program Files\\Quantower\\)." />
+    <Error Condition="!Exists('$(QuantowerSdkDir)TradingPlatform.BusinessLayer.dll')" 
+           Text="Quantower SDK not found: $(QuantowerSdkDir)TradingPlatform.BusinessLayer.dll is missing. Please install Quantower or set QuantowerSdkDir property to the correct path." />
+    <Error Condition="!Exists('$(QuantowerSdkDir)TradingPlatform.Common.dll')" 
+           Text="Quantower SDK not found: $(QuantowerSdkDir)TradingPlatform.Common.dll is missing. Please install Quantower or set QuantowerSdkDir property to the correct path." />
+  </Target>
+  
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>

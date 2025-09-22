@@ -32,7 +32,7 @@ Quantower Add-on (.NET 6) ── gRPC ──> BridgeApp (Go) ── gRPC ──>
 ### 4.1 Discovery & Tooling
 - [ ] Confirm Quantower SDK version and API surface (Core, Accounts, Orders, Trades, Portfolio).
 - [ ] Collect example code from Quantower docs (`Core.Instance.TradeAdded`, `PositionAdded`, etc.).
-- [ ] Document supported .NET runtime (Quantower 1.131+ requires net6.0-windows).
+- [ ] Document supported .NET runtime (Quantower stable 1.144.9 and beta 1.144.10 require net8.0-windows).
 - [ ] Set up local Quantower dev environment notes in `docs/ENVIRONMENT_SETUP.md`.
 
 ### 4.2 Proto & gRPC Contract
@@ -54,13 +54,13 @@ Quantower Add-on (.NET 6) ── gRPC ──> BridgeApp (Go) ── gRPC ──>
 - [ ] Update CLI tools under `BridgeApp/tools/` for new message shapes.
 
 ### 4.4 Shared gRPC Client (C#)
-- [ ] Replace the legacy `NTGrpcClient` with a Quantower-first `BridgeGrpcClient` targeting **net6.0-windows** only.
+- [ ] Replace the legacy `NTGrpcClient` with a Quantower-first `BridgeGrpcClient` targeting **net8.0-windows** only.
 - [ ] Switch from `Grpc.Core` to `Grpc.Net.Client` (Quantower supports modern .NET).
 - [ ] Expose Quantower-specific helpers (TradeId-based submission, portfolio snapshots).
 - [ ] Update logging metadata (tags: `source=qt`, `component=qt_addon`).
 
-- ### 4.5 Quantower Add-on Implementation
-- [ ] Create new project (e.g., `QuantowerMultiStratAddOn.csproj`) under `MultiStratManagerRepo/Quantower/` targeting `net6.0-windows` (Quantower-bridge-MT5EA stack only — NinjaTrader retired).
+### 4.5 Quantower Add-on Implementation
+- [ ] Create new project (e.g., `QuantowerMultiStratAddOn.csproj`) under `MultiStratManagerRepo/Quantower/` targeting `net8.0-windows` (Quantower-bridge-MT5EA stack only — NinjaTrader retired).
 - [ ] Implement lifecycle hooks:
   - Connect to Core events (`Core.Instance.TradeAdded`, `PositionAdded`, `PositionClosed`).
   - Manage configuration (accounts, symbols, hedging ratios) via Quantower panels.
