@@ -17,6 +17,7 @@ namespace Quantower.MultiStrat
         private readonly ConcurrentDictionary<string, byte> _pendingTrades = new();
         private QuantowerEventBridge? _eventBridge;
         private readonly string _grpcAddress;
+        private const string LogComponent = "qt_addon";
 
         public QuantowerAddon(string grpcAddress)
         {
@@ -27,10 +28,10 @@ namespace Quantower.MultiStrat
 
         public async Task<bool> StartAsync()
         {
-            var ok = await BridgeGrpcClient.Initialize(_grpcAddress, source: "qt", component: "qt_addon").ConfigureAwait(false);
+            var ok = await BridgeGrpcClient.Initialize(_grpcAddress, source: "qt", component: LogComponent).ConfigureAwait(false);
             if (!ok)
             {
-                Console.WriteLine($"[QT][ERROR] Failed to initialize bridge client: {BridgeGrpcClient.LastError}");
+                LogError($"Failed to initialize bridge client: {BridgeGrpcClient.LastError}");
                 return false;
             }
 
@@ -45,11 +46,11 @@ namespace Quantower.MultiStrat
                     await TryPublishPositionSnapshotAsync(position).ConfigureAwait(false);
                 }
 
-                Console.WriteLine("[QT][INFO] Attached to Quantower Core trade stream.");
+                LogInfo("Attached to Quantower Core trade stream");
             }
             else
             {
-                Console.WriteLine("[QT][WARN] Quantower Core instance not detected. Running without native event hooks.");
+                LogWarn("Quantower Core instance not detected. Running without native event hooks");
             }
 
             return true;
@@ -73,7 +74,7 @@ namespace Quantower.MultiStrat
 
                 if (string.IsNullOrWhiteSpace(tradeId))
                 {
-                    Console.WriteLine("[QT][ERROR] Trade JSON missing unique identifier");
+                    LogError("Trade JSON missing unique identifier");
                     return false;
                 }
 
@@ -86,7 +87,7 @@ namespace Quantower.MultiStrat
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[QT][ERROR] Exception in SubmitTradeAsync: {ex.Message}");
+                LogError($"Exception in SubmitTradeAsync: {ex.Message}", tradeId);
                 if (!string.IsNullOrWhiteSpace(tradeId))
                 {
                     _pendingTrades.TryRemove(tradeId, out _);
@@ -115,19 +116,20 @@ namespace Quantower.MultiStrat
             BridgeGrpcClient.Shutdown();
             _eventBridge?.Dispose();
             _eventBridge = null;
+            LogInfo("Quantower add-on stopped");
         }
 
         private void OnBridgeTradeReceived(string tradeJson)
         {
             // Placeholder: Quantower-specific logic will ingest MT5 responses here.
-            Console.WriteLine($"[QT][STREAM] {tradeJson}");
+            LogDebug($"Bridge stream payload received: {tradeJson}");
         }
 
         private void OnQuantowerTrade(Trade trade)
         {
             if (!QuantowerTradeMapper.TryBuildTradeEnvelope(trade, out var payload, out var tradeId))
             {
-                Console.WriteLine("[QT][WARN] Unable to translate Quantower trade event into bridge payload.");
+                LogWarn("Unable to translate Quantower trade event into bridge payload", trade?.Id, trade?.PositionId);
                 return;
             }
 
@@ -143,13 +145,13 @@ namespace Quantower.MultiStrat
         {
             if (QuantowerTradeMapper.TryBuildPositionSnapshot(position, out var tradePayload, out var positionTradeId))
             {
-                Console.WriteLine($"[QT][INFO] Streaming existing position as trade snapshot ({positionTradeId ?? "n/a"}).");
+                LogInfo($"Streaming existing position as trade snapshot ({positionTradeId ?? "n/a"})", positionTradeId, positionTradeId);
                 await DispatchWithLoggingAsync(() => BridgeGrpcClient.SubmitTradeAsync(tradePayload), "SubmitTradeSnapshot", positionTradeId ?? "n/a").ConfigureAwait(false);
             }
 
             if (QuantowerTradeMapper.TryBuildPositionClosure(position, out var closurePayload, out var closureId))
             {
-                Console.WriteLine($"[QT][INFO] Broadcasting position state ({closureId ?? "n/a"}) to bridge for reconciliation.");
+                LogInfo($"Broadcasting position state ({closureId ?? "n/a"}) to bridge for reconciliation", closureId, closureId);
                 await DispatchWithLoggingAsync(() => BridgeGrpcClient.CloseHedgeAsync(closurePayload), "CloseHedgeSnapshot", closureId ?? "n/a").ConfigureAwait(false);
             }
         }
@@ -158,11 +160,11 @@ namespace Quantower.MultiStrat
         {
             if (!QuantowerTradeMapper.TryBuildPositionClosure(position, out var payload, out var closureId))
             {
-                Console.WriteLine("[QT][WARN] Unable to map Quantower position closure to bridge notification.");
+                LogWarn("Unable to map Quantower position closure to bridge notification", closureId, closureId);
                 return;
             }
 
-            Console.WriteLine($"[QT][INFO] Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge.");
+            LogInfo($"Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge", closureId, closureId);
             ObserveAsyncOperation(BridgeGrpcClient.CloseHedgeAsync(payload), "CloseHedge", closureId ?? "n/a");
         }
 
@@ -173,12 +175,12 @@ namespace Quantower.MultiStrat
                 var success = await operation().ConfigureAwait(false);
                 if (!success)
                 {
-                    Console.WriteLine($"[QT][WARN] {operationName} failed for {identifier}: {BridgeGrpcClient.LastError}");
+                    LogWarnStatic($"{operationName} failed", identifier, BridgeGrpcClient.LastError);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[QT][ERROR] {operationName} threw for {identifier}: {ex.Message}");
+                LogErrorStatic($"{operationName} threw", identifier, ex.Message);
             }
         }
 
@@ -189,13 +191,55 @@ namespace Quantower.MultiStrat
                 if (t.IsFaulted)
                 {
                     var root = t.Exception?.GetBaseException();
-                    Console.WriteLine($"[QT][ERROR] {operationName} exception for {identifier}: {root?.Message ?? t.Exception?.Message}");
+                    LogErrorStatic($"{operationName} exception", identifier, root?.Message ?? t.Exception?.Message ?? "unknown error");
                 }
                 else if (!t.Result)
                 {
-                    Console.WriteLine($"[QT][WARN] {operationName} unsuccessful for {identifier}: {BridgeGrpcClient.LastError}");
+                    LogWarnStatic($"{operationName} unsuccessful", identifier, BridgeGrpcClient.LastError);
                 }
             }, TaskContinuationOptions.ExecuteSynchronously);
+        }
+
+        private static void LogDebug(string message, string? tradeId = null, string? baseId = null)
+        {
+            BridgeGrpcClient.LogDebug(LogComponent, message, tradeId ?? string.Empty, baseId ?? string.Empty);
+            Console.WriteLine($"[QT][DEBUG] {message}");
+        }
+
+        private static void LogInfo(string message, string? tradeId = null, string? baseId = null)
+        {
+            BridgeGrpcClient.LogInfo(LogComponent, message, tradeId ?? string.Empty, baseId ?? string.Empty);
+            Console.WriteLine($"[QT][INFO] {message}");
+        }
+
+        private static void LogWarn(string message, string? tradeId = null, string? baseId = null)
+        {
+            BridgeGrpcClient.LogWarn(LogComponent, message, tradeId ?? string.Empty, baseId ?? string.Empty);
+            Console.WriteLine($"[QT][WARN] {message}");
+        }
+
+        private static void LogError(string message, string? tradeId = null, string? baseId = null)
+        {
+            BridgeGrpcClient.LogError(LogComponent, message, tradeId ?? string.Empty, errorCode: string.Empty, baseId: baseId ?? string.Empty);
+            Console.WriteLine($"[QT][ERROR] {message}");
+        }
+
+        private static void LogWarnStatic(string message, string identifier, string details)
+        {
+            var composed = string.IsNullOrWhiteSpace(details)
+                ? $"{message} for {identifier}"
+                : $"{message} for {identifier}: {details}";
+            BridgeGrpcClient.LogWarn(LogComponent, composed, identifier ?? string.Empty, identifier ?? string.Empty);
+            Console.WriteLine($"[QT][WARN] {composed}");
+        }
+
+        private static void LogErrorStatic(string message, string identifier, string details)
+        {
+            var composed = string.IsNullOrWhiteSpace(details)
+                ? $"{message} for {identifier}"
+                : $"{message} for {identifier}: {details}";
+            BridgeGrpcClient.LogError(LogComponent, composed, identifier ?? string.Empty, errorCode: string.Empty, baseId: identifier ?? string.Empty);
+            Console.WriteLine($"[QT][ERROR] {composed}");
         }
     }
 }
