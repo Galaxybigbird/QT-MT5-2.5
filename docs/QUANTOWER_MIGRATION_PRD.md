@@ -38,7 +38,7 @@ Quantower Add-on (.NET 6) ── gRPC ──> BridgeApp (Go) ── gRPC ──>
 - [ ] Confirm Quantower SDK version and API surface (Core, Accounts, Orders, Trades, Portfolio).
 - [ ] Collect example code from Quantower docs (`Core.Instance.TradeAdded`, `PositionAdded`, etc.).
 - [ ] Document supported .NET runtime (Quantower stable 1.144.9 and beta 1.144.10 require net8.0-windows).
-- [ ] Set up local Quantower dev environment notes in `docs/ENVIRONMENT_SETUP.md`.
+- [ ] Maintain SDK notes in `docs/QUANTOWER_SDK_NOTES.md`; keep environment setup in `docs/ENVIRONMENT_SETUP.md` up to date.
 
 ### 4.2 Proto & gRPC Contract
 - [ ] Audit `BridgeApp/proto/trading.proto` for NT-specific fields (`nt_balance`, `NTTradeResult`, etc.).
