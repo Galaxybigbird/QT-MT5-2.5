@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using Quantower.Bridge.Client;
 using TradingPlatform.BusinessLayer;
 
 namespace Quantower.MultiStrat.Infrastructure
 {
     internal sealed class QuantowerEventBridge : IDisposable
     {
+        private const string LogComponent = "qt_event_bridge";
         private readonly Core _core;
         private readonly Action<Trade> _tradeHandler;
         private readonly Action<Position>? _positionClosedHandler;
@@ -27,6 +29,11 @@ namespace Quantower.MultiStrat.Infrastructure
 
         public static bool TryCreate(Action<Trade> onTradeAdded, Action<Position>? onPositionClosed, out QuantowerEventBridge? bridge)
         {
+            if (onTradeAdded == null)
+            {
+                throw new ArgumentNullException(nameof(onTradeAdded));
+            }
+
             bridge = null;
 
             try
@@ -34,7 +41,7 @@ namespace Quantower.MultiStrat.Infrastructure
                 var core = Core.Instance;
                 if (core == null)
                 {
-                    Console.Error.WriteLine("[QT][WARN] Quantower Core.Instance unavailable; skipping native event bridge.");
+                    LogWarn("Quantower Core.Instance unavailable; skipping native event bridge.");
                     return false;
                 }
 
@@ -43,7 +50,7 @@ namespace Quantower.MultiStrat.Infrastructure
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Failed to attach Quantower event bridge: {ex.Message}\n{ex}");
+                LogError($"Failed to attach Quantower event bridge: {ex.Message}", ex);
                 bridge = null;
                 return false;
             }
@@ -51,11 +58,46 @@ namespace Quantower.MultiStrat.Infrastructure
 
         public IEnumerable<Position> SnapshotPositions()
         {
+            ThrowIfDisposed();
+
             var positions = _core.Positions;
             return positions ?? Array.Empty<Position>();
         }
 
         public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (disposing)
+            {
+                try
+                {
+                    _core.TradeAdded -= HandleTradeAdded;
+
+                    if (_positionClosedHandler != null)
+                    {
+                        _core.PositionRemoved -= HandlePositionRemoved;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogWarn($"Failed detaching Quantower event bridge: {ex.Message}");
+                }
+            }
+
+            _disposed = true;
+        }
+
+        private void HandleTradeAdded(Trade trade)
         {
             if (_disposed)
             {
@@ -64,30 +106,11 @@ namespace Quantower.MultiStrat.Infrastructure
 
             try
             {
-                _core.TradeAdded -= HandleTradeAdded;
-
-                if (_positionClosedHandler != null)
-                {
-                    _core.PositionRemoved -= HandlePositionRemoved;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[QT][WARN] Failed detaching Quantower event bridge: {ex.Message}");
-            }
-
-            _disposed = true;
-        }
-
-        private void HandleTradeAdded(Trade trade)
-        {
-            try
-            {
                 _tradeHandler(trade);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] TradeAdded handler threw: {ex.Message}\n{ex}");
+                LogError($"TradeAdded handler threw: {ex.Message}", ex);
             }
         }
 
@@ -98,14 +121,38 @@ namespace Quantower.MultiStrat.Infrastructure
                 return;
             }
 
+            if (_disposed)
+            {
+                return;
+            }
+
             try
             {
                 _positionClosedHandler(position);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] PositionRemoved handler threw: {ex.Message}\n{ex}");
+                LogError($"PositionRemoved handler threw: {ex.Message}", ex);
             }
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(QuantowerEventBridge));
+            }
+        }
+
+        private static void LogWarn(string message)
+        {
+            BridgeGrpcClient.LogWarn(LogComponent, message);
+        }
+
+        private static void LogError(string message, Exception? ex = null)
+        {
+            var details = ex == null ? message : $"{message}: {ex}";
+            BridgeGrpcClient.LogError(LogComponent, details);
         }
     }
 }

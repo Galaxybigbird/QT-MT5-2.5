@@ -29,7 +29,7 @@ namespace NTGrpcClient
             try
             {
                 _source = string.IsNullOrWhiteSpace(source) ? "nt" : source;
-                _component = ComponentResolver.Derive(_source, component);
+                _component = ResolveComponent(component);
 
                 // Extract host and port, normalize localhost to 127.0.0.1 for Grpc.Core
                 var address = serverAddress.Replace("http://", "").Replace("https://", "");
@@ -62,6 +62,38 @@ namespace NTGrpcClient
                 LastError = $"Failed to create Grpc.Core channel: {ex.Message}";
                 throw;
             }
+        }
+
+        private string ResolveComponent(string component)
+        {
+            Func<string, string, string> resolver = ComponentResolver.Derive;
+            if (resolver == null)
+            {
+                LastError = "Component resolver unavailable; using fallback component";
+                return BuildFallbackComponent(component);
+            }
+
+            try
+            {
+                return resolver(_source, component);
+            }
+            catch (Exception ex)
+            {
+                LastError = $"Component resolver failed: {ex.Message}";
+                return BuildFallbackComponent(component);
+            }
+        }
+
+        private string BuildFallbackComponent(string component)
+        {
+            if (!string.IsNullOrWhiteSpace(component))
+            {
+                return component;
+            }
+
+            return string.IsNullOrWhiteSpace(_source)
+                ? "addon"
+                : $"{_source.ToLowerInvariant()}_addon";
         }
 
     public void LogFireAndForget(string level, string component, string message, string tradeId = "", string errorCode = "", string baseId = "", string correlationId = "")

@@ -12,6 +12,8 @@ namespace Quantower.Bridge.Client
     public static class BridgeGrpcClient
     {
         private static ITradingClient? _client;
+        private static readonly object InitLock = new();
+        private static volatile bool _initialized;
         private static readonly ConcurrentDictionary<string, string> CorrelationByBaseId = new();
 
         private static string GetOrCreateCorrelation(string baseId)
@@ -32,28 +34,26 @@ namespace Quantower.Bridge.Client
             }
         }
 
-        private static bool _initialized;
         public static string LastError { get; private set; } = string.Empty;
 
         public static async Task<bool> Initialize(string serverAddress, string source = "qt", string? component = null)
         {
-            Shutdown();
+            var address = NormalizeAddress(serverAddress);
+            var comp = string.IsNullOrWhiteSpace(component)
+                ? (!string.IsNullOrWhiteSpace(source) ? $"{source.ToLowerInvariant()}_addon" : "addon")
+                : component;
+
+            ITradingClient? newClient = null;
 
             try
             {
-                var address = NormalizeAddress(serverAddress);
-                var comp = string.IsNullOrWhiteSpace(component)
-                    ? (!string.IsNullOrWhiteSpace(source) ? $"{source.ToLowerInvariant()}_addon" : "addon")
-                    : component;
-
-                _client = new TradingClient(address, source, comp);
-                var healthTask = _client.HealthCheckAsync("addon");
+                newClient = new TradingClient(address, source, comp);
+                var healthTask = newClient.HealthCheckAsync("addon");
                 var completed = await Task.WhenAny(healthTask, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
 
                 if (completed != healthTask)
                 {
                     LastError = "HealthCheck timeout";
-                    _initialized = false;
                     return false;
                 }
 
@@ -63,31 +63,40 @@ namespace Quantower.Bridge.Client
                     LastError = string.IsNullOrWhiteSpace(health.ErrorMessage)
                         ? "HealthCheck failed"
                         : health.ErrorMessage;
-                    _initialized = false;
                     return false;
                 }
 
-                _initialized = true;
+                lock (InitLock)
+                {
+                    ShutdownInternal();
+                    _client = newClient;
+                    _initialized = true;
+                }
+
+                newClient = null;
                 return true;
             }
             catch (Exception ex)
             {
                 LastError = ex.Message;
-                _initialized = false;
                 return false;
+            }
+            finally
+            {
+                newClient?.Dispose();
             }
         }
 
         public static async Task<bool> SubmitTradeAsync(string tradeJson)
         {
-            if (!EnsureInitialized())
+            if (!TryGetClient(out var client))
             {
                 return false;
             }
 
             try
             {
-                var result = await _client!.SubmitTradeAsync(tradeJson).ConfigureAwait(false);
+                var result = await client!.SubmitTradeAsync(tradeJson).ConfigureAwait(false);
                 return result.Success;
             }
             catch (Exception ex)
@@ -99,14 +108,14 @@ namespace Quantower.Bridge.Client
 
         public static async Task<OperationResult> HealthCheckAsync(string source)
         {
-            if (!EnsureInitialized())
+            if (!TryGetClient(out var client))
             {
                 return OperationResult.Failure("gRPC client not initialized");
             }
 
             try
             {
-                var result = await _client!.HealthCheckAsync(source).ConfigureAwait(false);
+                var result = await client!.HealthCheckAsync(source).ConfigureAwait(false);
                 if (!result.Success && !string.IsNullOrEmpty(result.ErrorMessage))
                 {
                     LastError = result.ErrorMessage;
@@ -122,14 +131,14 @@ namespace Quantower.Bridge.Client
 
         public static async Task<bool> SubmitElasticUpdateAsync(string updateJson)
         {
-            if (!EnsureInitialized())
+            if (!TryGetClient(out var client))
             {
                 return false;
             }
 
             try
             {
-                var result = await _client!.SubmitElasticUpdateAsync(updateJson).ConfigureAwait(false);
+                var result = await client!.SubmitElasticUpdateAsync(updateJson).ConfigureAwait(false);
                 return result.Success;
             }
             catch (Exception ex)
@@ -141,14 +150,14 @@ namespace Quantower.Bridge.Client
 
         public static async Task<bool> SubmitTrailingUpdateAsync(string updateJson)
         {
-            if (!EnsureInitialized())
+            if (!TryGetClient(out var client))
             {
                 return false;
             }
 
             try
             {
-                var result = await _client!.SubmitTrailingUpdateAsync(updateJson).ConfigureAwait(false);
+                var result = await client!.SubmitTrailingUpdateAsync(updateJson).ConfigureAwait(false);
                 return result.Success;
             }
             catch (Exception ex)
@@ -160,14 +169,14 @@ namespace Quantower.Bridge.Client
 
         public static async Task<bool> NotifyHedgeCloseAsync(string notificationJson)
         {
-            if (!EnsureInitialized())
+            if (!TryGetClient(out var client))
             {
                 return false;
             }
 
             try
             {
-                var result = await _client!.NotifyHedgeCloseAsync(notificationJson).ConfigureAwait(false);
+                var result = await client!.NotifyHedgeCloseAsync(notificationJson).ConfigureAwait(false);
                 return result.Success;
             }
             catch (Exception ex)
@@ -179,14 +188,14 @@ namespace Quantower.Bridge.Client
 
         public static async Task<bool> CloseHedgeAsync(string notificationJson)
         {
-            if (!EnsureInitialized())
+            if (!TryGetClient(out var client))
             {
                 return false;
             }
 
             try
             {
-                var result = await _client!.CloseHedgeAsync(notificationJson).ConfigureAwait(false);
+                var result = await client!.CloseHedgeAsync(notificationJson).ConfigureAwait(false);
                 return result.Success;
             }
             catch (Exception ex)
@@ -198,12 +207,12 @@ namespace Quantower.Bridge.Client
 
         public static void StartTradingStream(Action<string>? onTradeReceived)
         {
-            if (!EnsureInitialized())
+            if (!TryGetClient(out var client, setError: false))
             {
                 return;
             }
 
-            _client!.StartTradingStream(payload =>
+            client!.StartTradingStream(payload =>
             {
                 if (payload == null)
                 {
@@ -214,28 +223,25 @@ namespace Quantower.Bridge.Client
             });
         }
 
-        public static void StopTradingStream() => _client?.StopTradingStream();
+        public static void StopTradingStream()
+        {
+            if (TryGetClient(out var client, setError: false))
+            {
+                client!.StopTradingStream();
+            }
+        }
 
         public static void Shutdown()
         {
-            try
+            lock (InitLock)
             {
-                _client?.Dispose();
-            }
-            catch
-            {
-                // ignore
-            }
-            finally
-            {
-                _client = null;
-                _initialized = false;
+                ShutdownInternal();
             }
         }
 
         public static void Log(string level, string component, string message, string tradeId = "", string errorCode = "", string baseId = "")
         {
-            if (!_initialized || _client is not TradingClient impl)
+            if (!TryGetClient(out var client, setError: false) || client is not TradingClient impl)
             {
                 return;
             }
@@ -249,15 +255,45 @@ namespace Quantower.Bridge.Client
         public static void LogWarn(string component, string message, string tradeId = "", string baseId = "") => Log("WARN", component, message, tradeId, "", baseId);
         public static void LogError(string component, string message, string tradeId = "", string errorCode = "", string baseId = "") => Log("ERROR", component, message, tradeId, errorCode, baseId);
 
-        private static bool EnsureInitialized()
+        private static bool TryGetClient(out ITradingClient? client, bool setError = true)
         {
-            if (_initialized && _client != null)
+            lock (InitLock)
             {
-                return true;
+                if (_initialized && _client != null)
+                {
+                    client = _client;
+                    return true;
+                }
             }
 
-            LastError = "gRPC client not initialized";
+            if (setError)
+            {
+                LastError = "gRPC client not initialized";
+            }
+
+            client = null;
             return false;
+        }
+
+        private static void ShutdownInternal()
+        {
+            if (_client != null)
+            {
+                try
+                {
+                    _client.Dispose();
+                }
+                catch
+                {
+                    // ignore
+                }
+                finally
+                {
+                    _client = null;
+                }
+            }
+
+            _initialized = false;
         }
 
         private static string NormalizeAddress(string serverAddress)
