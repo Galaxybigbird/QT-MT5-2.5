@@ -1,56 +1,45 @@
 using System;
 using System.Collections.Generic;
-using System.Linq.Expressions;
-using System.Reflection;
+using TradingPlatform.BusinessLayer;
 
 namespace Quantower.MultiStrat.Infrastructure
 {
     internal sealed class QuantowerEventBridge : IDisposable
     {
-        private readonly object _coreInstance;
-        private readonly List<(EventInfo Event, Delegate Handler)> _subscriptions;
-        private readonly Func<IEnumerable<object>> _positionsProvider;
+        private readonly Core _core;
+        private readonly Action<Trade> _tradeHandler;
+        private readonly Action<Position>? _positionClosedHandler;
+        private bool _disposed;
 
-        private QuantowerEventBridge(object coreInstance, List<(EventInfo, Delegate)> subscriptions, Func<IEnumerable<object>> positionsProvider)
+        private QuantowerEventBridge(Core core, Action<Trade> onTrade, Action<Position>? onPositionClosed)
         {
-            _coreInstance = coreInstance;
-            _subscriptions = subscriptions;
-            _positionsProvider = positionsProvider;
+            _core = core;
+            _tradeHandler = onTrade;
+            _positionClosedHandler = onPositionClosed;
+
+            _core.TradeAdded += HandleTradeAdded;
+
+            if (_positionClosedHandler != null)
+            {
+                _core.PositionRemoved += HandlePositionRemoved;
+            }
         }
 
-        public static bool TryCreate(Action<object> onTradeAdded, Action<object>? onPositionClosed, out QuantowerEventBridge? bridge)
+        public static bool TryCreate(Action<Trade> onTradeAdded, Action<Position>? onPositionClosed, out QuantowerEventBridge? bridge)
         {
             bridge = null;
 
             try
             {
-                var coreType = Type.GetType("TradingPlatform.BusinessLayer.Core, TradingPlatform.BusinessLayer", throwOnError: false);
-                if (coreType == null)
+                var core = Core.Instance;
+                if (core == null)
                 {
+                    Console.Error.WriteLine("[QT][WARN] Quantower Core.Instance unavailable; skipping native event bridge.");
                     return false;
                 }
 
-                var instanceProp = coreType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
-                var instance = instanceProp?.GetValue(null);
-                if (instance == null)
-                {
-                    return false;
-                }
-
-                var subscriptions = new List<(EventInfo, Delegate)>();
-
-                SubscribeIfPossible(instance, coreType, "TradeAdded", onTradeAdded, subscriptions);
-                SubscribeIfPossible(instance, coreType, "TradeUpdated", onTradeAdded, subscriptions);
-
-                if (onPositionClosed != null)
-                {
-                    SubscribeIfPossible(instance, coreType, "PositionRemoved", onPositionClosed, subscriptions);
-                }
-
-                var positionsProvider = BuildPositionsProvider(instance, coreType);
-
-                bridge = new QuantowerEventBridge(instance, subscriptions, positionsProvider);
-                return subscriptions.Count > 0;
+                bridge = new QuantowerEventBridge(core, onTradeAdded, onPositionClosed);
+                return true;
             }
             catch (Exception ex)
             {
@@ -60,144 +49,62 @@ namespace Quantower.MultiStrat.Infrastructure
             }
         }
 
-        public IEnumerable<object> SnapshotPositions() => _positionsProvider();
+        public IEnumerable<Position> SnapshotPositions()
+        {
+            var positions = _core.Positions;
+            return positions ?? Array.Empty<Position>();
+        }
 
         public void Dispose()
         {
-            foreach (var (eventInfo, handler) in _subscriptions)
-            {
-                try
-                {
-                    eventInfo.RemoveEventHandler(_coreInstance, handler);
-                }
-                catch
-                {
-                    // ignore detach failures
-                }
-            }
-            _subscriptions.Clear();
-        }
-
-        private static void SubscribeIfPossible(object instance, Type coreType, string eventName, Action<object> callback, List<(EventInfo, Delegate)> subscriptions)
-        {
-            var eventInfo = coreType.GetEvent(eventName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (eventInfo == null)
-            {
-                return;
-            }
-
-            var handler = CreateEventHandler(eventInfo, callback);
-            if (handler == null)
+            if (_disposed)
             {
                 return;
             }
 
             try
             {
-                eventInfo.AddEventHandler(instance, handler);
-                subscriptions.Add((eventInfo, handler));
+                _core.TradeAdded -= HandleTradeAdded;
+
+                if (_positionClosedHandler != null)
+                {
+                    _core.PositionRemoved -= HandlePositionRemoved;
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // failed to subscribe; remove handler
+                Console.Error.WriteLine($"[QT][WARN] Failed detaching Quantower event bridge: {ex.Message}");
+            }
+
+            _disposed = true;
+        }
+
+        private void HandleTradeAdded(Trade trade)
+        {
+            try
+            {
+                _tradeHandler(trade);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[QT][ERROR] TradeAdded handler threw: {ex.Message}\n{ex}");
             }
         }
 
-        private static Delegate? CreateEventHandler(EventInfo eventInfo, Action<object> callback)
+        private void HandlePositionRemoved(Position position)
         {
-            var handlerType = eventInfo.EventHandlerType;
-            if (handlerType == null)
+            if (_positionClosedHandler == null)
             {
-                return null;
+                return;
             }
 
-            var invokeMethod = handlerType.GetMethod("Invoke");
-            if (invokeMethod == null)
+            try
             {
-                return null;
+                _positionClosedHandler(position);
             }
-
-            var parameters = invokeMethod.GetParameters();
-            var parameterExpressions = new ParameterExpression[parameters.Length];
-            for (int i = 0; i < parameters.Length; i++)
+            catch (Exception ex)
             {
-                parameterExpressions[i] = Expression.Parameter(parameters[i].ParameterType, parameters[i].Name);
-            }
-
-            if (parameterExpressions.Length == 0)
-            {
-                Console.Error.WriteLine($"[QT][WARN] Event {eventInfo.Name} has no payload parameters; skipping subscription.");
-                return null;
-            }
-
-            var candidate = FindPayloadParameter(parameterExpressions, new[] { "trade", "position", "payload", "args", "eventargs", "e" });
-
-            if (candidate == null)
-            {
-                var fallback = parameterExpressions[^1];
-                if (!fallback.Type.IsValueType || Nullable.GetUnderlyingType(fallback.Type) != null)
-                {
-                    candidate = fallback;
-                }
-            }
-
-            if (candidate == null)
-            {
-                Console.Error.WriteLine($"[QT][WARN] Unable to determine payload parameter for event {eventInfo.Name}; skipping subscription.");
-                return null;
-            }
-
-            Expression payloadExpression = Expression.Convert(candidate, typeof(object));
-
-            var callbackExpression = Expression.Constant(callback);
-            var body = Expression.Invoke(callbackExpression, payloadExpression);
-            var lambda = Expression.Lambda(handlerType, body, parameterExpressions);
-            return lambda.Compile();
-        }
-
-        private static Func<IEnumerable<object>> BuildPositionsProvider(object instance, Type coreType)
-        {
-            var positionsProp = coreType.GetProperty("Positions", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (positionsProp == null)
-            {
-                return () => Array.Empty<object>();
-            }
-
-            return () => EnumerateObjects(positionsProp.GetValue(instance));
-        }
-
-        private static ParameterExpression? FindPayloadParameter(IEnumerable<ParameterExpression> parameters, IEnumerable<string> nameHints)
-        {
-            foreach (var parameter in parameters)
-            {
-                if (string.IsNullOrWhiteSpace(parameter.Name))
-                {
-                    continue;
-                }
-
-                foreach (var hint in nameHints)
-                {
-                    if (parameter.Name.Equals(hint, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return parameter;
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        private static IEnumerable<object> EnumerateObjects(object? source)
-        {
-            if (source is System.Collections.IEnumerable enumerable)
-            {
-                foreach (var item in enumerable)
-                {
-                    if (item != null)
-                    {
-                        yield return item;
-                    }
-                }
+                Console.Error.WriteLine($"[QT][ERROR] PositionRemoved handler threw: {ex.Message}\n{ex}");
             }
         }
     }

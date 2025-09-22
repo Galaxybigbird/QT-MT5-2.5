@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Quantower.Bridge.Client;
 using Quantower.MultiStrat.Infrastructure;
+using TradingPlatform.BusinessLayer;
 
 namespace Quantower.MultiStrat
 {
@@ -22,9 +23,11 @@ namespace Quantower.MultiStrat
             _grpcAddress = grpcAddress;
         }
 
-        public bool Start()
+        public bool Start() => StartAsync().GetAwaiter().GetResult();
+
+        public async Task<bool> StartAsync()
         {
-            var ok = BridgeGrpcClient.Initialize(_grpcAddress, source: "qt", component: "qt_addon");
+            var ok = await BridgeGrpcClient.Initialize(_grpcAddress, source: "qt", component: "qt_addon").ConfigureAwait(false);
             if (!ok)
             {
                 Console.WriteLine($"[QT][ERROR] Failed to initialize bridge client: {BridgeGrpcClient.LastError}");
@@ -39,7 +42,7 @@ namespace Quantower.MultiStrat
 
                 foreach (var position in bridge.SnapshotPositions())
                 {
-                    TryPublishPositionSnapshot(position);
+                    await TryPublishPositionSnapshotAsync(position).ConfigureAwait(false);
                 }
 
                 Console.WriteLine("[QT][INFO] Attached to Quantower Core trade stream.");
@@ -120,7 +123,7 @@ namespace Quantower.MultiStrat
             Console.WriteLine($"[QT][STREAM] {tradeJson}");
         }
 
-        private void OnQuantowerTrade(object trade)
+        private void OnQuantowerTrade(Trade trade)
         {
             if (!QuantowerTradeMapper.TryBuildTradeEnvelope(trade, out var payload, out var tradeId))
             {
@@ -133,25 +136,25 @@ namespace Quantower.MultiStrat
                 _pendingTrades.TryRemove(tradeId, out _);
             }
 
-            _ = BridgeGrpcClient.SubmitTradeAsync(payload);
+            ObserveAsyncOperation(BridgeGrpcClient.SubmitTradeAsync(payload), "SubmitTrade", tradeId ?? "unknown");
         }
 
-        private void TryPublishPositionSnapshot(object position)
+        private async Task TryPublishPositionSnapshotAsync(Position position)
         {
-            if (QuantowerTradeMapper.TryBuildTradeEnvelope(position, out var tradePayload, out var positionTradeId))
+            if (QuantowerTradeMapper.TryBuildPositionSnapshot(position, out var tradePayload, out var positionTradeId))
             {
                 Console.WriteLine($"[QT][INFO] Streaming existing position as trade snapshot ({positionTradeId ?? "n/a"}).");
-                _ = BridgeGrpcClient.SubmitTradeAsync(tradePayload);
+                await DispatchWithLoggingAsync(() => BridgeGrpcClient.SubmitTradeAsync(tradePayload), "SubmitTradeSnapshot", positionTradeId ?? "n/a").ConfigureAwait(false);
             }
 
             if (QuantowerTradeMapper.TryBuildPositionClosure(position, out var closurePayload, out var closureId))
             {
                 Console.WriteLine($"[QT][INFO] Broadcasting position state ({closureId ?? "n/a"}) to bridge for reconciliation.");
-                _ = BridgeGrpcClient.CloseHedgeAsync(closurePayload);
+                await DispatchWithLoggingAsync(() => BridgeGrpcClient.CloseHedgeAsync(closurePayload), "CloseHedgeSnapshot", closureId ?? "n/a").ConfigureAwait(false);
             }
         }
 
-        private void OnQuantowerPositionClosed(object position)
+        private void OnQuantowerPositionClosed(Position position)
         {
             if (!QuantowerTradeMapper.TryBuildPositionClosure(position, out var payload, out var closureId))
             {
@@ -160,7 +163,39 @@ namespace Quantower.MultiStrat
             }
 
             Console.WriteLine($"[QT][INFO] Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge.");
-            _ = BridgeGrpcClient.CloseHedgeAsync(payload);
+            ObserveAsyncOperation(BridgeGrpcClient.CloseHedgeAsync(payload), "CloseHedge", closureId ?? "n/a");
+        }
+
+        private static async Task DispatchWithLoggingAsync(Func<Task<bool>> operation, string operationName, string identifier)
+        {
+            try
+            {
+                var success = await operation().ConfigureAwait(false);
+                if (!success)
+                {
+                    Console.WriteLine($"[QT][WARN] {operationName} failed for {identifier}: {BridgeGrpcClient.LastError}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[QT][ERROR] {operationName} threw for {identifier}: {ex.Message}");
+            }
+        }
+
+        private static void ObserveAsyncOperation(Task<bool> task, string operationName, string identifier)
+        {
+            task.ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    var root = t.Exception?.GetBaseException();
+                    Console.WriteLine($"[QT][ERROR] {operationName} exception for {identifier}: {root?.Message ?? t.Exception?.Message}");
+                }
+                else if (!t.Result)
+                {
+                    Console.WriteLine($"[QT][WARN] {operationName} unsuccessful for {identifier}: {BridgeGrpcClient.LastError}");
+                }
+            }, TaskContinuationOptions.ExecuteSynchronously);
         }
     }
 }

@@ -5,6 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == '' and '$(QUANTOWER_SDK_DIR)' != ''">$(QUANTOWER_SDK_DIR)</QuantowerSdkDir>
+    <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == '' and '$(OS)' == 'Windows_NT'">C:\Quantower\TradingPlatform\v1.144.12\bin\</QuantowerSdkDir>
+    <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == ''">/mnt/c/Quantower/TradingPlatform/v1.144.12/bin/</QuantowerSdkDir>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\BridgeGrpcClient\BridgeGrpcClient.csproj" />
   </ItemGroup>
@@ -12,5 +18,16 @@
   <ItemGroup>
     <Compile Include="..\Infrastructure\QuantowerEventBridge.cs" />
     <Compile Include="..\Infrastructure\QuantowerTradeMapper.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="TradingPlatform.BusinessLayer">
+      <HintPath>$(QuantowerSdkDir)TradingPlatform.BusinessLayer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TradingPlatform.Common" Condition="Exists('$(QuantowerSdkDir)TradingPlatform.Common.dll')">
+      <HintPath>$(QuantowerSdkDir)TradingPlatform.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>

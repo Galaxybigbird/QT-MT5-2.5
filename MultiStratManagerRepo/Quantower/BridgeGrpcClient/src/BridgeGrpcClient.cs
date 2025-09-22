@@ -35,7 +35,7 @@ namespace Quantower.Bridge.Client
         private static bool _initialized;
         public static string LastError { get; private set; } = string.Empty;
 
-        public static bool Initialize(string serverAddress, string source = "qt", string? component = null)
+        public static async Task<bool> Initialize(string serverAddress, string source = "qt", string? component = null)
         {
             Shutdown();
 
@@ -47,20 +47,22 @@ namespace Quantower.Bridge.Client
                     : component;
 
                 _client = new TradingClient(address, source, comp);
+                var healthTask = _client.HealthCheckAsync("addon");
+                var completed = await Task.WhenAny(healthTask, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
 
-                var health = _client.HealthCheckAsync("addon");
-                if (!health.Wait(TimeSpan.FromSeconds(2)))
+                if (completed != healthTask)
                 {
                     LastError = "HealthCheck timeout";
                     _initialized = false;
                     return false;
                 }
 
-                if (!health.Result.Success)
+                var health = await healthTask.ConfigureAwait(false);
+                if (!health.Success)
                 {
-                    LastError = string.IsNullOrWhiteSpace(health.Result.ErrorMessage)
+                    LastError = string.IsNullOrWhiteSpace(health.ErrorMessage)
                         ? "HealthCheck failed"
-                        : health.Result.ErrorMessage;
+                        : health.ErrorMessage;
                     _initialized = false;
                     return false;
                 }
