@@ -24,71 +24,90 @@ namespace Trading.Proto {
     static TradingReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "ChNwcm90by90cmFkaW5nLnByb3RvEgd0cmFkaW5nIuUCCgVUcmFkZRIKCgJp",
-            "ZBgBIAEoCRIPCgdiYXNlX2lkGAIgASgJEhEKCXRpbWVzdGFtcBgDIAEoAxIO",
-            "CgZhY3Rpb24YBCABKAkSEAoIcXVhbnRpdHkYBSABKAESDQoFcHJpY2UYBiAB",
-            "KAESFgoOdG90YWxfcXVhbnRpdHkYByABKAUSFAoMY29udHJhY3RfbnVtGAgg",
-            "ASgFEhIKCm9yZGVyX3R5cGUYCSABKAkSGAoQbWVhc3VyZW1lbnRfcGlwcxgK",
-            "IAEoBRIXCg9yYXdfbWVhc3VyZW1lbnQYCyABKAESEgoKaW5zdHJ1bWVudBgM",
-            "IAEoCRIUCgxhY2NvdW50X25hbWUYDSABKAkSEgoKbnRfYmFsYW5jZRgOIAEo",
-            "ARIUCgxudF9kYWlseV9wbmwYDyABKAESFwoPbnRfdHJhZGVfcmVzdWx0GBAg",
-            "ASgJEhkKEW50X3Nlc3Npb25fdHJhZGVzGBEgASgFIu8BChZIZWRnZUNsb3Nl",
-            "Tm90aWZpY2F0aW9uEhIKCmV2ZW50X3R5cGUYASABKAkSDwoHYmFzZV9pZBgC",
-            "IAEoCRIcChRudF9pbnN0cnVtZW50X3N5bWJvbBgDIAEoCRIXCg9udF9hY2Nv",
-            "dW50X25hbWUYBCABKAkSHQoVY2xvc2VkX2hlZGdlX3F1YW50aXR5GAUgASgB",
-            "EhsKE2Nsb3NlZF9oZWRnZV9hY3Rpb24YBiABKAkSEQoJdGltZXN0YW1wGAcg",
-            "ASgJEhYKDmNsb3N1cmVfcmVhc29uGAggASgJEhIKCm10NV90aWNrZXQYCSAB",
-            "KAQingEKEkVsYXN0aWNIZWRnZVVwZGF0ZRISCgpldmVudF90eXBlGAEgASgJ",
-            "Eg4KBmFjdGlvbhgCIAEoCRIPCgdiYXNlX2lkGAMgASgJEhYKDmN1cnJlbnRf",
-            "cHJvZml0GAQgASgBEhQKDHByb2ZpdF9sZXZlbBgFIAEoBRIRCgl0aW1lc3Rh",
-            "bXAYBiABKAkSEgoKbXQ1X3RpY2tldBgHIAEoBCKmAQoSVHJhaWxpbmdTdG9w",
-            "VXBkYXRlEhIKCmV2ZW50X3R5cGUYASABKAkSDwoHYmFzZV9pZBgCIAEoCRIW",
-            "Cg5uZXdfc3RvcF9wcmljZRgDIAEoARIVCg10cmFpbGluZ190eXBlGAQgASgJ",
-            "EhUKDWN1cnJlbnRfcHJpY2UYBSABKAESEQoJdGltZXN0YW1wGAYgASgJEhIK",
-            "Cm10NV90aWNrZXQYByABKAQiXgoOTVQ1VHJhZGVSZXN1bHQSDgoGc3RhdHVz",
-            "GAEgASgJEg4KBnRpY2tldBgCIAEoBBIOCgZ2b2x1bWUYAyABKAESEAoIaXNf",
-            "Y2xvc2UYBCABKAgSCgoCaWQYBSABKAkiNwoNSGVhbHRoUmVxdWVzdBIOCgZz",
-            "b3VyY2UYASABKAkSFgoOb3Blbl9wb3NpdGlvbnMYAiABKAUiXgoOSGVhbHRo",
-            "UmVzcG9uc2USDgoGc3RhdHVzGAEgASgJEhIKCnF1ZXVlX3NpemUYAiABKAUS",
-            "FAoMbmV0X3Bvc2l0aW9uGAMgASgFEhIKCmhlZGdlX3NpemUYBCABKAEinQEK",
-            "D0dlbmVyaWNSZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHbWVzc2FnZRgC",
-            "IAEoCRI4CghtZXRhZGF0YRgDIAMoCzImLnRyYWRpbmcuR2VuZXJpY1Jlc3Bv",
-            "bnNlLk1ldGFkYXRhRW50cnkaLwoNTWV0YWRhdGFFbnRyeRILCgNrZXkYASAB",
-            "KAkSDQoFdmFsdWUYAiABKAk6AjgBIicKD1NldHRpbmdzUmVxdWVzdBIUCgxz",
-            "ZXR0aW5nX25hbWUYASABKAkiUAoQU2V0dGluZ3NSZXNwb25zZRIUCgxzZXR0",
-            "aW5nX25hbWUYASABKAkSFQoNc2V0dGluZ192YWx1ZRgCIAEoCRIPCgdzdWNj",
-            "ZXNzGAMgASgIIlkKEEhlYXJ0YmVhdFJlcXVlc3QSEQoJY29tcG9uZW50GAEg",
-            "ASgJEg4KBnN0YXR1cxgCIAEoCRIPCgd2ZXJzaW9uGAMgASgJEhEKCXRpbWVz",
-            "dGFtcBgEIAEoAyI0ChFIZWFydGJlYXRSZXNwb25zZRIOCgZzdGF0dXMYASAB",
-            "KAkSDwoHbWVzc2FnZRgCIAEoCTLPBQoOVHJhZGluZ1NlcnZpY2USNwoLU3Vi",
-            "bWl0VHJhZGUSDi50cmFkaW5nLlRyYWRlGhgudHJhZGluZy5HZW5lcmljUmVz",
-            "cG9uc2USNwoJR2V0VHJhZGVzEhYudHJhZGluZy5IZWFsdGhSZXF1ZXN0Gg4u",
-            "dHJhZGluZy5UcmFkZSgBMAESRgoRU3VibWl0VHJhZGVSZXN1bHQSFy50cmFk",
-            "aW5nLk1UNVRyYWRlUmVzdWx0GhgudHJhZGluZy5HZW5lcmljUmVzcG9uc2US",
-            "TQoQTm90aWZ5SGVkZ2VDbG9zZRIfLnRyYWRpbmcuSGVkZ2VDbG9zZU5vdGlm",
-            "aWNhdGlvbhoYLnRyYWRpbmcuR2VuZXJpY1Jlc3BvbnNlEkwKE1N1Ym1pdEVs",
-            "YXN0aWNVcGRhdGUSGy50cmFkaW5nLkVsYXN0aWNIZWRnZVVwZGF0ZRoYLnRy",
-            "YWRpbmcuR2VuZXJpY1Jlc3BvbnNlEk0KFFN1Ym1pdFRyYWlsaW5nVXBkYXRl",
-            "EhsudHJhZGluZy5UcmFpbGluZ1N0b3BVcGRhdGUaGC50cmFkaW5nLkdlbmVy",
-            "aWNSZXNwb25zZRI+CgtIZWFsdGhDaGVjaxIWLnRyYWRpbmcuSGVhbHRoUmVx",
-            "dWVzdBoXLnRyYWRpbmcuSGVhbHRoUmVzcG9uc2USQgoLR2V0U2V0dGluZ3MS",
-            "GC50cmFkaW5nLlNldHRpbmdzUmVxdWVzdBoZLnRyYWRpbmcuU2V0dGluZ3NS",
-            "ZXNwb25zZRJICg9TeXN0ZW1IZWFydGJlYXQSGS50cmFkaW5nLkhlYXJ0YmVh",
-            "dFJlcXVlc3QaGi50cmFkaW5nLkhlYXJ0YmVhdFJlc3BvbnNlEkkKDE5UQ2xv",
-            "c2VIZWRnZRIfLnRyYWRpbmcuSGVkZ2VDbG9zZU5vdGlmaWNhdGlvbhoYLnRy",
-            "YWRpbmcuR2VuZXJpY1Jlc3BvbnNlMrMCChBTdHJlYW1pbmdTZXJ2aWNlEjMK",
-            "DVRyYWRpbmdTdHJlYW0SDi50cmFkaW5nLlRyYWRlGg4udHJhZGluZy5UcmFk",
-            "ZSgBMAESQwoMU3RhdHVzU3RyZWFtEhYudHJhZGluZy5IZWFsdGhSZXF1ZXN0",
-            "GhcudHJhZGluZy5IZWFsdGhSZXNwb25zZSgBMAESUQoURWxhc3RpY1VwZGF0",
-            "ZXNTdHJlYW0SGy50cmFkaW5nLkVsYXN0aWNIZWRnZVVwZGF0ZRoYLnRyYWRp",
-            "bmcuR2VuZXJpY1Jlc3BvbnNlKAEwARJSChVUcmFpbGluZ1VwZGF0ZXNTdHJl",
-            "YW0SGy50cmFkaW5nLlRyYWlsaW5nU3RvcFVwZGF0ZRoYLnRyYWRpbmcuR2Vu",
-            "ZXJpY1Jlc3BvbnNlKAEwAUIzWiFnaXRodWIuY29tL2hlZGdlYm90L3Byb3Rv",
-            "L3RyYWRpbmeqAg1UcmFkaW5nLlByb3RvYgZwcm90bzM="));
+            "ChNwcm90by90cmFkaW5nLnByb3RvEgd0cmFkaW5nIpgDCghMb2dFdmVudBIU",
+            "Cgx0aW1lc3RhbXBfbnMYASABKAMSDgoGc291cmNlGAIgASgJEg0KBWxldmVs",
+            "GAMgASgJEhEKCWNvbXBvbmVudBgEIAEoCRIPCgdtZXNzYWdlGAUgASgJEg8K",
+            "B2Jhc2VfaWQYBiABKAkSEAoIdHJhZGVfaWQYByABKAkSEwoLbnRfb3JkZXJf",
+            "aWQYCCABKAkSEgoKbXQ1X3RpY2tldBgJIAEoBBISCgpxdWV1ZV9zaXplGAog",
+            "ASgFEhQKDG5ldF9wb3NpdGlvbhgLIAEoBRISCgpoZWRnZV9zaXplGAwgASgB",
+            "EhIKCmVycm9yX2NvZGUYDSABKAkSDQoFc3RhY2sYDiABKAkSKQoEdGFncxgP",
+            "IAMoCzIbLnRyYWRpbmcuTG9nRXZlbnQuVGFnc0VudHJ5EhYKDnNjaGVtYV92",
+            "ZXJzaW9uGBAgASgJEhYKDmNvcnJlbGF0aW9uX2lkGBEgASgJGisKCVRhZ3NF",
+            "bnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIisKBkxvZ0Fj",
+            "axIQCghhY2NlcHRlZBgBIAEoDRIPCgdkcm9wcGVkGAIgASgNIsYECgVUcmFk",
+            "ZRIKCgJpZBgBIAEoCRIPCgdiYXNlX2lkGAIgASgJEhEKCXRpbWVzdGFtcBgD",
+            "IAEoAxIOCgZhY3Rpb24YBCABKAkSEAoIcXVhbnRpdHkYBSABKAESDQoFcHJp",
+            "Y2UYBiABKAESFgoOdG90YWxfcXVhbnRpdHkYByABKAUSFAoMY29udHJhY3Rf",
+            "bnVtGAggASgFEhIKCm9yZGVyX3R5cGUYCSABKAkSGAoQbWVhc3VyZW1lbnRf",
+            "cGlwcxgKIAEoBRIXCg9yYXdfbWVhc3VyZW1lbnQYCyABKAESEgoKaW5zdHJ1",
+            "bWVudBgMIAEoCRIUCgxhY2NvdW50X25hbWUYDSABKAkSEgoKbnRfYmFsYW5j",
+            "ZRgOIAEoARIUCgxudF9kYWlseV9wbmwYDyABKAESFwoPbnRfdHJhZGVfcmVz",
+            "dWx0GBAgASgJEhkKEW50X3Nlc3Npb25fdHJhZGVzGBEgASgFEhIKCm10NV90",
+            "aWNrZXQYEiABKAQSHQoVbnRfcG9pbnRzX3Blcl8xa19sb3NzGBMgASgBEhIK",
+            "CmV2ZW50X3R5cGUYFCABKAkSHgoWZWxhc3RpY19jdXJyZW50X3Byb2ZpdBgV",
+            "IAEoARIcChRlbGFzdGljX3Byb2ZpdF9sZXZlbBgWIAEoBRITCgtxdF90cmFk",
+            "ZV9pZBgXIAEoCRIWCg5xdF9wb3NpdGlvbl9pZBgYIAEoCRIUCgxzdHJhdGVn",
+            "eV90YWcYGSABKAkSFwoPb3JpZ2luX3BsYXRmb3JtGBogASgJIu8BChZIZWRn",
+            "ZUNsb3NlTm90aWZpY2F0aW9uEhIKCmV2ZW50X3R5cGUYASABKAkSDwoHYmFz",
+            "ZV9pZBgCIAEoCRIcChRudF9pbnN0cnVtZW50X3N5bWJvbBgDIAEoCRIXCg9u",
+            "dF9hY2NvdW50X25hbWUYBCABKAkSHQoVY2xvc2VkX2hlZGdlX3F1YW50aXR5",
+            "GAUgASgBEhsKE2Nsb3NlZF9oZWRnZV9hY3Rpb24YBiABKAkSEQoJdGltZXN0",
+            "YW1wGAcgASgJEhYKDmNsb3N1cmVfcmVhc29uGAggASgJEhIKCm10NV90aWNr",
+            "ZXQYCSABKAQingEKEkVsYXN0aWNIZWRnZVVwZGF0ZRISCgpldmVudF90eXBl",
+            "GAEgASgJEg4KBmFjdGlvbhgCIAEoCRIPCgdiYXNlX2lkGAMgASgJEhYKDmN1",
+            "cnJlbnRfcHJvZml0GAQgASgBEhQKDHByb2ZpdF9sZXZlbBgFIAEoBRIRCgl0",
+            "aW1lc3RhbXAYBiABKAkSEgoKbXQ1X3RpY2tldBgHIAEoBCKmAQoSVHJhaWxp",
+            "bmdTdG9wVXBkYXRlEhIKCmV2ZW50X3R5cGUYASABKAkSDwoHYmFzZV9pZBgC",
+            "IAEoCRIWCg5uZXdfc3RvcF9wcmljZRgDIAEoARIVCg10cmFpbGluZ190eXBl",
+            "GAQgASgJEhUKDWN1cnJlbnRfcHJpY2UYBSABKAESEQoJdGltZXN0YW1wGAYg",
+            "ASgJEhIKCm10NV90aWNrZXQYByABKAQiXgoOTVQ1VHJhZGVSZXN1bHQSDgoG",
+            "c3RhdHVzGAEgASgJEg4KBnRpY2tldBgCIAEoBBIOCgZ2b2x1bWUYAyABKAES",
+            "EAoIaXNfY2xvc2UYBCABKAgSCgoCaWQYBSABKAkiNwoNSGVhbHRoUmVxdWVz",
+            "dBIOCgZzb3VyY2UYASABKAkSFgoOb3Blbl9wb3NpdGlvbnMYAiABKAUiXgoO",
+            "SGVhbHRoUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJEhIKCnF1ZXVlX3NpemUY",
+            "AiABKAUSFAoMbmV0X3Bvc2l0aW9uGAMgASgFEhIKCmhlZGdlX3NpemUYBCAB",
+            "KAEinQEKD0dlbmVyaWNSZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHbWVz",
+            "c2FnZRgCIAEoCRI4CghtZXRhZGF0YRgDIAMoCzImLnRyYWRpbmcuR2VuZXJp",
+            "Y1Jlc3BvbnNlLk1ldGFkYXRhRW50cnkaLwoNTWV0YWRhdGFFbnRyeRILCgNr",
+            "ZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIicKD1NldHRpbmdzUmVxdWVz",
+            "dBIUCgxzZXR0aW5nX25hbWUYASABKAkiUAoQU2V0dGluZ3NSZXNwb25zZRIU",
+            "CgxzZXR0aW5nX25hbWUYASABKAkSFQoNc2V0dGluZ192YWx1ZRgCIAEoCRIP",
+            "CgdzdWNjZXNzGAMgASgIIlkKEEhlYXJ0YmVhdFJlcXVlc3QSEQoJY29tcG9u",
+            "ZW50GAEgASgJEg4KBnN0YXR1cxgCIAEoCRIPCgd2ZXJzaW9uGAMgASgJEhEK",
+            "CXRpbWVzdGFtcBgEIAEoAyI0ChFIZWFydGJlYXRSZXNwb25zZRIOCgZzdGF0",
+            "dXMYASABKAkSDwoHbWVzc2FnZRgCIAEoCTLPBQoOVHJhZGluZ1NlcnZpY2US",
+            "NwoLU3VibWl0VHJhZGUSDi50cmFkaW5nLlRyYWRlGhgudHJhZGluZy5HZW5l",
+            "cmljUmVzcG9uc2USNwoJR2V0VHJhZGVzEhYudHJhZGluZy5IZWFsdGhSZXF1",
+            "ZXN0Gg4udHJhZGluZy5UcmFkZSgBMAESRgoRU3VibWl0VHJhZGVSZXN1bHQS",
+            "Fy50cmFkaW5nLk1UNVRyYWRlUmVzdWx0GhgudHJhZGluZy5HZW5lcmljUmVz",
+            "cG9uc2USTQoQTm90aWZ5SGVkZ2VDbG9zZRIfLnRyYWRpbmcuSGVkZ2VDbG9z",
+            "ZU5vdGlmaWNhdGlvbhoYLnRyYWRpbmcuR2VuZXJpY1Jlc3BvbnNlEkwKE1N1",
+            "Ym1pdEVsYXN0aWNVcGRhdGUSGy50cmFkaW5nLkVsYXN0aWNIZWRnZVVwZGF0",
+            "ZRoYLnRyYWRpbmcuR2VuZXJpY1Jlc3BvbnNlEk0KFFN1Ym1pdFRyYWlsaW5n",
+            "VXBkYXRlEhsudHJhZGluZy5UcmFpbGluZ1N0b3BVcGRhdGUaGC50cmFkaW5n",
+            "LkdlbmVyaWNSZXNwb25zZRI+CgtIZWFsdGhDaGVjaxIWLnRyYWRpbmcuSGVh",
+            "bHRoUmVxdWVzdBoXLnRyYWRpbmcuSGVhbHRoUmVzcG9uc2USQgoLR2V0U2V0",
+            "dGluZ3MSGC50cmFkaW5nLlNldHRpbmdzUmVxdWVzdBoZLnRyYWRpbmcuU2V0",
+            "dGluZ3NSZXNwb25zZRJICg9TeXN0ZW1IZWFydGJlYXQSGS50cmFkaW5nLkhl",
+            "YXJ0YmVhdFJlcXVlc3QaGi50cmFkaW5nLkhlYXJ0YmVhdFJlc3BvbnNlEkkK",
+            "DE5UQ2xvc2VIZWRnZRIfLnRyYWRpbmcuSGVkZ2VDbG9zZU5vdGlmaWNhdGlv",
+            "bhoYLnRyYWRpbmcuR2VuZXJpY1Jlc3BvbnNlMrMCChBTdHJlYW1pbmdTZXJ2",
+            "aWNlEjMKDVRyYWRpbmdTdHJlYW0SDi50cmFkaW5nLlRyYWRlGg4udHJhZGlu",
+            "Zy5UcmFkZSgBMAESQwoMU3RhdHVzU3RyZWFtEhYudHJhZGluZy5IZWFsdGhS",
+            "ZXF1ZXN0GhcudHJhZGluZy5IZWFsdGhSZXNwb25zZSgBMAESUQoURWxhc3Rp",
+            "Y1VwZGF0ZXNTdHJlYW0SGy50cmFkaW5nLkVsYXN0aWNIZWRnZVVwZGF0ZRoY",
+            "LnRyYWRpbmcuR2VuZXJpY1Jlc3BvbnNlKAEwARJSChVUcmFpbGluZ1VwZGF0",
+            "ZXNTdHJlYW0SGy50cmFkaW5nLlRyYWlsaW5nU3RvcFVwZGF0ZRoYLnRyYWRp",
+            "bmcuR2VuZXJpY1Jlc3BvbnNlKAEwATI7Cg5Mb2dnaW5nU2VydmljZRIpCgNM",
+            "b2cSES50cmFkaW5nLkxvZ0V2ZW50Gg8udHJhZGluZy5Mb2dBY2tCN1olQnJp",
+            "ZGdlQXBwL2ludGVybmFsL2dycGMvcHJvdG87dHJhZGluZ6oCDVRyYWRpbmcu",
+            "UHJvdG9iBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Trading.Proto.Trade), global::Trading.Proto.Trade.Parser, new[]{ "Id", "BaseId", "Timestamp", "Action", "Quantity", "Price", "TotalQuantity", "ContractNum", "OrderType", "MeasurementPips", "RawMeasurement", "Instrument", "AccountName", "NtBalance", "NtDailyPnl", "NtTradeResult", "NtSessionTrades" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Trading.Proto.LogEvent), global::Trading.Proto.LogEvent.Parser, new[]{ "TimestampNs", "Source", "Level", "Component", "Message", "BaseId", "TradeId", "NtOrderId", "Mt5Ticket", "QueueSize", "NetPosition", "HedgeSize", "ErrorCode", "Stack", "Tags", "SchemaVersion", "CorrelationId" }, null, null, null, new pbr::GeneratedClrTypeInfo[] { null, }),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Trading.Proto.LogAck), global::Trading.Proto.LogAck.Parser, new[]{ "Accepted", "Dropped" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Trading.Proto.Trade), global::Trading.Proto.Trade.Parser, new[]{ "Id", "BaseId", "Timestamp", "Action", "Quantity", "Price", "TotalQuantity", "ContractNum", "OrderType", "MeasurementPips", "RawMeasurement", "Instrument", "AccountName", "NtBalance", "NtDailyPnl", "NtTradeResult", "NtSessionTrades", "Mt5Ticket", "NtPointsPer1KLoss", "EventType", "ElasticCurrentProfit", "ElasticProfitLevel", "QtTradeId", "QtPositionId", "StrategyTag", "OriginPlatform" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Trading.Proto.HedgeCloseNotification), global::Trading.Proto.HedgeCloseNotification.Parser, new[]{ "EventType", "BaseId", "NtInstrumentSymbol", "NtAccountName", "ClosedHedgeQuantity", "ClosedHedgeAction", "Timestamp", "ClosureReason", "Mt5Ticket" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Trading.Proto.ElasticHedgeUpdate), global::Trading.Proto.ElasticHedgeUpdate.Parser, new[]{ "EventType", "Action", "BaseId", "CurrentProfit", "ProfitLevel", "Timestamp", "Mt5Ticket" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Trading.Proto.TrailingStopUpdate), global::Trading.Proto.TrailingStopUpdate.Parser, new[]{ "EventType", "BaseId", "NewStopPrice", "TrailingType", "CurrentPrice", "Timestamp", "Mt5Ticket" }, null, null, null, null),
@@ -107,8 +126,1041 @@ namespace Trading.Proto {
   }
   #region Messages
   /// <summary>
+  /// Unified logging
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class LogEvent : pb::IMessage<LogEvent>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<LogEvent> _parser = new pb::MessageParser<LogEvent>(() => new LogEvent());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<LogEvent> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[0]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public LogEvent() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public LogEvent(LogEvent other) : this() {
+      timestampNs_ = other.timestampNs_;
+      source_ = other.source_;
+      level_ = other.level_;
+      component_ = other.component_;
+      message_ = other.message_;
+      baseId_ = other.baseId_;
+      tradeId_ = other.tradeId_;
+      ntOrderId_ = other.ntOrderId_;
+      mt5Ticket_ = other.mt5Ticket_;
+      queueSize_ = other.queueSize_;
+      netPosition_ = other.netPosition_;
+      hedgeSize_ = other.hedgeSize_;
+      errorCode_ = other.errorCode_;
+      stack_ = other.stack_;
+      tags_ = other.tags_.Clone();
+      schemaVersion_ = other.schemaVersion_;
+      correlationId_ = other.correlationId_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public LogEvent Clone() {
+      return new LogEvent(this);
+    }
+
+    /// <summary>Field number for the "timestamp_ns" field.</summary>
+    public const int TimestampNsFieldNumber = 1;
+    private long timestampNs_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public long TimestampNs {
+      get { return timestampNs_; }
+      set {
+        timestampNs_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "source" field.</summary>
+    public const int SourceFieldNumber = 2;
+    private string source_ = "";
+    /// <summary>
+    /// bridge|nt|mt5
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string Source {
+      get { return source_; }
+      set {
+        source_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "level" field.</summary>
+    public const int LevelFieldNumber = 3;
+    private string level_ = "";
+    /// <summary>
+    /// TRACE|DEBUG|INFO|WARN|ERROR
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string Level {
+      get { return level_; }
+      set {
+        level_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "component" field.</summary>
+    public const int ComponentFieldNumber = 4;
+    private string component_ = "";
+    /// <summary>
+    /// queue|stream|trade_exec|close_sync|...
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string Component {
+      get { return component_; }
+      set {
+        component_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "message" field.</summary>
+    public const int MessageFieldNumber = 5;
+    private string message_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string Message {
+      get { return message_; }
+      set {
+        message_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "base_id" field.</summary>
+    public const int BaseIdFieldNumber = 6;
+    private string baseId_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string BaseId {
+      get { return baseId_; }
+      set {
+        baseId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "trade_id" field.</summary>
+    public const int TradeIdFieldNumber = 7;
+    private string tradeId_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string TradeId {
+      get { return tradeId_; }
+      set {
+        tradeId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "nt_order_id" field.</summary>
+    public const int NtOrderIdFieldNumber = 8;
+    private string ntOrderId_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string NtOrderId {
+      get { return ntOrderId_; }
+      set {
+        ntOrderId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "mt5_ticket" field.</summary>
+    public const int Mt5TicketFieldNumber = 9;
+    private ulong mt5Ticket_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public ulong Mt5Ticket {
+      get { return mt5Ticket_; }
+      set {
+        mt5Ticket_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "queue_size" field.</summary>
+    public const int QueueSizeFieldNumber = 10;
+    private int queueSize_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int QueueSize {
+      get { return queueSize_; }
+      set {
+        queueSize_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "net_position" field.</summary>
+    public const int NetPositionFieldNumber = 11;
+    private int netPosition_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int NetPosition {
+      get { return netPosition_; }
+      set {
+        netPosition_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "hedge_size" field.</summary>
+    public const int HedgeSizeFieldNumber = 12;
+    private double hedgeSize_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public double HedgeSize {
+      get { return hedgeSize_; }
+      set {
+        hedgeSize_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "error_code" field.</summary>
+    public const int ErrorCodeFieldNumber = 13;
+    private string errorCode_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string ErrorCode {
+      get { return errorCode_; }
+      set {
+        errorCode_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "stack" field.</summary>
+    public const int StackFieldNumber = 14;
+    private string stack_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string Stack {
+      get { return stack_; }
+      set {
+        stack_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "tags" field.</summary>
+    public const int TagsFieldNumber = 15;
+    private static readonly pbc::MapField<string, string>.Codec _map_tags_codec
+        = new pbc::MapField<string, string>.Codec(pb::FieldCodec.ForString(10, ""), pb::FieldCodec.ForString(18, ""), 122);
+    private readonly pbc::MapField<string, string> tags_ = new pbc::MapField<string, string>();
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public pbc::MapField<string, string> Tags {
+      get { return tags_; }
+    }
+
+    /// <summary>Field number for the "schema_version" field.</summary>
+    public const int SchemaVersionFieldNumber = 16;
+    private string schemaVersion_ = "";
+    /// <summary>
+    /// added 2025-08 for enrichment tracking
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string SchemaVersion {
+      get { return schemaVersion_; }
+      set {
+        schemaVersion_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "correlation_id" field.</summary>
+    public const int CorrelationIdFieldNumber = 17;
+    private string correlationId_ = "";
+    /// <summary>
+    /// trace/log correlation across systems
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string CorrelationId {
+      get { return correlationId_; }
+      set {
+        correlationId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as LogEvent);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(LogEvent other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (TimestampNs != other.TimestampNs) return false;
+      if (Source != other.Source) return false;
+      if (Level != other.Level) return false;
+      if (Component != other.Component) return false;
+      if (Message != other.Message) return false;
+      if (BaseId != other.BaseId) return false;
+      if (TradeId != other.TradeId) return false;
+      if (NtOrderId != other.NtOrderId) return false;
+      if (Mt5Ticket != other.Mt5Ticket) return false;
+      if (QueueSize != other.QueueSize) return false;
+      if (NetPosition != other.NetPosition) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.Equals(HedgeSize, other.HedgeSize)) return false;
+      if (ErrorCode != other.ErrorCode) return false;
+      if (Stack != other.Stack) return false;
+      if (!Tags.Equals(other.Tags)) return false;
+      if (SchemaVersion != other.SchemaVersion) return false;
+      if (CorrelationId != other.CorrelationId) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (TimestampNs != 0L) hash ^= TimestampNs.GetHashCode();
+      if (Source.Length != 0) hash ^= Source.GetHashCode();
+      if (Level.Length != 0) hash ^= Level.GetHashCode();
+      if (Component.Length != 0) hash ^= Component.GetHashCode();
+      if (Message.Length != 0) hash ^= Message.GetHashCode();
+      if (BaseId.Length != 0) hash ^= BaseId.GetHashCode();
+      if (TradeId.Length != 0) hash ^= TradeId.GetHashCode();
+      if (NtOrderId.Length != 0) hash ^= NtOrderId.GetHashCode();
+      if (Mt5Ticket != 0UL) hash ^= Mt5Ticket.GetHashCode();
+      if (QueueSize != 0) hash ^= QueueSize.GetHashCode();
+      if (NetPosition != 0) hash ^= NetPosition.GetHashCode();
+      if (HedgeSize != 0D) hash ^= pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.GetHashCode(HedgeSize);
+      if (ErrorCode.Length != 0) hash ^= ErrorCode.GetHashCode();
+      if (Stack.Length != 0) hash ^= Stack.GetHashCode();
+      hash ^= Tags.GetHashCode();
+      if (SchemaVersion.Length != 0) hash ^= SchemaVersion.GetHashCode();
+      if (CorrelationId.Length != 0) hash ^= CorrelationId.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (TimestampNs != 0L) {
+        output.WriteRawTag(8);
+        output.WriteInt64(TimestampNs);
+      }
+      if (Source.Length != 0) {
+        output.WriteRawTag(18);
+        output.WriteString(Source);
+      }
+      if (Level.Length != 0) {
+        output.WriteRawTag(26);
+        output.WriteString(Level);
+      }
+      if (Component.Length != 0) {
+        output.WriteRawTag(34);
+        output.WriteString(Component);
+      }
+      if (Message.Length != 0) {
+        output.WriteRawTag(42);
+        output.WriteString(Message);
+      }
+      if (BaseId.Length != 0) {
+        output.WriteRawTag(50);
+        output.WriteString(BaseId);
+      }
+      if (TradeId.Length != 0) {
+        output.WriteRawTag(58);
+        output.WriteString(TradeId);
+      }
+      if (NtOrderId.Length != 0) {
+        output.WriteRawTag(66);
+        output.WriteString(NtOrderId);
+      }
+      if (Mt5Ticket != 0UL) {
+        output.WriteRawTag(72);
+        output.WriteUInt64(Mt5Ticket);
+      }
+      if (QueueSize != 0) {
+        output.WriteRawTag(80);
+        output.WriteInt32(QueueSize);
+      }
+      if (NetPosition != 0) {
+        output.WriteRawTag(88);
+        output.WriteInt32(NetPosition);
+      }
+      if (HedgeSize != 0D) {
+        output.WriteRawTag(97);
+        output.WriteDouble(HedgeSize);
+      }
+      if (ErrorCode.Length != 0) {
+        output.WriteRawTag(106);
+        output.WriteString(ErrorCode);
+      }
+      if (Stack.Length != 0) {
+        output.WriteRawTag(114);
+        output.WriteString(Stack);
+      }
+      tags_.WriteTo(output, _map_tags_codec);
+      if (SchemaVersion.Length != 0) {
+        output.WriteRawTag(130, 1);
+        output.WriteString(SchemaVersion);
+      }
+      if (CorrelationId.Length != 0) {
+        output.WriteRawTag(138, 1);
+        output.WriteString(CorrelationId);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (TimestampNs != 0L) {
+        output.WriteRawTag(8);
+        output.WriteInt64(TimestampNs);
+      }
+      if (Source.Length != 0) {
+        output.WriteRawTag(18);
+        output.WriteString(Source);
+      }
+      if (Level.Length != 0) {
+        output.WriteRawTag(26);
+        output.WriteString(Level);
+      }
+      if (Component.Length != 0) {
+        output.WriteRawTag(34);
+        output.WriteString(Component);
+      }
+      if (Message.Length != 0) {
+        output.WriteRawTag(42);
+        output.WriteString(Message);
+      }
+      if (BaseId.Length != 0) {
+        output.WriteRawTag(50);
+        output.WriteString(BaseId);
+      }
+      if (TradeId.Length != 0) {
+        output.WriteRawTag(58);
+        output.WriteString(TradeId);
+      }
+      if (NtOrderId.Length != 0) {
+        output.WriteRawTag(66);
+        output.WriteString(NtOrderId);
+      }
+      if (Mt5Ticket != 0UL) {
+        output.WriteRawTag(72);
+        output.WriteUInt64(Mt5Ticket);
+      }
+      if (QueueSize != 0) {
+        output.WriteRawTag(80);
+        output.WriteInt32(QueueSize);
+      }
+      if (NetPosition != 0) {
+        output.WriteRawTag(88);
+        output.WriteInt32(NetPosition);
+      }
+      if (HedgeSize != 0D) {
+        output.WriteRawTag(97);
+        output.WriteDouble(HedgeSize);
+      }
+      if (ErrorCode.Length != 0) {
+        output.WriteRawTag(106);
+        output.WriteString(ErrorCode);
+      }
+      if (Stack.Length != 0) {
+        output.WriteRawTag(114);
+        output.WriteString(Stack);
+      }
+      tags_.WriteTo(ref output, _map_tags_codec);
+      if (SchemaVersion.Length != 0) {
+        output.WriteRawTag(130, 1);
+        output.WriteString(SchemaVersion);
+      }
+      if (CorrelationId.Length != 0) {
+        output.WriteRawTag(138, 1);
+        output.WriteString(CorrelationId);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (TimestampNs != 0L) {
+        size += 1 + pb::CodedOutputStream.ComputeInt64Size(TimestampNs);
+      }
+      if (Source.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(Source);
+      }
+      if (Level.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(Level);
+      }
+      if (Component.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(Component);
+      }
+      if (Message.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(Message);
+      }
+      if (BaseId.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(BaseId);
+      }
+      if (TradeId.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(TradeId);
+      }
+      if (NtOrderId.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(NtOrderId);
+      }
+      if (Mt5Ticket != 0UL) {
+        size += 1 + pb::CodedOutputStream.ComputeUInt64Size(Mt5Ticket);
+      }
+      if (QueueSize != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(QueueSize);
+      }
+      if (NetPosition != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(NetPosition);
+      }
+      if (HedgeSize != 0D) {
+        size += 1 + 8;
+      }
+      if (ErrorCode.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(ErrorCode);
+      }
+      if (Stack.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(Stack);
+      }
+      size += tags_.CalculateSize(_map_tags_codec);
+      if (SchemaVersion.Length != 0) {
+        size += 2 + pb::CodedOutputStream.ComputeStringSize(SchemaVersion);
+      }
+      if (CorrelationId.Length != 0) {
+        size += 2 + pb::CodedOutputStream.ComputeStringSize(CorrelationId);
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(LogEvent other) {
+      if (other == null) {
+        return;
+      }
+      if (other.TimestampNs != 0L) {
+        TimestampNs = other.TimestampNs;
+      }
+      if (other.Source.Length != 0) {
+        Source = other.Source;
+      }
+      if (other.Level.Length != 0) {
+        Level = other.Level;
+      }
+      if (other.Component.Length != 0) {
+        Component = other.Component;
+      }
+      if (other.Message.Length != 0) {
+        Message = other.Message;
+      }
+      if (other.BaseId.Length != 0) {
+        BaseId = other.BaseId;
+      }
+      if (other.TradeId.Length != 0) {
+        TradeId = other.TradeId;
+      }
+      if (other.NtOrderId.Length != 0) {
+        NtOrderId = other.NtOrderId;
+      }
+      if (other.Mt5Ticket != 0UL) {
+        Mt5Ticket = other.Mt5Ticket;
+      }
+      if (other.QueueSize != 0) {
+        QueueSize = other.QueueSize;
+      }
+      if (other.NetPosition != 0) {
+        NetPosition = other.NetPosition;
+      }
+      if (other.HedgeSize != 0D) {
+        HedgeSize = other.HedgeSize;
+      }
+      if (other.ErrorCode.Length != 0) {
+        ErrorCode = other.ErrorCode;
+      }
+      if (other.Stack.Length != 0) {
+        Stack = other.Stack;
+      }
+      tags_.MergeFrom(other.tags_);
+      if (other.SchemaVersion.Length != 0) {
+        SchemaVersion = other.SchemaVersion;
+      }
+      if (other.CorrelationId.Length != 0) {
+        CorrelationId = other.CorrelationId;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 8: {
+            TimestampNs = input.ReadInt64();
+            break;
+          }
+          case 18: {
+            Source = input.ReadString();
+            break;
+          }
+          case 26: {
+            Level = input.ReadString();
+            break;
+          }
+          case 34: {
+            Component = input.ReadString();
+            break;
+          }
+          case 42: {
+            Message = input.ReadString();
+            break;
+          }
+          case 50: {
+            BaseId = input.ReadString();
+            break;
+          }
+          case 58: {
+            TradeId = input.ReadString();
+            break;
+          }
+          case 66: {
+            NtOrderId = input.ReadString();
+            break;
+          }
+          case 72: {
+            Mt5Ticket = input.ReadUInt64();
+            break;
+          }
+          case 80: {
+            QueueSize = input.ReadInt32();
+            break;
+          }
+          case 88: {
+            NetPosition = input.ReadInt32();
+            break;
+          }
+          case 97: {
+            HedgeSize = input.ReadDouble();
+            break;
+          }
+          case 106: {
+            ErrorCode = input.ReadString();
+            break;
+          }
+          case 114: {
+            Stack = input.ReadString();
+            break;
+          }
+          case 122: {
+            tags_.AddEntriesFrom(input, _map_tags_codec);
+            break;
+          }
+          case 130: {
+            SchemaVersion = input.ReadString();
+            break;
+          }
+          case 138: {
+            CorrelationId = input.ReadString();
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 8: {
+            TimestampNs = input.ReadInt64();
+            break;
+          }
+          case 18: {
+            Source = input.ReadString();
+            break;
+          }
+          case 26: {
+            Level = input.ReadString();
+            break;
+          }
+          case 34: {
+            Component = input.ReadString();
+            break;
+          }
+          case 42: {
+            Message = input.ReadString();
+            break;
+          }
+          case 50: {
+            BaseId = input.ReadString();
+            break;
+          }
+          case 58: {
+            TradeId = input.ReadString();
+            break;
+          }
+          case 66: {
+            NtOrderId = input.ReadString();
+            break;
+          }
+          case 72: {
+            Mt5Ticket = input.ReadUInt64();
+            break;
+          }
+          case 80: {
+            QueueSize = input.ReadInt32();
+            break;
+          }
+          case 88: {
+            NetPosition = input.ReadInt32();
+            break;
+          }
+          case 97: {
+            HedgeSize = input.ReadDouble();
+            break;
+          }
+          case 106: {
+            ErrorCode = input.ReadString();
+            break;
+          }
+          case 114: {
+            Stack = input.ReadString();
+            break;
+          }
+          case 122: {
+            tags_.AddEntriesFrom(ref input, _map_tags_codec);
+            break;
+          }
+          case 130: {
+            SchemaVersion = input.ReadString();
+            break;
+          }
+          case 138: {
+            CorrelationId = input.ReadString();
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class LogAck : pb::IMessage<LogAck>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<LogAck> _parser = new pb::MessageParser<LogAck>(() => new LogAck());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<LogAck> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[1]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public LogAck() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public LogAck(LogAck other) : this() {
+      accepted_ = other.accepted_;
+      dropped_ = other.dropped_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public LogAck Clone() {
+      return new LogAck(this);
+    }
+
+    /// <summary>Field number for the "accepted" field.</summary>
+    public const int AcceptedFieldNumber = 1;
+    private uint accepted_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint Accepted {
+      get { return accepted_; }
+      set {
+        accepted_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "dropped" field.</summary>
+    public const int DroppedFieldNumber = 2;
+    private uint dropped_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint Dropped {
+      get { return dropped_; }
+      set {
+        dropped_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as LogAck);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(LogAck other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (Accepted != other.Accepted) return false;
+      if (Dropped != other.Dropped) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (Accepted != 0) hash ^= Accepted.GetHashCode();
+      if (Dropped != 0) hash ^= Dropped.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (Accepted != 0) {
+        output.WriteRawTag(8);
+        output.WriteUInt32(Accepted);
+      }
+      if (Dropped != 0) {
+        output.WriteRawTag(16);
+        output.WriteUInt32(Dropped);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (Accepted != 0) {
+        output.WriteRawTag(8);
+        output.WriteUInt32(Accepted);
+      }
+      if (Dropped != 0) {
+        output.WriteRawTag(16);
+        output.WriteUInt32(Dropped);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (Accepted != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeUInt32Size(Accepted);
+      }
+      if (Dropped != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeUInt32Size(Dropped);
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(LogAck other) {
+      if (other == null) {
+        return;
+      }
+      if (other.Accepted != 0) {
+        Accepted = other.Accepted;
+      }
+      if (other.Dropped != 0) {
+        Dropped = other.Dropped;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 8: {
+            Accepted = input.ReadUInt32();
+            break;
+          }
+          case 16: {
+            Dropped = input.ReadUInt32();
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 8: {
+            Accepted = input.ReadUInt32();
+            break;
+          }
+          case 16: {
+            Dropped = input.ReadUInt32();
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  /// <summary>
   /// Core trade message
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class Trade : pb::IMessage<Trade>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -123,7 +1175,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[0]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[2]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -160,6 +1212,15 @@ namespace Trading.Proto {
       ntDailyPnl_ = other.ntDailyPnl_;
       ntTradeResult_ = other.ntTradeResult_;
       ntSessionTrades_ = other.ntSessionTrades_;
+      mt5Ticket_ = other.mt5Ticket_;
+      ntPointsPer1KLoss_ = other.ntPointsPer1KLoss_;
+      eventType_ = other.eventType_;
+      elasticCurrentProfit_ = other.elasticCurrentProfit_;
+      elasticProfitLevel_ = other.elasticProfitLevel_;
+      qtTradeId_ = other.qtTradeId_;
+      qtPositionId_ = other.qtPositionId_;
+      strategyTag_ = other.strategyTag_;
+      originPlatform_ = other.originPlatform_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -385,6 +1446,141 @@ namespace Trading.Proto {
       }
     }
 
+    /// <summary>Field number for the "mt5_ticket" field.</summary>
+    public const int Mt5TicketFieldNumber = 18;
+    private ulong mt5Ticket_;
+    /// <summary>
+    /// MT5 position ticket number for CLOSE_HEDGE targeting
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public ulong Mt5Ticket {
+      get { return mt5Ticket_; }
+      set {
+        mt5Ticket_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "nt_points_per_1k_loss" field.</summary>
+    public const int NtPointsPer1KLossFieldNumber = 19;
+    private double ntPointsPer1KLoss_;
+    /// <summary>
+    /// Elastic sizing hint: NT points that correspond to $1000 loss for 1 contract on NT
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public double NtPointsPer1KLoss {
+      get { return ntPointsPer1KLoss_; }
+      set {
+        ntPointsPer1KLoss_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "event_type" field.</summary>
+    public const int EventTypeFieldNumber = 20;
+    private string eventType_ = "";
+    /// <summary>
+    /// Optional event enrichment so EA can branch on elastic/trailing without synthetic trades
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string EventType {
+      get { return eventType_; }
+      set {
+        eventType_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "elastic_current_profit" field.</summary>
+    public const int ElasticCurrentProfitFieldNumber = 21;
+    private double elasticCurrentProfit_;
+    /// <summary>
+    /// forwarded for elastic events
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public double ElasticCurrentProfit {
+      get { return elasticCurrentProfit_; }
+      set {
+        elasticCurrentProfit_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "elastic_profit_level" field.</summary>
+    public const int ElasticProfitLevelFieldNumber = 22;
+    private int elasticProfitLevel_;
+    /// <summary>
+    /// forwarded for elastic events
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int ElasticProfitLevel {
+      get { return elasticProfitLevel_; }
+      set {
+        elasticProfitLevel_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "qt_trade_id" field.</summary>
+    public const int QtTradeIdFieldNumber = 23;
+    private string qtTradeId_ = "";
+    /// <summary>
+    /// Quantower identifiers (optional during transition)
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string QtTradeId {
+      get { return qtTradeId_; }
+      set {
+        qtTradeId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "qt_position_id" field.</summary>
+    public const int QtPositionIdFieldNumber = 24;
+    private string qtPositionId_ = "";
+    /// <summary>
+    /// Quantower Position.Id (aggregate exposure grouping)
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string QtPositionId {
+      get { return qtPositionId_; }
+      set {
+        qtPositionId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "strategy_tag" field.</summary>
+    public const int StrategyTagFieldNumber = 25;
+    private string strategyTag_ = "";
+    /// <summary>
+    /// Quantower strategy/portfolio tag for hedging context
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string StrategyTag {
+      get { return strategyTag_; }
+      set {
+        strategyTag_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "origin_platform" field.</summary>
+    public const int OriginPlatformFieldNumber = 26;
+    private string originPlatform_ = "";
+    /// <summary>
+    /// source platform identifier (e.g., "quantower", "mt5")
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string OriginPlatform {
+      get { return originPlatform_; }
+      set {
+        originPlatform_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -417,6 +1613,15 @@ namespace Trading.Proto {
       if (!pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.Equals(NtDailyPnl, other.NtDailyPnl)) return false;
       if (NtTradeResult != other.NtTradeResult) return false;
       if (NtSessionTrades != other.NtSessionTrades) return false;
+      if (Mt5Ticket != other.Mt5Ticket) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.Equals(NtPointsPer1KLoss, other.NtPointsPer1KLoss)) return false;
+      if (EventType != other.EventType) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.Equals(ElasticCurrentProfit, other.ElasticCurrentProfit)) return false;
+      if (ElasticProfitLevel != other.ElasticProfitLevel) return false;
+      if (QtTradeId != other.QtTradeId) return false;
+      if (QtPositionId != other.QtPositionId) return false;
+      if (StrategyTag != other.StrategyTag) return false;
+      if (OriginPlatform != other.OriginPlatform) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -441,6 +1646,15 @@ namespace Trading.Proto {
       if (NtDailyPnl != 0D) hash ^= pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.GetHashCode(NtDailyPnl);
       if (NtTradeResult.Length != 0) hash ^= NtTradeResult.GetHashCode();
       if (NtSessionTrades != 0) hash ^= NtSessionTrades.GetHashCode();
+      if (Mt5Ticket != 0UL) hash ^= Mt5Ticket.GetHashCode();
+      if (NtPointsPer1KLoss != 0D) hash ^= pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.GetHashCode(NtPointsPer1KLoss);
+      if (EventType.Length != 0) hash ^= EventType.GetHashCode();
+      if (ElasticCurrentProfit != 0D) hash ^= pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.GetHashCode(ElasticCurrentProfit);
+      if (ElasticProfitLevel != 0) hash ^= ElasticProfitLevel.GetHashCode();
+      if (QtTradeId.Length != 0) hash ^= QtTradeId.GetHashCode();
+      if (QtPositionId.Length != 0) hash ^= QtPositionId.GetHashCode();
+      if (StrategyTag.Length != 0) hash ^= StrategyTag.GetHashCode();
+      if (OriginPlatform.Length != 0) hash ^= OriginPlatform.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -527,6 +1741,42 @@ namespace Trading.Proto {
         output.WriteRawTag(136, 1);
         output.WriteInt32(NtSessionTrades);
       }
+      if (Mt5Ticket != 0UL) {
+        output.WriteRawTag(144, 1);
+        output.WriteUInt64(Mt5Ticket);
+      }
+      if (NtPointsPer1KLoss != 0D) {
+        output.WriteRawTag(153, 1);
+        output.WriteDouble(NtPointsPer1KLoss);
+      }
+      if (EventType.Length != 0) {
+        output.WriteRawTag(162, 1);
+        output.WriteString(EventType);
+      }
+      if (ElasticCurrentProfit != 0D) {
+        output.WriteRawTag(169, 1);
+        output.WriteDouble(ElasticCurrentProfit);
+      }
+      if (ElasticProfitLevel != 0) {
+        output.WriteRawTag(176, 1);
+        output.WriteInt32(ElasticProfitLevel);
+      }
+      if (QtTradeId.Length != 0) {
+        output.WriteRawTag(186, 1);
+        output.WriteString(QtTradeId);
+      }
+      if (QtPositionId.Length != 0) {
+        output.WriteRawTag(194, 1);
+        output.WriteString(QtPositionId);
+      }
+      if (StrategyTag.Length != 0) {
+        output.WriteRawTag(202, 1);
+        output.WriteString(StrategyTag);
+      }
+      if (OriginPlatform.Length != 0) {
+        output.WriteRawTag(210, 1);
+        output.WriteString(OriginPlatform);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -605,6 +1855,42 @@ namespace Trading.Proto {
         output.WriteRawTag(136, 1);
         output.WriteInt32(NtSessionTrades);
       }
+      if (Mt5Ticket != 0UL) {
+        output.WriteRawTag(144, 1);
+        output.WriteUInt64(Mt5Ticket);
+      }
+      if (NtPointsPer1KLoss != 0D) {
+        output.WriteRawTag(153, 1);
+        output.WriteDouble(NtPointsPer1KLoss);
+      }
+      if (EventType.Length != 0) {
+        output.WriteRawTag(162, 1);
+        output.WriteString(EventType);
+      }
+      if (ElasticCurrentProfit != 0D) {
+        output.WriteRawTag(169, 1);
+        output.WriteDouble(ElasticCurrentProfit);
+      }
+      if (ElasticProfitLevel != 0) {
+        output.WriteRawTag(176, 1);
+        output.WriteInt32(ElasticProfitLevel);
+      }
+      if (QtTradeId.Length != 0) {
+        output.WriteRawTag(186, 1);
+        output.WriteString(QtTradeId);
+      }
+      if (QtPositionId.Length != 0) {
+        output.WriteRawTag(194, 1);
+        output.WriteString(QtPositionId);
+      }
+      if (StrategyTag.Length != 0) {
+        output.WriteRawTag(202, 1);
+        output.WriteString(StrategyTag);
+      }
+      if (OriginPlatform.Length != 0) {
+        output.WriteRawTag(210, 1);
+        output.WriteString(OriginPlatform);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -665,6 +1951,33 @@ namespace Trading.Proto {
       }
       if (NtSessionTrades != 0) {
         size += 2 + pb::CodedOutputStream.ComputeInt32Size(NtSessionTrades);
+      }
+      if (Mt5Ticket != 0UL) {
+        size += 2 + pb::CodedOutputStream.ComputeUInt64Size(Mt5Ticket);
+      }
+      if (NtPointsPer1KLoss != 0D) {
+        size += 2 + 8;
+      }
+      if (EventType.Length != 0) {
+        size += 2 + pb::CodedOutputStream.ComputeStringSize(EventType);
+      }
+      if (ElasticCurrentProfit != 0D) {
+        size += 2 + 8;
+      }
+      if (ElasticProfitLevel != 0) {
+        size += 2 + pb::CodedOutputStream.ComputeInt32Size(ElasticProfitLevel);
+      }
+      if (QtTradeId.Length != 0) {
+        size += 2 + pb::CodedOutputStream.ComputeStringSize(QtTradeId);
+      }
+      if (QtPositionId.Length != 0) {
+        size += 2 + pb::CodedOutputStream.ComputeStringSize(QtPositionId);
+      }
+      if (StrategyTag.Length != 0) {
+        size += 2 + pb::CodedOutputStream.ComputeStringSize(StrategyTag);
+      }
+      if (OriginPlatform.Length != 0) {
+        size += 2 + pb::CodedOutputStream.ComputeStringSize(OriginPlatform);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -729,6 +2042,33 @@ namespace Trading.Proto {
       if (other.NtSessionTrades != 0) {
         NtSessionTrades = other.NtSessionTrades;
       }
+      if (other.Mt5Ticket != 0UL) {
+        Mt5Ticket = other.Mt5Ticket;
+      }
+      if (other.NtPointsPer1KLoss != 0D) {
+        NtPointsPer1KLoss = other.NtPointsPer1KLoss;
+      }
+      if (other.EventType.Length != 0) {
+        EventType = other.EventType;
+      }
+      if (other.ElasticCurrentProfit != 0D) {
+        ElasticCurrentProfit = other.ElasticCurrentProfit;
+      }
+      if (other.ElasticProfitLevel != 0) {
+        ElasticProfitLevel = other.ElasticProfitLevel;
+      }
+      if (other.QtTradeId.Length != 0) {
+        QtTradeId = other.QtTradeId;
+      }
+      if (other.QtPositionId.Length != 0) {
+        QtPositionId = other.QtPositionId;
+      }
+      if (other.StrategyTag.Length != 0) {
+        StrategyTag = other.StrategyTag;
+      }
+      if (other.OriginPlatform.Length != 0) {
+        OriginPlatform = other.OriginPlatform;
+      }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
 
@@ -740,7 +2080,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -812,6 +2156,42 @@ namespace Trading.Proto {
             NtSessionTrades = input.ReadInt32();
             break;
           }
+          case 144: {
+            Mt5Ticket = input.ReadUInt64();
+            break;
+          }
+          case 153: {
+            NtPointsPer1KLoss = input.ReadDouble();
+            break;
+          }
+          case 162: {
+            EventType = input.ReadString();
+            break;
+          }
+          case 169: {
+            ElasticCurrentProfit = input.ReadDouble();
+            break;
+          }
+          case 176: {
+            ElasticProfitLevel = input.ReadInt32();
+            break;
+          }
+          case 186: {
+            QtTradeId = input.ReadString();
+            break;
+          }
+          case 194: {
+            QtPositionId = input.ReadString();
+            break;
+          }
+          case 202: {
+            StrategyTag = input.ReadString();
+            break;
+          }
+          case 210: {
+            OriginPlatform = input.ReadString();
+            break;
+          }
         }
       }
     #endif
@@ -823,7 +2203,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -895,6 +2279,42 @@ namespace Trading.Proto {
             NtSessionTrades = input.ReadInt32();
             break;
           }
+          case 144: {
+            Mt5Ticket = input.ReadUInt64();
+            break;
+          }
+          case 153: {
+            NtPointsPer1KLoss = input.ReadDouble();
+            break;
+          }
+          case 162: {
+            EventType = input.ReadString();
+            break;
+          }
+          case 169: {
+            ElasticCurrentProfit = input.ReadDouble();
+            break;
+          }
+          case 176: {
+            ElasticProfitLevel = input.ReadInt32();
+            break;
+          }
+          case 186: {
+            QtTradeId = input.ReadString();
+            break;
+          }
+          case 194: {
+            QtPositionId = input.ReadString();
+            break;
+          }
+          case 202: {
+            StrategyTag = input.ReadString();
+            break;
+          }
+          case 210: {
+            OriginPlatform = input.ReadString();
+            break;
+          }
         }
       }
     }
@@ -905,6 +2325,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Hedge closure notification
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HedgeCloseNotification : pb::IMessage<HedgeCloseNotification>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -919,7 +2340,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[1]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[3]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -1295,7 +2716,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -1346,7 +2771,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -1396,6 +2825,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Elastic hedge update
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class ElasticHedgeUpdate : pb::IMessage<ElasticHedgeUpdate>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -1410,7 +2840,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[2]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[4]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -1728,7 +3158,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -1771,7 +3205,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -1813,6 +3251,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Trailing stop update
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class TrailingStopUpdate : pb::IMessage<TrailingStopUpdate>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -1827,7 +3266,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[3]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[5]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -2145,7 +3584,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -2188,7 +3631,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -2230,6 +3677,7 @@ namespace Trading.Proto {
   /// <summary>
   /// MT5 trade result
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class MT5TradeResult : pb::IMessage<MT5TradeResult>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -2244,7 +3692,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[4]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[6]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -2501,7 +3949,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -2536,7 +3988,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -2570,6 +4026,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Health check request/response
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HealthRequest : pb::IMessage<HealthRequest>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -2584,7 +4041,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[5]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[7]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -2760,7 +4217,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -2783,7 +4244,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -2802,6 +4267,7 @@ namespace Trading.Proto {
 
   }
 
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HealthResponse : pb::IMessage<HealthResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -2816,7 +4282,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[6]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[8]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -3044,7 +4510,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -3075,7 +4545,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -3105,6 +4579,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Generic response
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class GenericResponse : pb::IMessage<GenericResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -3119,7 +4594,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[7]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[9]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -3295,7 +4770,7 @@ namespace Trading.Proto {
       if (other.Message.Length != 0) {
         Message = other.Message;
       }
-      metadata_.Add(other.metadata_);
+      metadata_.MergeFrom(other.metadata_);
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
 
@@ -3307,7 +4782,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -3334,7 +4813,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -3360,6 +4843,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Settings request/response for addon
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class SettingsRequest : pb::IMessage<SettingsRequest>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -3374,7 +4858,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[8]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[10]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -3515,7 +4999,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -3534,7 +5022,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -3549,6 +5041,7 @@ namespace Trading.Proto {
 
   }
 
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class SettingsResponse : pb::IMessage<SettingsResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -3563,7 +5056,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[9]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[11]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -3762,7 +5255,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -3789,7 +5286,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -3815,6 +5316,7 @@ namespace Trading.Proto {
   /// <summary>
   /// System heartbeat
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HeartbeatRequest : pb::IMessage<HeartbeatRequest>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -3829,7 +5331,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[10]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[12]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -4057,7 +5559,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -4088,7 +5594,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -4115,6 +5625,7 @@ namespace Trading.Proto {
 
   }
 
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HeartbeatResponse : pb::IMessage<HeartbeatResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -4129,7 +5640,7 @@ namespace Trading.Proto {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[11]; }
+      get { return global::Trading.Proto.TradingReflection.Descriptor.MessageTypes[13]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -4299,7 +5810,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -4322,7 +5837,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;

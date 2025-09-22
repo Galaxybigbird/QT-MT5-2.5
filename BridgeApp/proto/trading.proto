@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package trading;
-option go_package = "github.com/hedgebot/proto/trading";
+option go_package = "BridgeApp/internal/grpc/proto;trading";
 option csharp_namespace = "Trading.Proto";
 
 // Unified logging
@@ -45,7 +45,7 @@ message Trade {
   double raw_measurement = 11;
   string instrument = 12;
   string account_name = 13;
-  
+
   // Enhanced NT Performance Data
   double nt_balance = 14;
   double nt_daily_pnl = 15;
@@ -59,6 +59,12 @@ message Trade {
   string event_type = 20;                // e.g., "elastic_hedge_update"
   double elastic_current_profit = 21;    // forwarded for elastic events
   int32 elastic_profit_level = 22;       // forwarded for elastic events
+
+  // Quantower identifiers (optional during transition)
+  string qt_trade_id = 23;        // Quantower Trade.Id (authoritative unique identifier)
+  string qt_position_id = 24;     // Quantower Position.Id (aggregate exposure grouping)
+  string strategy_tag = 25;       // Quantower strategy/portfolio tag for hedging context
+  string origin_platform = 26;    // source platform identifier (e.g., "quantower", "mt5")
 }
 
 // Hedge closure notification

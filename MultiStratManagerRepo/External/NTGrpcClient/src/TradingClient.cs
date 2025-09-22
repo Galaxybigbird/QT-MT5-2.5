@@ -21,17 +21,23 @@ namespace NTGrpcClient
         public bool IsConnected { get; private set; }
         public string LastError { get; private set; } = "";
         
-        public TradingClient(string serverAddress)
+        private readonly string _source;
+        private readonly string _component;
+
+        public TradingClient(string serverAddress, string source = "nt", string component = "nt_addon")
         {
             try
             {
+                _source = string.IsNullOrWhiteSpace(source) ? "nt" : source;
+                _component = string.IsNullOrWhiteSpace(component) ? (_source.Equals("nt", StringComparison.OrdinalIgnoreCase) ? "nt_addon" : "addon") : component;
+
                 // Extract host and port, normalize localhost to 127.0.0.1 for Grpc.Core
                 var address = serverAddress.Replace("http://", "").Replace("https://", "");
                 if (address.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase))
                 {
                     address = "127.0.0.1:" + address.Substring("localhost:".Length);
                 }
-                
+
                 // For .NET Framework 4.8, use Grpc.Core's native implementation
                 // Optionally specify a small connect timeout via environment if configured
                 // Configure keepalive to reduce intermittent disconnects
@@ -44,11 +50,11 @@ namespace NTGrpcClient
                     new ChannelOption("grpc.max_reconnect_backoff_ms", 5000)    // speed up reconnects
                 };
                 _channel = new Channel(address, ChannelCredentials.Insecure, options);
-                
+
                 _client = new TradingService.TradingServiceClient(_channel);
                 _streamingClient = new StreamingService.StreamingServiceClient(_channel);
                 _loggingClient = new LoggingService.LoggingServiceClient(_channel);
-                
+
                 LastError = $"Grpc.Core channel created for {address}";
             }
             catch (Exception ex)
@@ -66,9 +72,9 @@ namespace NTGrpcClient
                 var ev = new LogEvent
                 {
                     TimestampNs = nowNs,
-                    Source = "nt",
+                    Source = _source,
                     Level = string.IsNullOrWhiteSpace(level) ? "INFO" : level,
-                    Component = component ?? "nt_addon",
+                    Component = component ?? _component,
                     Message = message ?? string.Empty,
                     TradeId = tradeId ?? string.Empty,
                     ErrorCode = errorCode ?? string.Empty,
@@ -111,7 +117,7 @@ namespace NTGrpcClient
         {
             try
             {
-                var request = new HealthRequest { Source = "nt_addon_init" };
+                var request = new HealthRequest { Source = "addon" };
                 var response = await _client.HealthCheckAsync(request);
                 IsConnected = response.Status == "healthy";
             }
@@ -348,11 +354,11 @@ namespace NTGrpcClient
         {
             var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            
+
             return new Trade
             {
-                Id = GetStringValue(root, "id"),
-                BaseId = GetStringValue(root, "base_id"),
+                Id = GetStringValue(root, "id", "trade_id"),
+                BaseId = GetStringValue(root, "base_id", "qt_position_id", "position_id"),
                 Timestamp = GetInt64Value(root, "timestamp"),
                 Action = GetStringValue(root, "action"),
                 Quantity = GetDoubleValue(root, "quantity"),
@@ -360,18 +366,22 @@ namespace NTGrpcClient
                 TotalQuantity = GetInt32Value(root, "total_quantity"),
                 ContractNum = GetInt32Value(root, "contract_num"),
                 OrderType = GetStringValue(root, "order_type"),
-                MeasurementPips = GetInt32Value(root, "measurement_pips"),
+                MeasurementPips = GetInt32Value(root, "measurement_pips", "measurement", "pips"),
                 RawMeasurement = GetDoubleValue(root, "raw_measurement"),
-                Instrument = GetStringValue(root, "instrument_name"),
-                AccountName = GetStringValue(root, "account_name"),
+                Instrument = GetStringValue(root, "instrument", "instrument_name", "symbol"),
+                AccountName = GetStringValue(root, "account_name", "account"),
                 NtBalance = GetDoubleValue(root, "nt_balance"),
                 NtDailyPnl = GetDoubleValue(root, "nt_daily_pnl"),
                 NtTradeResult = GetStringValue(root, "nt_trade_result"),
                 NtSessionTrades = GetInt32Value(root, "nt_session_trades"),
-                NtPointsPer1KLoss = GetDoubleValue(root, "nt_points_per_1k_loss")
+                NtPointsPer1KLoss = GetDoubleValue(root, "nt_points_per_1k_loss"),
+                QtTradeId = GetStringValue(root, "qt_trade_id", "quantower_trade_id"),
+                QtPositionId = GetStringValue(root, "qt_position_id", "quantower_position_id"),
+                StrategyTag = GetStringValue(root, "strategy_tag", "strategy"),
+                OriginPlatform = GetStringValue(root, "origin_platform", "source_platform", "platform")
             };
         }
-        
+
         private string ProtoTradeToJson(Trade trade)
         {
             var data = new
@@ -387,6 +397,7 @@ namespace NTGrpcClient
                 order_type = trade.OrderType,
                 measurement_pips = trade.MeasurementPips,
                 raw_measurement = trade.RawMeasurement,
+                instrument = trade.Instrument,
                 instrument_name = trade.Instrument,
                 account_name = trade.AccountName,
                 nt_balance = trade.NtBalance,
@@ -394,9 +405,13 @@ namespace NTGrpcClient
                 nt_trade_result = trade.NtTradeResult,
                 nt_session_trades = trade.NtSessionTrades,
                 mt5_ticket = trade.Mt5Ticket,
-                nt_points_per_1k_loss = trade.NtPointsPer1KLoss
+                nt_points_per_1k_loss = trade.NtPointsPer1KLoss,
+                qt_trade_id = trade.QtTradeId,
+                qt_position_id = trade.QtPositionId,
+                strategy_tag = trade.StrategyTag,
+                origin_platform = trade.OriginPlatform
             };
-            
+
             return JsonSerializer.Serialize(data);
         }
         
@@ -429,7 +444,7 @@ namespace NTGrpcClient
             {
                 EventType = GetStringValue(root, "event_type"),
                 Action = GetStringValue(root, "action"),
-                BaseId = GetStringValue(root, "base_id"),
+                BaseId = GetStringValue(root, "base_id", "qt_position_id", "position_id"),
                 CurrentProfit = currentProfit,
                 ProfitLevel = profitLevel,
                 Timestamp = GetStringValue(root, "timestamp"),
@@ -445,7 +460,7 @@ namespace NTGrpcClient
             return new TrailingStopUpdate
             {
                 EventType = GetStringValue(root, "event_type"),
-                BaseId = GetStringValue(root, "base_id"),
+                BaseId = GetStringValue(root, "base_id", "qt_position_id", "position_id"),
                 NewStopPrice = GetDoubleValue(root, "new_stop_price"),
                 TrailingType = GetStringValue(root, "trailing_type"),
                 CurrentPrice = GetDoubleValue(root, "current_price"),
@@ -453,16 +468,16 @@ namespace NTGrpcClient
                 Mt5Ticket = GetUInt64Value(root, "mt5_ticket")
             };
         }
-        
+
         private HedgeCloseNotification JsonToProtoHedgeClose(string json)
         {
             var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            
+
             return new HedgeCloseNotification
             {
                 EventType = GetStringValue(root, "event_type"),
-                BaseId = GetStringValue(root, "base_id"),
+                BaseId = GetStringValue(root, "base_id", "qt_position_id", "position_id"),
                 NtInstrumentSymbol = GetStringValue(root, "nt_instrument_symbol"),
                 NtAccountName = GetStringValue(root, "nt_account_name"),
                 ClosedHedgeQuantity = GetDoubleValue(root, "closed_hedge_quantity"),
@@ -474,17 +489,34 @@ namespace NTGrpcClient
         }
         
         // Helper methods for JSON parsing
-        private string GetStringValue(JsonElement element, string propertyName)
+        private string GetStringValue(JsonElement element, params string[] propertyNames)
         {
-            return element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String 
-                ? value.GetString() ?? "" 
-                : "";
-        }
-        
-        private double GetDoubleValue(JsonElement element, string propertyName)
-        {
-            if (element.TryGetProperty(propertyName, out var value))
+            foreach (var propertyName in propertyNames)
             {
+                if (!element.TryGetProperty(propertyName, out var value))
+                    continue;
+
+                switch (value.ValueKind)
+                {
+                    case JsonValueKind.String:
+                        return value.GetString() ?? string.Empty;
+                    case JsonValueKind.Number:
+                        return value.ToString();
+                    case JsonValueKind.True:
+                    case JsonValueKind.False:
+                        return value.GetBoolean().ToString();
+                }
+            }
+            return string.Empty;
+        }
+
+        private double GetDoubleValue(JsonElement element, params string[] propertyNames)
+        {
+            foreach (var propertyName in propertyNames)
+            {
+                if (!element.TryGetProperty(propertyName, out var value))
+                    continue;
+
                 if (value.ValueKind == JsonValueKind.Number)
                     return value.GetDouble();
                 if (value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(), out var result))
@@ -492,11 +524,14 @@ namespace NTGrpcClient
             }
             return 0.0;
         }
-        
-        private int GetInt32Value(JsonElement element, string propertyName)
+
+        private int GetInt32Value(JsonElement element, params string[] propertyNames)
         {
-            if (element.TryGetProperty(propertyName, out var value))
+            foreach (var propertyName in propertyNames)
             {
+                if (!element.TryGetProperty(propertyName, out var value))
+                    continue;
+
                 if (value.ValueKind == JsonValueKind.Number)
                     return value.GetInt32();
                 if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var result))
@@ -504,11 +539,14 @@ namespace NTGrpcClient
             }
             return 0;
         }
-        
-        private long GetInt64Value(JsonElement element, string propertyName)
+
+        private long GetInt64Value(JsonElement element, params string[] propertyNames)
         {
-            if (element.TryGetProperty(propertyName, out var value))
+            foreach (var propertyName in propertyNames)
             {
+                if (!element.TryGetProperty(propertyName, out var value))
+                    continue;
+
                 if (value.ValueKind == JsonValueKind.Number)
                     return value.GetInt64();
                 if (value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), out var result))
@@ -516,11 +554,14 @@ namespace NTGrpcClient
             }
             return 0;
         }
-        
-        private ulong GetUInt64Value(JsonElement element, string propertyName)
+
+        private ulong GetUInt64Value(JsonElement element, params string[] propertyNames)
         {
-            if (element.TryGetProperty(propertyName, out var value))
+            foreach (var propertyName in propertyNames)
             {
+                if (!element.TryGetProperty(propertyName, out var value))
+                    continue;
+
                 if (value.ValueKind == JsonValueKind.Number)
                     return value.GetUInt64();
                 if (value.ValueKind == JsonValueKind.String && ulong.TryParse(value.GetString(), out var result))

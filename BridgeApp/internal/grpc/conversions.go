@@ -27,6 +27,10 @@ type Trade struct {
 	NTSessionTrades   int       `json:"nt_session_trades,omitempty"`
 	MT5Ticket         uint64    `json:"mt5_ticket"`
 	NTPointsPer1kLoss float64   `json:"nt_points_per_1k_loss,omitempty"`
+	QTTradeID         string    `json:"qt_trade_id,omitempty"`
+	QTPositionID      string    `json:"qt_position_id,omitempty"`
+	StrategyTag       string    `json:"strategy_tag,omitempty"`
+	Origin            string    `json:"origin_platform,omitempty"`
 }
 
 // Internal struct definitions that match the app.go structures
@@ -56,6 +60,10 @@ type InternalTrade struct {
 	EventType            string  `json:"event_type,omitempty"`
 	ElasticCurrentProfit float64 `json:"elastic_current_profit,omitempty"`
 	ElasticProfitLevel   int32   `json:"elastic_profit_level,omitempty"`
+	QTTradeID            string  `json:"qt_trade_id,omitempty"`
+	QTPositionID         string  `json:"qt_position_id,omitempty"`
+	StrategyTag          string  `json:"strategy_tag,omitempty"`
+	OriginPlatform       string  `json:"origin_platform,omitempty"`
 }
 
 type InternalHedgeCloseNotification struct {
@@ -131,6 +139,10 @@ func convertProtoToInternalTrade(proto *trading.Trade) *InternalTrade {
 		EventType:            proto.GetEventType(),
 		ElasticCurrentProfit: proto.GetElasticCurrentProfit(),
 		ElasticProfitLevel:   proto.GetElasticProfitLevel(),
+		QTTradeID:            proto.GetQtTradeId(),
+		QTPositionID:         proto.GetQtPositionId(),
+		StrategyTag:          proto.GetStrategyTag(),
+		OriginPlatform:       proto.GetOriginPlatform(),
 	}
 }
 
@@ -159,6 +171,10 @@ func ConvertInternalToProtoTrade(internal *InternalTrade) *trading.Trade {
 		EventType:            internal.EventType,
 		ElasticCurrentProfit: internal.ElasticCurrentProfit,
 		ElasticProfitLevel:   internal.ElasticProfitLevel,
+		QtTradeId:            internal.QTTradeID,
+		QtPositionId:         internal.QTPositionID,
+		StrategyTag:          internal.StrategyTag,
+		OriginPlatform:       internal.OriginPlatform,
 	}
 }
 
