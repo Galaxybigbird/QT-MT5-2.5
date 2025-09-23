@@ -30,8 +30,9 @@ namespace Quantower.MultiStrat
         private readonly object _trackingLock = new();
         private readonly TimeSpan _trackingInterval = TimeSpan.FromSeconds(2);
         private readonly object _riskLock = new();
-        private bool _disposed;
+        private int _disposed; // 0 = active, 1 = disposed
         private Timer? _riskTimer;
+        public TimeSpan RiskTimerInterval { get; set; } = TimeSpan.FromSeconds(5);
 
         public MultiStratManagerService()
         {
@@ -304,12 +305,11 @@ namespace Quantower.MultiStrat
 
         public void Dispose()
         {
-            if (_disposed)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
             {
                 return;
             }
 
-            _disposed = true;
             SaveSettings();
             try
             {
@@ -823,6 +823,12 @@ namespace Quantower.MultiStrat
                     SymbolName = position.Symbol?.Name
                 };
 
+                // Avoid creating timers when disposal has started
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    return;
+                }
+
                 state.Timer = new Timer(OnTrackingTimer, state, _trackingInterval, _trackingInterval);
                 _trackingStates[baseId] = state;
             }
@@ -899,12 +905,13 @@ namespace Quantower.MultiStrat
 
         private void StartRiskTimer()
         {
-            _riskTimer ??= new Timer(OnRiskTimer, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+            var interval = RiskTimerInterval <= TimeSpan.Zero ? TimeSpan.FromSeconds(5) : RiskTimerInterval;
+            _riskTimer ??= new Timer(OnRiskTimer, null, interval, interval);
         }
 
         private void OnRiskTimer(object? state)
         {
-            if (_disposed || !IsConnected)
+            if (Volatile.Read(ref _disposed) != 0 || !IsConnected)
             {
                 return;
             }
@@ -1075,41 +1082,38 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private Task<bool> FlattenAccountInternalAsync(AccountSubscription subscription, string reason, bool disableAfter)
+        private bool FlattenAccountInternal(AccountSubscription subscription, string reason, bool disableAfter)
         {
-            return Task.Run(() =>
+            var accountId = subscription.AccountId;
+            var positions = EnumeratePositions(accountId).ToList();
+            var success = true;
+
+            if (positions.Count == 0)
             {
-                var accountId = subscription.AccountId;
-                var positions = EnumeratePositions(accountId).ToList();
-                var success = true;
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"No open positions to flatten for account {subscription.DisplayName}");
+            }
 
-                if (positions.Count == 0)
+            foreach (var position in positions)
+            {
+                try
                 {
-                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"No open positions to flatten for account {subscription.DisplayName}");
+                    position.Close();
                 }
-
-                foreach (var position in positions)
+                catch (Exception ex)
                 {
-                    try
-                    {
-                        position.Close();
-                    }
-                    catch (Exception ex)
-                    {
-                        success = false;
-                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to close position {position.Symbol?.Name}: {ex.Message}");
-                    }
+                    success = false;
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to close position {position.Symbol?.Name}: {ex.Message}");
                 }
+            }
 
-                if (disableAfter)
-                {
-                    subscription.IsEnabled = false;
-                    StopTrackingByAccount(subscription.AccountId);
-                }
+            if (disableAfter)
+            {
+                subscription.IsEnabled = false;
+                StopTrackingByAccount(subscription.AccountId);
+            }
 
-                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Flatten operation completed for account {subscription.DisplayName} (reason={reason}, success={success})");
-                return success;
-            });
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Flatten operation completed for account {subscription.DisplayName} (reason={reason}, success={success})");
+            return success;
         }
 
         private void OnTrackingTimer(object? state)
@@ -1309,7 +1313,7 @@ namespace Quantower.MultiStrat
 
         private void ThrowIfDisposed()
         {
-            if (_disposed)
+            if (Volatile.Read(ref _disposed) != 0)
             {
                 throw new ObjectDisposedException(nameof(MultiStratManagerService));
             }

@@ -75,7 +75,8 @@ namespace Quantower.MultiStrat
 
         public void Stop()
         {
-            StopAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+            // Avoid sync-over-async deadlocks by running the async stop on a background task
+            Task.Run(async () => await StopAsync().ConfigureAwait(false)).GetAwaiter().GetResult();
         }
 
         public void Dispose()

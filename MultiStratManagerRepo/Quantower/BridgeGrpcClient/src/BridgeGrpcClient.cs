@@ -16,6 +16,13 @@ namespace Quantower.Bridge.Client
         private static volatile bool _initialized;
         private static readonly ConcurrentDictionary<string, string> CorrelationByBaseId = new();
 
+        private static TimeSpan _healthCheckTimeout = TimeSpan.FromSeconds(2);
+        public static TimeSpan HealthCheckTimeout
+        {
+            get => _healthCheckTimeout;
+            set => _healthCheckTimeout = value > TimeSpan.Zero ? value : TimeSpan.FromSeconds(2);
+        }
+
         private static string GetOrCreateCorrelation(string baseId)
         {
             if (string.IsNullOrWhiteSpace(baseId))
@@ -49,7 +56,7 @@ namespace Quantower.Bridge.Client
             {
                 newClient = new TradingClient(address, source, comp);
                 var healthTask = newClient.HealthCheckAsync("addon");
-                var completed = await Task.WhenAny(healthTask, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+                var completed = await Task.WhenAny(healthTask, Task.Delay(_healthCheckTimeout)).ConfigureAwait(false);
 
                 if (completed != healthTask)
                 {

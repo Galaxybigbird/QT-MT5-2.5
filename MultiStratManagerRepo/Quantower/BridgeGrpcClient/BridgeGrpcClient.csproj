@@ -10,7 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
     <PackageReference Include="Grpc.Core.Api" Version="2.71.0" />
-    <PackageReference Include="Google.Protobuf" Version="3.25.1" />
+    <PackageReference Include="Google.Protobuf" Version="3.25.5" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="All" />
   </ItemGroup>

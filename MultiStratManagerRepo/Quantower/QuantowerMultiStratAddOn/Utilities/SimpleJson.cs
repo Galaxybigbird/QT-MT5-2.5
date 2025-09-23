@@ -37,6 +37,19 @@ namespace Quantower.MultiStrat.Utilities
 
             return JsonSerializer.Deserialize<T>(json, Options);
         }
+        private static JsonSerializerOptions WithoutInferredTypesConverter(JsonSerializerOptions options)
+        {
+            var clone = new JsonSerializerOptions(options);
+            for (int i = clone.Converters.Count - 1; i >= 0; i--)
+            {
+                if (clone.Converters[i] is ObjectToInferredTypesConverter)
+                {
+                    clone.Converters.RemoveAt(i);
+                }
+            }
+            return clone;
+        }
+
 
         private sealed class ObjectToInferredTypesConverter : JsonConverter<object?>
         {
@@ -72,12 +85,14 @@ namespace Quantower.MultiStrat.Utilities
                     case JsonTokenType.StartArray:
                         {
                             using var doc = JsonDocument.ParseValue(ref reader);
-                            return JsonSerializer.Deserialize<object?[]>(doc.RootElement.GetRawText(), options);
+                            var clean = WithoutInferredTypesConverter(options);
+                            return JsonSerializer.Deserialize<object?[]>(doc.RootElement.GetRawText(), clean);
                         }
                     case JsonTokenType.StartObject:
                         {
                             using var doc = JsonDocument.ParseValue(ref reader);
-                            return JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, object?>>(doc.RootElement.GetRawText(), options);
+                            var clean = WithoutInferredTypesConverter(options);
+                            return JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, object?>>(doc.RootElement.GetRawText(), clean);
                         }
                     default:
                         throw new JsonException($"Unsupported token type {reader.TokenType}");
@@ -97,6 +112,25 @@ namespace Quantower.MultiStrat.Utilities
                     case string s:
                         writer.WriteStringValue(s);
                         break;
+                    case short s16:
+                        writer.WriteNumberValue(s16);
+                        break;
+                    case ushort u16:
+                        writer.WriteNumberValue(u16);
+                        break;
+                    case uint u32:
+                        writer.WriteNumberValue(u32);
+                        break;
+                    case ulong u64:
+                        writer.WriteNumberValue(u64);
+                        break;
+                    case byte b8:
+                        writer.WriteNumberValue(b8);
+                        break;
+                    case sbyte sb8:
+                        writer.WriteNumberValue(sb8);
+                        break;
+
                     case DateTime dt:
                         writer.WriteStringValue(dt);
                         break;
@@ -125,7 +159,8 @@ namespace Quantower.MultiStrat.Utilities
                         element.WriteTo(writer);
                         break;
                     default:
-                        JsonSerializer.Serialize(writer, value, value.GetType(), options);
+                        var clean = WithoutInferredTypesConverter(options);
+                        JsonSerializer.Serialize(writer, value, value.GetType(), clean);
                         break;
                 }
             }

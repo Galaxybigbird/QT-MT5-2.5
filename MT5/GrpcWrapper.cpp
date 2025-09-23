@@ -449,8 +449,9 @@ extern "C" {
 }
 
 // Global state
-static bool g_wsaInitialized = false;
-static bool g_grpcConnected = false;
+static std::atomic<bool> g_wsaInitialized(false);
+static std::atomic<bool> g_grpcConnected(false);
+static std::mutex g_stateMutex;
 static std::string g_serverAddress = "";        // UTF-8 preserved
 static std::wstring g_serverAddressW = L"";     // original wide address preserved for reconnect
 static int g_serverPort = 0;
@@ -463,24 +464,34 @@ static std::queue<std::string> g_tradeQueue;
 static std::mutex g_queueMutex;
 static std::condition_variable g_queueCondition;
 
+// Thread-safe error helpers
+static void SetLastError(const std::string& msg) {
+    std::lock_guard<std::mutex> lock(g_stateMutex);
+    g_lastError = msg;
+}
+static std::string GetLastErrorCopy() {
+    std::lock_guard<std::mutex> lock(g_stateMutex);
+    return g_lastError;
+}
+
 // Helper functions
 bool InitializeWinsock() {
-    if (g_wsaInitialized) return true;
+    if (g_wsaInitialized.load()) return true;
 
     WSADATA wsaData;
     int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (result != 0) {
-        g_lastError = "WSAStartup failed with error: " + std::to_string(result);
+        SetLastError(std::string("WSAStartup failed with error: ") + std::to_string(result));
         return false;
     }
-    g_wsaInitialized = true;
+    g_wsaInitialized.store(true);
     return true;
 }
 
 void CleanupWinsock() {
-    if (g_wsaInitialized) {
+    if (g_wsaInitialized.load()) {
         WSACleanup();
-        g_wsaInitialized = false;
+        g_wsaInitialized.store(false);
     }
 }
 
@@ -492,7 +503,7 @@ bool TestTcpConnection(const std::string& address, int port) {
 
     SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) {
-        g_lastError = "Failed to create socket: " + std::to_string(WSAGetLastError());
+        SetLastError(std::string("Failed to create socket: ") + std::to_string(WSAGetLastError()));
         return false;
     }
 
@@ -507,7 +518,7 @@ bool TestTcpConnection(const std::string& address, int port) {
 
     // Convert address
     if (inet_pton(AF_INET, address.c_str(), &serverAddr.sin_addr) <= 0) {
-        g_lastError = "Invalid server address: " + address;
+        SetLastError(std::string("Invalid server address: ") + address);
         closesocket(sock);
         return false;
     }
@@ -517,7 +528,7 @@ bool TestTcpConnection(const std::string& address, int port) {
     bool connected = (result == 0);
 
     if (!connected) {
-        g_lastError = "Connection failed: " + std::to_string(WSAGetLastError());
+        SetLastError(std::string("Connection failed: ") + std::to_string(WSAGetLastError()));
     }
 
     closesocket(sock);
@@ -532,7 +543,7 @@ SOCKET CreateStreamConnection() {
 
     SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) {
-        g_lastError = "Failed to create stream socket: " + std::to_string(WSAGetLastError());
+        SetLastError(std::string("Failed to create stream socket: ") + std::to_string(WSAGetLastError()));
         return INVALID_SOCKET;
     }
 
@@ -547,11 +558,18 @@ SOCKET CreateStreamConnection() {
 
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(g_serverPort);
-    inet_pton(AF_INET, g_serverAddress.c_str(), &serverAddr.sin_addr);
+    // Copy address/port under lock to avoid races
+    int portLocal; std::string addrLocal;
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        portLocal = g_serverPort;
+        addrLocal = g_serverAddress;
+    }
+    serverAddr.sin_port = htons(portLocal);
+    inet_pton(AF_INET, addrLocal.c_str(), &serverAddr.sin_addr);
 
     if (connect(sock, (sockaddr*)&serverAddr, sizeof(serverAddr)) != 0) {
-        g_lastError = "Stream connection failed: " + std::to_string(WSAGetLastError());
+        SetLastError(std::string("Stream connection failed: ") + std::to_string(WSAGetLastError()));
         closesocket(sock);
         return INVALID_SOCKET;
     }
@@ -606,7 +624,7 @@ bool SendGrpcStreamInit(SOCKET sock, const std::string& method) {
     // HTTP/2 Connection Preface
     const char* preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
     if (send(sock, preface, 24, 0) == SOCKET_ERROR) {
-        g_lastError = "Failed to send HTTP/2 preface";
+        SetLastError("Failed to send HTTP/2 preface");
         return false;
     }
 
@@ -630,7 +648,7 @@ bool SendGrpcStreamInit(SOCKET sock, const std::string& method) {
         0x00, 0x00, 0x40, 0x00  // Value: 16384
     };
     if (send(sock, reinterpret_cast<char*>(settings), sizeof(settings), 0) == SOCKET_ERROR) {
-        g_lastError = "Failed to send SETTINGS frame";
+        SetLastError("Failed to send SETTINGS frame");
         return false;
     }
 
@@ -642,7 +660,7 @@ bool SendGrpcStreamInit(SOCKET sock, const std::string& method) {
         0x00, 0x00, 0x00, 0x00  // Stream ID: 0
     };
     if (send(sock, reinterpret_cast<char*>(settingsAck), sizeof(settingsAck), 0) == SOCKET_ERROR) {
-        g_lastError = "Failed to send SETTINGS ACK frame";
+        SetLastError("Failed to send SETTINGS ACK frame");
         return false;
     }
 
@@ -716,12 +734,12 @@ bool SendGrpcStreamInit(SOCKET sock, const std::string& method) {
     headerFrame[8] = 0x01;
 
     if (send(sock, reinterpret_cast<char*>(headerFrame), 9, 0) == SOCKET_ERROR) {
-        g_lastError = "Failed to send HEADERS frame header";
+        SetLastError("Failed to send HEADERS frame header");
         return false;
     }
 
     if (send(sock, headers.c_str(), headerLen, 0) == SOCKET_ERROR) {
-        g_lastError = "Failed to send HEADERS frame payload";
+        SetLastError("Failed to send HEADERS frame payload");
         return false;
     }
 
@@ -750,13 +768,13 @@ bool SendGrpcMessage(SOCKET sock, const std::string& grpcMessage) {
 
     // Send frame header
     if (send(sock, reinterpret_cast<char*>(dataFrameHeader), 9, 0) == SOCKET_ERROR) {
-        g_lastError = "Failed to send DATA frame header";
+        SetLastError("Failed to send DATA frame header");
         return false;
     }
 
     // Send frame payload (gRPC message)
     if (send(sock, grpcMessage.c_str(), dataLen, 0) == SOCKET_ERROR) {
-        g_lastError = "Failed to send DATA frame payload";
+        SetLastError("Failed to send DATA frame payload");
         return false;
     }
 
@@ -785,7 +803,7 @@ bool SendGrpcRequest(SOCKET sock, const std::string& method, const std::string& 
 
     int bytesSent = send(sock, request.c_str(), request.length(), 0);
     if (bytesSent == SOCKET_ERROR) {
-        g_lastError = "Failed to send gRPC request: " + std::to_string(WSAGetLastError());
+        SetLastError(std::string("Failed to send gRPC request: ") + std::to_string(WSAGetLastError()));
         return false;
     }
 
@@ -946,8 +964,10 @@ void StreamPollingThread() {
             }
 
             // SocketHandle will close here before retry sleep
+        } catch (const std::exception& ex) {
+            SetLastError(std::string("Stream thread exception: ") + ex.what());
         } catch (...) {
-            // Continue streaming on any exception
+            SetLastError("Stream thread unknown exception");
         }
         // Ensure the socket is destroyed before sleeping/retrying
         std::this_thread::sleep_for(std::chrono::seconds(3));
@@ -1009,30 +1029,39 @@ __declspec(dllexport) int __stdcall TestFunction() {
 
 __declspec(dllexport) int __stdcall GrpcInitialize(const wchar_t* server_address, int port) {
     try {
-        // Convert and store server address
-        g_serverAddress = WCharToString(server_address);
-        g_serverAddressW = server_address ? std::wstring(server_address) : L"";
-        g_serverPort = port;
+        // Convert and store server address under lock
+        {
+            std::lock_guard<std::mutex> lock(g_stateMutex);
+            g_serverAddress = WCharToString(server_address);
+            g_serverAddressW = server_address ? std::wstring(server_address) : L"";
+            g_serverPort = port;
+        }
 
         // Test TCP connection to gRPC server
-        if (TestTcpConnection(g_serverAddress, g_serverPort)) {
-            g_grpcConnected = true;
-            g_lastError = "Connection successful";
+        std::string addrCopy; int portCopy;
+        {
+            std::lock_guard<std::mutex> lock(g_stateMutex);
+            addrCopy = g_serverAddress;
+            portCopy = g_serverPort;
+        }
+        if (TestTcpConnection(addrCopy, portCopy)) {
+            g_grpcConnected.store(true);
+            SetLastError("Connection successful");
             return GRPC_SUCCESS;
         } else {
-            g_grpcConnected = false;
+            g_grpcConnected.store(false);
             return GRPC_CONNECTION_FAILED;
         }
     }
     catch (...) {
-        g_grpcConnected = false;
-        g_lastError = "Exception during initialization";
+        g_grpcConnected.store(false);
+        SetLastError("Exception during initialization");
         return GRPC_SOCKET_ERROR;
     }
 }
 
 __declspec(dllexport) int __stdcall GrpcShutdown() {
-    g_grpcConnected = false;
+    g_grpcConnected.store(false);
 
     // Stop streaming
     if (g_streamActive) {
@@ -1055,7 +1084,7 @@ __declspec(dllexport) int __stdcall GrpcShutdown() {
 }
 
 __declspec(dllexport) int __stdcall GrpcIsConnected() {
-    return g_grpcConnected ? 1 : 0;
+    return g_grpcConnected.load() ? 1 : 0;
 }
 
 __declspec(dllexport) int __stdcall GrpcReconnect() {
@@ -1065,8 +1094,8 @@ __declspec(dllexport) int __stdcall GrpcReconnect() {
 }
 
 __declspec(dllexport) int __stdcall GrpcStartTradeStream() {
-    if (!g_grpcConnected) {
-        g_lastError = "Not connected to gRPC server";
+    if (!g_grpcConnected.load()) {
+        SetLastError("Not connected to gRPC server");
         return GRPC_CONNECTION_FAILED;
     }
 
@@ -1077,11 +1106,11 @@ __declspec(dllexport) int __stdcall GrpcStartTradeStream() {
     try {
         g_streamActive = true;
         g_streamThread = std::thread(StreamPollingThread);
-        g_lastError = "Trade streaming started";
+        SetLastError("Trade streaming started");
         return GRPC_SUCCESS;
     } catch (...) {
         g_streamActive = false;
-        g_lastError = "Failed to start streaming thread";
+        SetLastError("Failed to start streaming thread");
         return GRPC_SOCKET_ERROR;
     }
 }
@@ -1267,7 +1296,8 @@ __declspec(dllexport) int __stdcall GrpcSubmitTrailingUpdate(const wchar_t* upda
 
 __declspec(dllexport) int __stdcall GrpcGetLastErrorMessage(wchar_t* error_message, int buffer_size) {
     if (error_message && buffer_size > 0) {
-        StringToWChar(g_lastError, error_message, buffer_size);
+        std::string err = GetLastErrorCopy();
+        StringToWChar(err, error_message, buffer_size);
     }
     return GRPC_SUCCESS;
 }

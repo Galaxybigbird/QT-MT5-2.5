@@ -11,7 +11,7 @@ namespace Quantower.MultiStrat.Services
     public sealed class SltpRemovalService : IDisposable
     {
         private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingRemovals = new(StringComparer.OrdinalIgnoreCase);
-        private bool _disposed;
+        private int _disposed; // 0 = active, 1 = disposed
 
         public bool Enabled { get; set; }
         public int RemovalDelaySeconds { get; set; } = 2;
@@ -39,18 +39,12 @@ namespace Quantower.MultiStrat.Services
             var key = trade.Id ?? trade.OrderId ?? Guid.NewGuid().ToString("N");
             var cts = new CancellationTokenSource();
 
-            var previous = _pendingRemovals.AddOrUpdate(key, cts, (_, existing) =>
+            _pendingRemovals.AddOrUpdate(key, cts, (_, existing) =>
             {
                 existing.Cancel();
                 existing.Dispose();
                 return cts;
             });
-
-            if (!ReferenceEquals(previous, cts))
-            {
-                previous.Cancel();
-                previous.Dispose();
-            }
 
             Task.Run(async () =>
             {
@@ -108,17 +102,17 @@ namespace Quantower.MultiStrat.Services
 
             if (direction.HasValue)
             {
-                var quantitySign = Math.Sign(trade.Quantity);
-                if (direction == Side.Buy && quantitySign > 0)
-                {
-                    return true;
-                }
-
-                if (direction == Side.Sell && quantitySign < 0)
-                {
-                    return true;
-                }
-            }
+                // For entry trades: Buy side increases with positive quantity, Sell side increases with positive quantity
+                 if (direction == Side.Buy && trade.Quantity > 0)
+                 {
+                     return true;
+                 }
+ 
+                 if (direction == Side.Sell && trade.Quantity > 0)
+                 {
+                     return true;
+                 }
+             }
 
             return false;
         }
@@ -328,12 +322,11 @@ namespace Quantower.MultiStrat.Services
 
         public void Dispose()
         {
-            if (_disposed)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
             {
                 return;
             }
 
-            _disposed = true;
             foreach (var entry in _pendingRemovals)
             {
                 entry.Value.Cancel();

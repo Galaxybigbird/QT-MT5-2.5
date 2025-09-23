@@ -4,6 +4,8 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Threading;
+
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -52,7 +54,20 @@ namespace Quantower.MultiStrat
         {
             base.Initialize();
 
-            _dispatcher = Dispatcher.CurrentDispatcher;
+            if (Application.Current != null)
+            {
+                _dispatcher = Application.Current.Dispatcher;
+            }
+            else
+            {
+                _dispatcher = Dispatcher.FromThread(Thread.CurrentThread);
+            }
+            if (_dispatcher == null)
+            {
+                AddLogEntry("ERROR", "MultiStratPlugin.Initialize must run on the UI thread.");
+                throw new InvalidOperationException("Initialize must run on the UI thread.");
+            }
+
             _managerService.Log += OnBridgeLog;
 
             var layout = BuildLayout();
@@ -65,7 +80,8 @@ namespace Quantower.MultiStrat
             }
             catch (Exception ex)
             {
-                AddLogEntry("WARN", $"Unable to load accounts: {ex.Message}");
+                AddLogEntry("ERROR", $"Unable to load accounts: {ex}");
+                throw;
             }
             RenderAccounts();
             PopulateRiskUi();
@@ -370,25 +386,57 @@ namespace Quantower.MultiStrat
                 return editor;
             }
 
-            _enableElasticCheckbox = (CheckBox)AddRow("Enable Elastic Hedging", new CheckBox());
+            var enableElasticCheckbox = AddRow("Enable Elastic Hedging", new CheckBox()) as CheckBox;
+            if (enableElasticCheckbox == null) { AddLogEntry("ERROR", "Failed to create Enable Elastic Hedging checkbox"); throw new InvalidOperationException("Elastic checkbox not created"); }
+            _enableElasticCheckbox = enableElasticCheckbox;
 
-            _elasticTriggerCombo = (ComboBox)AddRow("Elastic Trigger Units", new ComboBox { ItemsSource = Enum.GetValues(typeof(Services.TrailingElasticService.ProfitUnitType)) });
-            _profitThresholdInput = (TextBox)AddRow("Profit Update Threshold", new TextBox { Width = 100 });
+            var elasticTriggerCombo = AddRow("Elastic Trigger Units", new ComboBox { ItemsSource = Enum.GetValues(typeof(Services.TrailingElasticService.ProfitUnitType)) }) as ComboBox;
+            if (elasticTriggerCombo == null) { AddLogEntry("ERROR", "Failed to create Elastic Trigger Units combo"); throw new InvalidOperationException("Elastic trigger combo not created"); }
+            _elasticTriggerCombo = elasticTriggerCombo;
 
-            _elasticIncrementCombo = (ComboBox)AddRow("Elastic Increment Units", new ComboBox { ItemsSource = Enum.GetValues(typeof(Services.TrailingElasticService.ProfitUnitType)) });
-            _elasticIncrementValueInput = (TextBox)AddRow("Elastic Increment Value", new TextBox { Width = 100 });
+            var profitThresholdInput = AddRow("Profit Update Threshold", new TextBox { Width = 100 }) as TextBox;
+            if (profitThresholdInput == null) { AddLogEntry("ERROR", "Failed to create Profit Update Threshold input"); throw new InvalidOperationException("Profit threshold input not created"); }
+            _profitThresholdInput = profitThresholdInput;
 
-            _enableTrailingCheckbox = (CheckBox)AddRow("Enable Trailing Updates", new CheckBox());
+            var elasticIncrementCombo = AddRow("Elastic Increment Units", new ComboBox { ItemsSource = Enum.GetValues(typeof(Services.TrailingElasticService.ProfitUnitType)) }) as ComboBox;
+            if (elasticIncrementCombo == null) { AddLogEntry("ERROR", "Failed to create Elastic Increment Units combo"); throw new InvalidOperationException("Elastic increment combo not created"); }
+            _elasticIncrementCombo = elasticIncrementCombo;
 
-            _trailingActivationCombo = (ComboBox)AddRow("Trailing Activation Units", new ComboBox { ItemsSource = Enum.GetValues(typeof(Services.TrailingElasticService.ProfitUnitType)) });
-            _trailingActivationValueInput = (TextBox)AddRow("Trailing Activation Value", new TextBox { Width = 100 });
+            var elasticIncrementValueInput = AddRow("Elastic Increment Value", new TextBox { Width = 100 }) as TextBox;
+            if (elasticIncrementValueInput == null) { AddLogEntry("ERROR", "Failed to create Elastic Increment Value input"); throw new InvalidOperationException("Elastic increment value input not created"); }
+            _elasticIncrementValueInput = elasticIncrementValueInput;
 
-            _trailingStopCombo = (ComboBox)AddRow("Trailing Stop Units", new ComboBox { ItemsSource = Enum.GetValues(typeof(Services.TrailingElasticService.ProfitUnitType)) });
-            _trailingStopValueInput = (TextBox)AddRow("Trailing Stop Value", new TextBox { Width = 100 });
+            var enableTrailingCheckbox = AddRow("Enable Trailing Updates", new CheckBox()) as CheckBox;
+            if (enableTrailingCheckbox == null) { AddLogEntry("ERROR", "Failed to create Enable Trailing Updates checkbox"); throw new InvalidOperationException("Trailing checkbox not created"); }
+            _enableTrailingCheckbox = enableTrailingCheckbox;
 
-            _demaMultiplierInput = (TextBox)AddRow("DEMA/ATR Multiplier", new TextBox { Width = 100 });
-            _atrPeriodInput = (TextBox)AddRow("ATR Period", new TextBox { Width = 100 });
-            _demaPeriodInput = (TextBox)AddRow("DEMA Period", new TextBox { Width = 100 });
+            var trailingActivationCombo = AddRow("Trailing Activation Units", new ComboBox { ItemsSource = Enum.GetValues(typeof(Services.TrailingElasticService.ProfitUnitType)) }) as ComboBox;
+            if (trailingActivationCombo == null) { AddLogEntry("ERROR", "Failed to create Trailing Activation Units combo"); throw new InvalidOperationException("Trailing activation combo not created"); }
+            _trailingActivationCombo = trailingActivationCombo;
+
+            var trailingActivationValueInput = AddRow("Trailing Activation Value", new TextBox { Width = 100 }) as TextBox;
+            if (trailingActivationValueInput == null) { AddLogEntry("ERROR", "Failed to create Trailing Activation Value input"); throw new InvalidOperationException("Trailing activation value input not created"); }
+            _trailingActivationValueInput = trailingActivationValueInput;
+
+            var trailingStopCombo = AddRow("Trailing Stop Units", new ComboBox { ItemsSource = Enum.GetValues(typeof(Services.TrailingElasticService.ProfitUnitType)) }) as ComboBox;
+            if (trailingStopCombo == null) { AddLogEntry("ERROR", "Failed to create Trailing Stop Units combo"); throw new InvalidOperationException("Trailing stop combo not created"); }
+            _trailingStopCombo = trailingStopCombo;
+
+            var trailingStopValueInput = AddRow("Trailing Stop Value", new TextBox { Width = 100 }) as TextBox;
+            if (trailingStopValueInput == null) { AddLogEntry("ERROR", "Failed to create Trailing Stop Value input"); throw new InvalidOperationException("Trailing stop value input not created"); }
+            _trailingStopValueInput = trailingStopValueInput;
+
+            var demaMultiplierInput = AddRow("DEMA/ATR Multiplier", new TextBox { Width = 100 }) as TextBox;
+            if (demaMultiplierInput == null) { AddLogEntry("ERROR", "Failed to create DEMA/ATR Multiplier input"); throw new InvalidOperationException("DEMA multiplier input not created"); }
+            _demaMultiplierInput = demaMultiplierInput;
+
+            var atrPeriodInput = AddRow("ATR Period", new TextBox { Width = 100 }) as TextBox;
+            if (atrPeriodInput == null) { AddLogEntry("ERROR", "Failed to create ATR Period input"); throw new InvalidOperationException("ATR period input not created"); }
+            _atrPeriodInput = atrPeriodInput;
+
+            var demaPeriodInput = AddRow("DEMA Period", new TextBox { Width = 100 }) as TextBox;
+            if (demaPeriodInput == null) { AddLogEntry("ERROR", "Failed to create DEMA Period input"); throw new InvalidOperationException("DEMA period input not created"); }
+            _demaPeriodInput = demaPeriodInput;
 
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var applyButton = new Button

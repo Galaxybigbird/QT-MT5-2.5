@@ -401,16 +401,8 @@ namespace Quantower.MultiStrat.Services
                 tracker.LowWaterMark = price;
             }
 
-            if (tracker.Side == Side.Sell)
-            {
-                tracker.LowWaterMark = Math.Min(tracker.LowWaterMark, price);
-                tracker.HighWaterMark = Math.Max(tracker.HighWaterMark, price);
-            }
-            else
-            {
-                tracker.HighWaterMark = Math.Max(tracker.HighWaterMark, price);
-                tracker.LowWaterMark = Math.Min(tracker.LowWaterMark, price);
-            }
+            tracker.HighWaterMark = Math.Max(tracker.HighWaterMark, price);
+            tracker.LowWaterMark = Math.Min(tracker.LowWaterMark, price);
         }
 
         private double ComputeTrailingOffset(Position position, ElasticTracker tracker, double currentPrice)
