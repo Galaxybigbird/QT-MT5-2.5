@@ -21,8 +21,8 @@ function Resolve-DefaultQuantowerPluginsPath {
     }
 
     $documents = [Environment]::GetFolderPath('MyDocuments')
-    $fallback1 = Join-Path $documents 'Quantower\Settings\Scripts\plugins'
-    $fallback2 = 'C:\Quantower\Settings\Scripts\plugins'
+    $fallback1 = Join-Path $documents 'Quantower\Settings\Scripts\plug-ins'
+    $fallback2 = 'C:\Quantower\Settings\Scripts\plug-ins'
 
     if (Test-Path $fallback1) { return (Resolve-Path -Path $fallback1).Path }
     if (Test-Path $fallback2) { return (Resolve-Path -Path $fallback2).Path }
