@@ -37,7 +37,7 @@ namespace Quantower.MultiStrat
 
             BridgeGrpcClient.StartTradingStream(OnBridgeTradeReceived);
 
-            if (QuantowerEventBridge.TryCreate(OnQuantowerTrade, OnQuantowerPositionClosed, out var bridge) && bridge != null)
+            if (QuantowerEventBridge.TryCreate(OnQuantowerTrade, OnQuantowerPositionAdded, OnQuantowerPositionClosed, out var bridge) && bridge != null)
             {
                 _eventBridge = bridge;
 
@@ -112,10 +112,31 @@ namespace Quantower.MultiStrat
 
         public void Stop()
         {
-            BridgeGrpcClient.StopTradingStream();
-            BridgeGrpcClient.Shutdown();
-            _eventBridge?.Dispose();
-            _eventBridge = null;
+            try
+            {
+                BridgeGrpcClient.StopTradingStream();
+                BridgeGrpcClient.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                LogWarn($"Bridge shutdown encountered an error: {ex.Message}");
+            }
+            finally
+            {
+                try
+                {
+                    _eventBridge?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    LogWarn($"Event bridge disposal encountered an error: {ex.Message}");
+                }
+                finally
+                {
+                    _eventBridge = null;
+                }
+            }
+
             LogInfo("Quantower add-on stopped");
         }
 
@@ -166,6 +187,21 @@ namespace Quantower.MultiStrat
 
             LogInfo($"Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge", closureId, closureId);
             ObserveAsyncOperation(BridgeGrpcClient.CloseHedgeAsync(payload), "CloseHedge", closureId ?? "n/a");
+        }
+
+        private void OnQuantowerPositionAdded(Position position)
+        {
+            if (QuantowerTradeMapper.TryBuildPositionSnapshot(position, out var tradePayload, out var positionTradeId))
+            {
+                LogInfo($"Quantower position added ({positionTradeId ?? "n/a"}) -> notifying bridge", positionTradeId, positionTradeId);
+                ObserveAsyncOperation(BridgeGrpcClient.SubmitTradeAsync(tradePayload), "SubmitTradeSnapshot", positionTradeId ?? "n/a");
+            }
+
+            if (QuantowerTradeMapper.TryBuildPositionClosure(position, out var closurePayload, out var closureId))
+            {
+                LogInfo($"Quantower position state broadcast ({closureId ?? "n/a"}) after addition", closureId, closureId);
+                ObserveAsyncOperation(BridgeGrpcClient.CloseHedgeAsync(closurePayload), "CloseHedgeSnapshot", closureId ?? "n/a");
+            }
         }
 
         private static async Task DispatchWithLoggingAsync(Func<Task<bool>> operation, string operationName, string identifier)

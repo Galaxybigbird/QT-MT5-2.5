@@ -10,16 +10,23 @@ namespace Quantower.MultiStrat.Infrastructure
         private const string LogComponent = "qt_event_bridge";
         private readonly Core _core;
         private readonly Action<Trade> _tradeHandler;
+        private readonly Action<Position>? _positionAddedHandler;
         private readonly Action<Position>? _positionClosedHandler;
         private volatile bool _disposed;
 
-        private QuantowerEventBridge(Core core, Action<Trade> onTrade, Action<Position>? onPositionClosed)
+        private QuantowerEventBridge(Core core, Action<Trade> onTrade, Action<Position>? onPositionAdded, Action<Position>? onPositionClosed)
         {
             _core = core;
             _tradeHandler = onTrade;
+            _positionAddedHandler = onPositionAdded;
             _positionClosedHandler = onPositionClosed;
 
             _core.TradeAdded += HandleTradeAdded;
+
+            if (_positionAddedHandler != null)
+            {
+                _core.PositionAdded += HandlePositionAdded;
+            }
 
             if (_positionClosedHandler != null)
             {
@@ -27,7 +34,7 @@ namespace Quantower.MultiStrat.Infrastructure
             }
         }
 
-        public static bool TryCreate(Action<Trade> onTradeAdded, Action<Position>? onPositionClosed, out QuantowerEventBridge? bridge)
+        public static bool TryCreate(Action<Trade> onTradeAdded, Action<Position>? onPositionAdded, Action<Position>? onPositionClosed, out QuantowerEventBridge? bridge)
         {
             if (onTradeAdded == null)
             {
@@ -45,7 +52,7 @@ namespace Quantower.MultiStrat.Infrastructure
                     return false;
                 }
 
-                bridge = new QuantowerEventBridge(core, onTradeAdded, onPositionClosed);
+                bridge = new QuantowerEventBridge(core, onTradeAdded, onPositionAdded, onPositionClosed);
                 return true;
             }
             catch (Exception ex)
@@ -83,6 +90,11 @@ namespace Quantower.MultiStrat.Infrastructure
                 {
                     _core.TradeAdded -= HandleTradeAdded;
 
+                    if (_positionAddedHandler != null)
+                    {
+                        _core.PositionAdded -= HandlePositionAdded;
+                    }
+
                     if (_positionClosedHandler != null)
                     {
                         _core.PositionRemoved -= HandlePositionRemoved;
@@ -111,6 +123,23 @@ namespace Quantower.MultiStrat.Infrastructure
             catch (Exception ex)
             {
                 LogError($"TradeAdded handler threw: {ex.Message}", ex);
+            }
+        }
+
+        private void HandlePositionAdded(Position position)
+        {
+            if (_positionAddedHandler == null || _disposed)
+            {
+                return;
+            }
+
+            try
+            {
+                _positionAddedHandler(position);
+            }
+            catch (Exception ex)
+            {
+                LogError($"PositionAdded handler threw: {ex.Message}", ex);
             }
         }
 
