@@ -19,9 +19,8 @@ namespace MT5GrpcClient
         private static TradingService.TradingServiceClient _client;
         private static StreamingService.StreamingServiceClient _streamingClient;
         private static ConcurrentQueue<string> _tradeQueue = new ConcurrentQueue<string>();
-        private static CancellationTokenSource _cancellationTokenSource;
-        private static readonly object _ctsSync = new object();
-        private static Task _streamingTask;
+        private static volatile CancellationTokenSource _cancellationTokenSource;
+        private static readonly object _ctsSync = new object();        private static Task _streamingTask;
         private static volatile bool _isInitialized;
         private static volatile bool _isStreamingActive;
         private static string _serverAddress = "";
@@ -163,8 +162,9 @@ namespace MT5GrpcClient
 
                             try
                             {
-                                using var call = _client.GetTrades(cancellationToken: token);
-
+                                using var call = _client.GetTrades(
+                                    deadline: DateTime.UtcNow.AddSeconds(30),
+                                    cancellationToken: token);
                                 var heartbeatTask = Task.Run(async () =>
                                 {
                                     try
@@ -267,14 +267,13 @@ namespace MT5GrpcClient
                     return ERROR_SUCCESS;
                 }
 
-                return ERROR_SUCCESS; // No trades available, not an error
+                return ERROR_TIMEOUT; // No trades available
             }
             catch (Exception)
             {
                 return ERROR_SERIALIZATION;
             }
         }
-
         /// <summary>
         /// Submit trade execution result to Bridge Server
         /// </summary>
@@ -560,8 +559,7 @@ namespace MT5GrpcClient
                     try
                     {
                         var completion = Task.WhenAny(task, Task.Delay(StreamingShutdownTimeout));
-                        completion.ConfigureAwait(false).GetAwaiter().GetResult();
-
+                        Task.Run(async () => await completion.ConfigureAwait(false)).Wait(StreamingShutdownTimeout);
                         if (task.IsCompleted)
                         {
                             task.ConfigureAwait(false).GetAwaiter().GetResult();

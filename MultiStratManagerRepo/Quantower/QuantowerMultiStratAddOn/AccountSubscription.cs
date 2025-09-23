@@ -6,12 +6,18 @@ namespace Quantower.MultiStrat
 {
     public sealed class AccountSubscription : INotifyPropertyChanged
     {
+        private readonly object _accountSync = new();
         private Account? _account;
         private bool _isEnabled;
 
         public AccountSubscription(Account account, bool isEnabled = true)
         {
-            _account = account ?? throw new ArgumentNullException(nameof(account));
+            if (account == null)
+            {
+                throw new ArgumentNullException(nameof(account));
+            }
+
+            _account = account;
             AccountId = SafeAccountIdentifier(account);
             DisplayName = ResolveDisplayName(account);
             _isEnabled = isEnabled;
@@ -36,7 +42,16 @@ namespace Quantower.MultiStrat
             }
         }
 
-        public Account? Account => _account;
+        public Account? Account
+        {
+            get
+            {
+                lock (_accountSync)
+                {
+                    return _account;
+                }
+            }
+        }
 
         public bool Matches(Account? candidate)
         {
@@ -46,18 +61,24 @@ namespace Quantower.MultiStrat
             }
 
             var candidateKey = SafeAccountIdentifier(candidate);
+            var currentAccount = Account;
             if (!string.IsNullOrEmpty(candidateKey) && !string.IsNullOrEmpty(AccountId))
             {
                 return string.Equals(candidateKey, AccountId, StringComparison.OrdinalIgnoreCase);
             }
 
-            return string.Equals(candidate?.Name, _account?.Name, StringComparison.OrdinalIgnoreCase);
+            return string.Equals(candidate?.Name, currentAccount?.Name, StringComparison.OrdinalIgnoreCase);
         }
 
         public void Update(Account account)
         {
-            _account = account;
-            DisplayName = ResolveDisplayName(account);
+            string newDisplayName;
+            lock (_accountSync)
+            {
+                _account = account;
+                newDisplayName = ResolveDisplayName(account);
+                DisplayName = newDisplayName;
+            }
             OnPropertyChanged(nameof(DisplayName));
         }
 

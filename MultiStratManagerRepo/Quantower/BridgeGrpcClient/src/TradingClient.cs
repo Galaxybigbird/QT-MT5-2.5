@@ -82,7 +82,8 @@ namespace Quantower.Bridge.Client
                     log.Tags["correlation_id"] = correlationId;
                 }
 
-                _ = _loggingClient.LogAsync(log);
+                var call = _loggingClient.LogAsync(log);
+                _ = ObserveLoggingAsync(call.ResponseAsync);
             }
             catch
             {
@@ -328,6 +329,18 @@ namespace Quantower.Bridge.Client
             StopTradingStream();
             // Channel is shared via cache; do not dispose here to allow reuse
             GC.SuppressFinalize(this);
+        }
+
+        private static async Task ObserveLoggingAsync(Task task)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            catch
+            {
+                // Suppress logging exceptions to keep the fire-and-forget semantics.
+            }
         }
 
         #region JSON ↔ Proto helpers

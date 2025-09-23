@@ -30,10 +30,14 @@ string ULOG_CTX_ERROR_CODE = "";
 // Persistent microsecond base aligned to epoch for dedup and replay
 long   ULOG_BASE_US = 0;
 bool   ULOG_BASE_READY = false;
+const long ULOG_JSON_MAX_SAFE_INT = 9007199254740991; // 2^53-1 to keep JSON numbers precise
 
 void ULogRefreshBase()
 {
-   ULOG_BASE_US = ((long)TimeCurrent()) * (long)1000000 - (long)GetMicrosecondCount();
+   long currentSeconds = (long)TimeCurrent();
+   const long microsPerSecond = (long)1000000;
+   long microOffset = (long)GetMicrosecondCount();
+   ULOG_BASE_US = currentSeconds * microsPerSecond - microOffset;
    ULOG_BASE_READY = true;
 }
 
@@ -111,7 +115,9 @@ void ULogPush(const string level, const string message, const string base_id)
    if(ULOG_COUNT >= ULOG_MAX) return;
    // Use epoch-based nanoseconds for consistent ordering with bridge/server logs
    // Note: TimeCurrent() returns seconds since 1970-01-01 (UTC). Multiply to ns in 64-bit.
-   long epoch_ns = ((long)TimeCurrent()) * (long)1000000000;
+   long epochSeconds = (long)TimeCurrent();
+   const long nanosPerSecond = (long)1000000000;
+   long epoch_ns = epochSeconds * nanosPerSecond;
    ULogEvent e;
    e.level = level;
    e.message = message;
@@ -153,15 +159,163 @@ void ULogErrorPrint(const string msg)
    int GrpcLog(string log_json);
 #import
 
-// Simple JSON string escaper for quotes and backslashes
-string _ULogJsonEscape(const string s)
+// JSON helpers ---------------------------------------------------------
+string _ULogJsonEscape(const string value)
 {
-   string out = s;
-   StringReplace(out, "\\", "\\\\");
-   StringReplace(out, "\"", "\\\"");
-   StringReplace(out, "\n", "\\n");
-   StringReplace(out, "\r", "\\r");
-   return out;
+   string result = "";
+   const int len = StringLen(value);
+   for(int i = 0; i < len; i++)
+   {
+      const ushort ch = StringGetCharacter(value, i);
+      if(ch == '\\')
+      {
+         result += "\\\\";
+      }
+      else if(ch == '\"')
+      {
+         result += "\\\"";
+      }
+      else if(ch == 0x08)
+      {
+         result += "\\b";
+      }
+      else if(ch == 0x0C)
+      {
+         result += "\\f";
+      }
+      else if(ch == 0x0A)
+      {
+         result += "\\n";
+      }
+      else if(ch == 0x0D)
+      {
+         result += "\\r";
+      }
+      else if(ch == 0x09)
+      {
+         result += "\\t";
+      }
+      else if(ch < 0x20 || ch > 0x7F)
+      {
+         result += StringFormat("\\u%04X", ch);
+      }
+      else
+      {
+         result += StringSubstr(value, i, 1);
+      }
+   }
+   return result;
+}
+
+void _ULogJsonAppendString(string &json, const string key, const string value, bool &first)
+{
+   if(!first)
+      json += ",";
+   json += "\"";
+   json += _ULogJsonEscape(key);
+   json += "\":"";
+   json += _ULogJsonEscape(value);
+   json += "\"";
+   first = false;
+}
+
+void _ULogJsonAppendRaw(string &json, const string key, const string rawValue, bool &first)
+{
+   if(!first)
+      json += ",";
+   json += "\"";
+   json += _ULogJsonEscape(key);
+   json += "\":";
+   json += rawValue;
+   first = false;
+}
+
+void _ULogJsonAppendInt(string &json, const string key, const long value, bool &first)
+{
+   string asString = StringFormat("%I64d", value);
+   _ULogJsonAppendRaw(json, key, asString, first);
+}
+
+bool _ULogValidateJson(const string json)
+{
+   const int len = StringLen(json);
+   if(len < 2)
+      return false;
+
+   bool inString = false;
+   bool escape = false;
+   int braceDepth = 0;
+
+   for(int i = 0; i < len; i++)
+   {
+      const ushort ch = StringGetCharacter(json, i);
+      if(escape)
+      {
+         escape = false;
+         continue;
+      }
+
+      if(ch == '\\')
+      {
+         escape = true;
+         continue;
+      }
+
+      if(ch == '"')
+      {
+         inString = !inString;
+         continue;
+      }
+
+      if(!inString)
+      {
+         if(ch == '{')
+            braceDepth++;
+         else if(ch == '}')
+         {
+            braceDepth--;
+            if(braceDepth < 0)
+               return false;
+         }
+      }
+   }
+
+   return !inString && braceDepth == 0 && StringGetCharacter(json, 0) == '{' && StringGetCharacter(json, len - 1) == '}';
+}
+
+string _ULogBuildLogJson(const ULogEvent event)
+{
+   bool first = true;
+   string json = "{";
+
+   _ULogJsonAppendInt(json, "timestamp_ns", event.ts_ns, first);
+   _ULogJsonAppendString(json, "source", "mt5", first);
+   _ULogJsonAppendString(json, "level", event.level, first);
+   _ULogJsonAppendString(json, "component", "EA", first);
+   _ULogJsonAppendString(json, "message", event.message, first);
+   _ULogJsonAppendString(json, "base_id", event.base_id, first);
+
+   if(event.instrument != "")
+      _ULogJsonAppendString(json, "instrument", event.instrument, first);
+
+   if(event.mt5_ticket > 0)
+   {
+      if(event.mt5_ticket > ULOG_JSON_MAX_SAFE_INT)
+         _ULogJsonAppendString(json, "mt5_ticket", StringFormat("%I64d", event.mt5_ticket), first);
+      else
+         _ULogJsonAppendInt(json, "mt5_ticket", event.mt5_ticket, first);
+   }
+
+   if(event.error_code != "")
+      _ULogJsonAppendString(json, "error_code", event.error_code, first);
+
+   _ULogJsonAppendString(json, "schema_version", "mt5-1", first);
+
+   json += "}";
+   if(!_ULogValidateJson(json))
+      return "";
+
+   return json;
 }
 
 // Flush buffered log events to the Bridge via GrpcLog()
@@ -171,33 +325,20 @@ int ULogFlush()
    int attempted = ULOG_COUNT;
    for(int i=0; i<ULOG_COUNT; i++)
    {
-   string msgEsc = _ULogJsonEscape(ULOG_BUFFER[i].message);
-   string baseEsc = _ULogJsonEscape(ULOG_BUFFER[i].base_id);
-   // Build JSON with optional fields instrument, mt5_ticket, error_code
-   string json = StringFormat("{\"timestamp_ns\":%I64d,\"source\":\"mt5\",\"level\":\"%s\",\"component\":\"EA\",\"message\":\"%s\",\"base_id\":\"%s\"", ULOG_BUFFER[i].ts_ns, ULOG_BUFFER[i].level, msgEsc, baseEsc);
-   if(ULOG_BUFFER[i].instrument != "")
-   {
-      string instEsc = _ULogJsonEscape(ULOG_BUFFER[i].instrument);
-      // Append optional instrument field
-      json += StringFormat(",\"instrument\":\"%s\"", instEsc);
-   }
-   if(ULOG_BUFFER[i].mt5_ticket > 0)
-   {
-      // Append numeric mt5_ticket as JSON number using 64-bit integer format
-      json += StringFormat(",\"mt5_ticket\":%I64d", (long)ULOG_BUFFER[i].mt5_ticket);
-   }
-   if(ULOG_BUFFER[i].error_code != "")
-   {
-      string ecEsc = _ULogJsonEscape(ULOG_BUFFER[i].error_code);
-      json += StringFormat(",\"error_code\":\"%s\"", ecEsc);
-   }
-   json += ",\"schema_version\":\"mt5-1\"}";
+      ULogEvent event = ULOG_BUFFER[i];
+      string json = _ULogBuildLogJson(event);
+      if(json == \"\")
+      {
+         Print("ULogFlush: Skipping malformed log event level=", event.level, ", msg=", event.message);
+         continue;
+      }
+
       int rc = GrpcLog(json);
       if(rc == 0) {
          sent++;
       } else {
          // Surface failures in Experts tab for troubleshooting
-         Print("ULogFlush: GrpcLog failed rc=", rc, ", level=", ULOG_BUFFER[i].level, ", msg=", ULOG_BUFFER[i].message);
+         Print("ULogFlush: GrpcLog failed rc=", rc, ", level=", event.level, ", msg=", event.message);
       }
    }
    ULOG_COUNT = 0;
@@ -211,6 +352,7 @@ int ULogFlush()
    }
    return sent;
 }
+
 
 // Optional auto-flush helper with simple throttling (flush at most ~2 Hz or when buffer is large)
 void ULogAutoFlush()

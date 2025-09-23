@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using Quantower.MultiStrat.Indicators;
 using Quantower.MultiStrat.Utilities;
 using TradingPlatform.BusinessLayer;
@@ -41,6 +42,12 @@ namespace Quantower.MultiStrat.Services
 
         private readonly ConcurrentDictionary<string, ElasticTracker> _trackers = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, List<IndicatorQuote>> _quoteHistory = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, object> _trackerLocks = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, object> _historyLocks = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<Type, PropertyInfo?> TickSizePropertyCache = new();
+        private readonly ConcurrentDictionary<string, double> _tickSizeCache = new(StringComparer.OrdinalIgnoreCase);
+
+        public Action<string>? LogWarning { get; set; }
 
         public bool EnableElasticHedging { get; set; } = true;
         public bool EnableTrailing { get; set; } = true;
@@ -64,7 +71,8 @@ namespace Quantower.MultiStrat.Services
             }
 
             var tracker = _trackers.GetOrAdd(baseId, _ => new ElasticTracker());
-            lock (tracker)
+            var trackerLock = GetTrackerLock(baseId);
+            lock (trackerLock)
             {
                 var wasInitialized = tracker.EntryPrice > 0 || tracker.LastPublishUtc != DateTime.MinValue || tracker.Triggered;
 
@@ -111,6 +119,7 @@ namespace Quantower.MultiStrat.Services
             }
 
             _trackers.TryRemove(baseId, out _);
+            _trackerLocks.TryRemove(baseId, out _);
         }
 
         public void TrackQuote(Symbol symbol, IndicatorQuote quote)
@@ -127,7 +136,8 @@ namespace Quantower.MultiStrat.Services
             }
 
             var history = _quoteHistory.GetOrAdd(key, _ => new List<IndicatorQuote>());
-            lock (history)
+            var historyLock = GetHistoryLock(key);
+            lock (historyLock)
             {
                 history.Add(quote);
                 if (history.Count > 600)
@@ -136,14 +146,18 @@ namespace Quantower.MultiStrat.Services
                 }
             }
 
-            foreach (var tracker in _trackers.Values)
+            foreach (var trackerEntry in _trackers)
             {
-                if (string.Equals(tracker.SymbolKey, key, StringComparison.OrdinalIgnoreCase))
+                var tracker = trackerEntry.Value;
+                if (!string.Equals(tracker.SymbolKey, key, StringComparison.OrdinalIgnoreCase))
                 {
-                    lock (tracker)
-                    {
-                        UpdateWaterMarks(tracker, quote.Close);
-                    }
+                    continue;
+                }
+
+                var trackerLock = GetTrackerLock(trackerEntry.Key);
+                lock (trackerLock)
+                {
+                    UpdateWaterMarks(tracker, quote.Close);
                 }
             }
         }
@@ -181,7 +195,8 @@ namespace Quantower.MultiStrat.Services
                 return null;
             }
 
-            lock (tracker)
+            var trackerLock = GetTrackerLock(baseId);
+            lock (trackerLock)
             {
                 var currentPrice = ResolveCurrentPrice(position);
                 if (currentPrice <= 0)
@@ -280,7 +295,8 @@ namespace Quantower.MultiStrat.Services
                 return null;
             }
 
-            lock (tracker)
+            var trackerLock = GetTrackerLock(baseId);
+            lock (trackerLock)
             {
                 var currentPrice = ResolveCurrentPrice(position);
                 if (currentPrice <= 0)
@@ -367,6 +383,16 @@ namespace Quantower.MultiStrat.Services
             return tracker;
         }
 
+        private object GetTrackerLock(string baseId)
+        {
+            return _trackerLocks.GetOrAdd(baseId, _ => new object());
+        }
+
+        private object GetHistoryLock(string key)
+        {
+            return _historyLocks.GetOrAdd(key, _ => new object());
+        }
+
         private static string? GetAccountId(Account? account)
         {
             return account?.Id ?? account?.Name;
@@ -384,10 +410,21 @@ namespace Quantower.MultiStrat.Services
             }
         }
 
-        private static void UpdateWaterMarks(ElasticTracker tracker, double price)
+        private void UpdateWaterMarks(ElasticTracker tracker, double price)
         {
             if (price <= 0 || double.IsNaN(price) || double.IsInfinity(price))
             {
+                var reason = price <= 0 ? "non-positive" : (double.IsNaN(price) ? "NaN" : "Infinity");
+                var symbol = tracker.SymbolKey ?? "unknown";
+                var message = $"[TrailingElastic] Ignoring invalid price {price} ({reason}) for baseId={tracker.BaseId}, symbol={symbol}";
+                if (LogWarning != null)
+                {
+                    LogWarning.Invoke(message);
+                }
+                else
+                {
+                    Console.WriteLine(message);
+                }
                 return;
             }
 
@@ -481,7 +518,8 @@ namespace Quantower.MultiStrat.Services
 
             if (_quoteHistory.TryGetValue(key, out var history))
             {
-                lock (history)
+                var historyLock = GetHistoryLock(key);
+                lock (historyLock)
                 {
                     return IndicatorCalculator.CalculateAtr(history.ToList(), period);
                 }
@@ -505,7 +543,8 @@ namespace Quantower.MultiStrat.Services
 
             if (_quoteHistory.TryGetValue(key, out var history))
             {
-                lock (history)
+                var historyLock = GetHistoryLock(key);
+                lock (historyLock)
                 {
                     return IndicatorCalculator.CalculateDema(history.ToList(), period);
                 }
@@ -581,17 +620,28 @@ namespace Quantower.MultiStrat.Services
                 : symbol.Name ?? symbol.Description ?? string.Empty;
         }
 
-        private static double GetTickSize(Symbol? symbol)
+        private double GetTickSize(Symbol? symbol)
         {
             if (symbol == null)
             {
                 return 0.0;
             }
 
+            var cacheKey = GetSymbolKey(symbol);
+            if (!string.IsNullOrEmpty(cacheKey) && _tickSizeCache.TryGetValue(cacheKey, out var cached) && cached > 0)
+            {
+                return cached;
+            }
+
             try
             {
                 if (symbol.TickSize > 0)
                 {
+                    if (!string.IsNullOrEmpty(cacheKey))
+                    {
+                        _tickSizeCache[cacheKey] = symbol.TickSize;
+                    }
+
                     return symbol.TickSize;
                 }
             }
@@ -600,18 +650,33 @@ namespace Quantower.MultiStrat.Services
                 // fall through to reflection-based lookup
             }
 
-            var tickProp = symbol.GetType().GetProperty("TickSize");
+            var type = symbol.GetType();
+            var tickProp = TickSizePropertyCache.GetOrAdd(type, t => t.GetProperty("TickSize"));
             if (tickProp != null)
             {
-                var value = tickProp.GetValue(symbol);
-                if (value is double d)
+                try
                 {
-                    return d;
-                }
+                    var value = tickProp.GetValue(symbol);
+                    double tickSize = value switch
+                    {
+                        double d when d > 0 => d,
+                        decimal dec when dec > 0 => (double)dec,
+                        _ => 0.0
+                    };
 
-                if (value is decimal dec)
+                    if (tickSize > 0 && !string.IsNullOrEmpty(cacheKey))
+                    {
+                        _tickSizeCache[cacheKey] = tickSize;
+                    }
+
+                    if (tickSize > 0)
+                    {
+                        return tickSize;
+                    }
+                }
+                catch
                 {
-                    return (double)dec;
+                    // ignore and fall through to default
                 }
             }
 

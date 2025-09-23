@@ -73,10 +73,10 @@ namespace Quantower.MultiStrat
             }
         }
 
+        [Obsolete("Use StopAsync() instead.")]
         public void Stop()
         {
-            // Avoid sync-over-async deadlocks by running the async stop on a background task
-            Task.Run(async () => await StopAsync().ConfigureAwait(false)).GetAwaiter().GetResult();
+            StopAsync().GetAwaiter().GetResult();
         }
 
         public void Dispose()
@@ -183,19 +183,26 @@ namespace Quantower.MultiStrat
                     return false;
                 }
 
-                _pendingTrades.TryAdd(tradeId, 0);
-                var success = await BridgeGrpcClient.SubmitTradeAsync(tradeJson).ConfigureAwait(false);
-                _pendingTrades.TryRemove(tradeId, out _);
+                var added = _pendingTrades.TryAdd(tradeId, 0);
+                if (!added)
+                {
+                    EmitLog(BridgeLogLevel.Warn, "Trade submission already pending", tradeId, tradeId, "already pending");
+                    return false;
+                }
 
-                return success;
+                try
+                {
+                    var success = await BridgeGrpcClient.SubmitTradeAsync(tradeJson).ConfigureAwait(false);
+                    return success;
+                }
+                finally
+                {
+                    _pendingTrades.TryRemove(tradeId, out _);
+                }
             }
             catch (Exception ex)
             {
                 EmitLog(BridgeLogLevel.Error, "Exception in SubmitTradeAsync", tradeId, tradeId, ex.Message);
-                if (!string.IsNullOrWhiteSpace(tradeId))
-                {
-                    _pendingTrades.TryRemove(tradeId, out _);
-                }
 
                 return false;
             }
@@ -378,20 +385,21 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private void ObserveAsyncOperation(Task<bool> task, string operationName, string identifier)
+        private async void ObserveAsyncOperation(Task<bool> task, string operationName, string identifier)
         {
-            task.ContinueWith(t =>
+            try
             {
-                if (t.IsFaulted)
-                {
-                    var root = t.Exception?.GetBaseException();
-                    EmitLog(BridgeLogLevel.Error, $"{operationName} exception", identifier, identifier, root?.Message ?? t.Exception?.Message ?? "unknown error");
-                }
-                else if (!t.Result)
+                var result = await task.ConfigureAwait(false);
+                if (!result)
                 {
                     EmitLog(BridgeLogLevel.Warn, $"{operationName} unsuccessful", identifier, identifier, BridgeGrpcClient.LastError);
                 }
-            }, TaskContinuationOptions.ExecuteSynchronously);
+            }
+            catch (Exception ex)
+            {
+                var root = ex.GetBaseException();
+                EmitLog(BridgeLogLevel.Error, $"{operationName} exception", identifier, identifier, root?.Message ?? ex.Message);
+            }
         }
 
         private void EmitLog(BridgeLogLevel level, string message, string? tradeId = null, string? baseId = null, string? details = null)

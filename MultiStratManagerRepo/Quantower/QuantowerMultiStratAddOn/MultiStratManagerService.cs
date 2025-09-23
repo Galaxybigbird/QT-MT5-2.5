@@ -24,7 +24,7 @@ namespace Quantower.MultiStrat
         private readonly SettingsRepository _settingsRepository = new();
         private readonly RiskConfiguration _riskSettings = new();
         private readonly HashSet<string> _savedAccountIds = new(StringComparer.OrdinalIgnoreCase);
-        private readonly Services.TrailingElasticService _trailingService = new();
+        private readonly Services.TrailingElasticService _trailingService;
         private readonly Services.SltpRemovalService _sltpService = new();
         private readonly Dictionary<string, TrackingState> _trackingStates = new(StringComparer.OrdinalIgnoreCase);
         private readonly object _trackingLock = new();
@@ -36,6 +36,10 @@ namespace Quantower.MultiStrat
 
         public MultiStratManagerService()
         {
+            _trailingService = new Services.TrailingElasticService
+            {
+                LogWarning = message => EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, message)
+            };
             _bridgeService = new QuantowerBridgeService();
             _bridgeService.Log += entry => Log?.Invoke(entry);
             _bridgeService.TradeReceived += HandleTrade;
@@ -1082,7 +1086,7 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private bool FlattenAccountInternal(AccountSubscription subscription, string reason, bool disableAfter)
+        private async Task<bool> FlattenAccountInternalAsync(AccountSubscription subscription, string reason, bool disableAfter)
         {
             var accountId = subscription.AccountId;
             var positions = EnumeratePositions(accountId).ToList();
@@ -1091,13 +1095,19 @@ namespace Quantower.MultiStrat
             if (positions.Count == 0)
             {
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"No open positions to flatten for account {subscription.DisplayName}");
+                if (disableAfter)
+                {
+                    subscription.IsEnabled = false;
+                    StopTrackingByAccount(subscription.AccountId);
+                }
+                return true;
             }
 
             foreach (var position in positions)
             {
                 try
                 {
-                    position.Close();
+                    await Task.Run(() => position.Close()).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

@@ -10,11 +10,24 @@ namespace Quantower.MultiStrat.Infrastructure
 {
     internal static class QuantowerTradeMapper
     {
+        public static Action<string, Exception>? LogError { get; set; }
+
         private static readonly JsonSerializerOptions SerializerOptions = new()
         {
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
             WriteIndented = false
         };
+
+        private static void ReportError(string message, Exception ex)
+        {
+            if (LogError != null)
+            {
+                LogError.Invoke(message, ex);
+                return;
+            }
+
+            Console.Error.WriteLine($"{message}\n{ex}");
+        }
 
         public static bool TryBuildTradeEnvelope(Trade trade, out string json, out string? tradeId)
         {
@@ -68,15 +81,15 @@ namespace Quantower.MultiStrat.Infrastructure
             }
             catch (JsonException ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Failed to serialize Quantower trade payload: {ex.Message}\n{ex}");
+                ReportError($"[QT][ERROR] Failed to serialize Quantower trade payload: {ex.Message}", ex);
             }
             catch (FormatException ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Invalid numeric/date format in Quantower trade: {ex.Message}\n{ex}");
+                ReportError($"[QT][ERROR] Invalid numeric/date format in Quantower trade: {ex.Message}", ex);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Unexpected error while mapping Quantower trade: {ex.Message}\n{ex}");
+                ReportError($"[QT][ERROR] Unexpected error while mapping Quantower trade: {ex.Message}", ex);
             }
 
             json = string.Empty;
@@ -119,15 +132,15 @@ namespace Quantower.MultiStrat.Infrastructure
             }
             catch (JsonException ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Failed to serialize Quantower position snapshot: {ex.Message}\n{ex}");
+                ReportError($"[QT][ERROR] Failed to serialize Quantower position snapshot: {ex.Message}", ex);
             }
             catch (FormatException ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Invalid data when mapping Quantower position snapshot: {ex.Message}\n{ex}");
+                ReportError($"[QT][ERROR] Invalid data when mapping Quantower position snapshot: {ex.Message}", ex);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Unexpected error while mapping Quantower position snapshot: {ex.Message}\n{ex}");
+                ReportError($"[QT][ERROR] Unexpected error while mapping Quantower position snapshot: {ex.Message}", ex);
             }
 
             json = string.Empty;
@@ -176,15 +189,15 @@ namespace Quantower.MultiStrat.Infrastructure
             }
             catch (JsonException ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Failed to serialize Quantower position closure: {ex.Message}\n{ex}");
+                ReportError($"[QT][ERROR] Failed to serialize Quantower position closure: {ex.Message}", ex);
             }
             catch (FormatException ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Invalid data while mapping Quantower position closure: {ex.Message}\n{ex}");
+                ReportError($"[QT][ERROR] Invalid data while mapping Quantower position closure: {ex.Message}", ex);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[QT][ERROR] Unexpected error while mapping Quantower position closure: {ex.Message}\n{ex}");
+                ReportError($"[QT][ERROR] Unexpected error while mapping Quantower position closure: {ex.Message}", ex);
             }
 
             json = string.Empty;
@@ -313,8 +326,25 @@ namespace Quantower.MultiStrat.Infrastructure
                         return DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime;
                     case double unixDouble:
                         return DateTimeOffset.FromUnixTimeSeconds((long)unixDouble).UtcDateTime;
-                    case string s when DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed):
-                        return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+                    case string s:
+                        if (DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal, out var dtoParsed))
+                        {
+                            return dtoParsed.UtcDateTime;
+                        }
+
+                        var hasOffset = HasExplicitOffset(s);
+                        var styles = DateTimeStyles.AllowWhiteSpaces;
+                        if (!hasOffset)
+                        {
+                            styles |= DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal;
+                        }
+
+                        if (DateTime.TryParse(s, CultureInfo.InvariantCulture, styles, out var parsed))
+                        {
+                            var utc = hasOffset ? parsed.ToUniversalTime() : parsed;
+                            return DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+                        }
+                        break;
                 }
             }
 
@@ -332,6 +362,43 @@ namespace Quantower.MultiStrat.Infrastructure
 
             var field = type.GetField(propertyName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             return field?.GetValue(target);
+        }
+
+        private static bool HasExplicitOffset(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                var c = value[i];
+                if (c == 'Z' || c == 'z')
+                {
+                    return true;
+                }
+
+                if ((c == '+' || c == '-') && i > 0)
+                {
+                    var previous = value[i - 1];
+                    if (previous == 'T' || previous == ' ')
+                    {
+                        return true;
+                    }
+
+                    if (i >= value.Length - 5)
+                    {
+                        var nextIndex = i + 1;
+                        if (nextIndex < value.Length && char.IsDigit(value[nextIndex]))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
         }
     }
 }

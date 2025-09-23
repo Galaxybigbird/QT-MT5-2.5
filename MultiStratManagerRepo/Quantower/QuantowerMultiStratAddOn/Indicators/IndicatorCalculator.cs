@@ -111,7 +111,7 @@ namespace Quantower.MultiStrat.Indicators
             {
                 if (values == null || values.Count < period)
                 {
-                    return null;
+                    return new List<double>();
                 }
 
                 var emaValues = new List<double>();
@@ -130,7 +130,7 @@ namespace Quantower.MultiStrat.Indicators
             catch (Exception ex)
             {
                 Console.WriteLine($"[QT][IndicatorCalculator] EMA calculation failed: {ex.Message}");
-                return null;
+                return new List<double>();
             }
         }
     }

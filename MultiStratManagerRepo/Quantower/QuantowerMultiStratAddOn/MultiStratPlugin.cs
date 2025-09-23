@@ -163,7 +163,17 @@ namespace Quantower.MultiStrat
                 Width = 90,
                 Margin = new Thickness(8, 0, 0, 0)
             };
-            _connectButton.Click += async (_, __) => await ConnectAsync().ConfigureAwait(true);
+            _connectButton.Click += async (_, __) =>
+            {
+                try
+                {
+                    await ConnectAsync().ConfigureAwait(true);
+                }
+                catch (Exception ex)
+                {
+                    AddLogEntry("ERROR", $"Connect handler failed: {ex.Message}");
+                }
+            };
             header.Children.Add(_connectButton);
 
             _disconnectButton = new Button
@@ -173,7 +183,17 @@ namespace Quantower.MultiStrat
                 Margin = new Thickness(8, 0, 0, 0),
                 IsEnabled = false
             };
-            _disconnectButton.Click += async (_, __) => await DisconnectAsync().ConfigureAwait(true);
+            _disconnectButton.Click += async (_, __) =>
+            {
+                try
+                {
+                    await DisconnectAsync().ConfigureAwait(true);
+                }
+                catch (Exception ex)
+                {
+                    AddLogEntry("ERROR", $"Disconnect handler failed: {ex.Message}");
+                }
+            };
             header.Children.Add(_disconnectButton);
 
             root.Children.Add(header);
@@ -329,7 +349,17 @@ namespace Quantower.MultiStrat
                 Content = "Flatten All Accounts",
                 Width = 160
             };
-            flattenAllButton.Click += (_, __) => FlattenAllAccounts();
+            flattenAllButton.Click += async (_, __) =>
+            {
+                try
+                {
+                    await FlattenAllAccountsAsync().ConfigureAwait(true);
+                }
+                catch (Exception ex)
+                {
+                    AddLogEntry("ERROR", $"Flatten all handler failed: {ex.Message}");
+                }
+            };
             buttonsRow.Children.Add(flattenAllButton);
 
             panel.Children.Add(buttonsRow);
@@ -549,11 +579,11 @@ namespace Quantower.MultiStrat
             RenderAccounts();
         }
 
-        private async void FlattenAllAccounts()
+        private async Task FlattenAllAccountsAsync()
         {
             try
             {
-                var success = await _managerService.FlattenAllAsync(disableAfter: _disableOnLimitCheckbox?.IsChecked == true, reason: "manual");
+                var success = await _managerService.FlattenAllAsync(disableAfter: _disableOnLimitCheckbox?.IsChecked == true, reason: "manual").ConfigureAwait(true);
                 AddLogEntry(success ? "INFO" : "WARN", success ? "Flattened all accounts" : "One or more accounts failed to flatten");
             }
             catch (Exception ex)
