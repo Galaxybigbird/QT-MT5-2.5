@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TradingPlatform.BusinessLayer;
@@ -166,12 +167,9 @@ namespace Quantower.MultiStrat.Infrastructure
                 payload["closed_hedge_quantity"] = position.Quantity;
                 payload["closed_hedge_action"] = ResolveAction(position.Side, position.Quantity);
 
-                var closeTime = position.CloseTime;
-                if (closeTime == default)
-                {
-                    closeTime = DateTime.UtcNow;
-                }
-                payload["timestamp"] = DateTime.SpecifyKind(closeTime, DateTimeKind.Utc).ToString("o", CultureInfo.InvariantCulture);
+                var closeTime = GetDateTimeValue(position, "CloseTime", "ExecutionTime", "Time", "DateTime", "Timestamp")
+                                 ?? DateTime.UtcNow;
+                payload["timestamp"] = closeTime.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
 
                 json = JsonSerializer.Serialize(payload, SerializerOptions);
                 return true;
@@ -258,8 +256,8 @@ namespace Quantower.MultiStrat.Infrastructure
                 return;
             }
 
-            var normalized = DateTime.SpecifyKind(timestamp, DateTimeKind.Utc);
-            payload["timestamp"] = new DateTimeOffset(normalized).ToUnixTimeSeconds();
+            var utc = timestamp.ToUniversalTime();
+            payload["timestamp"] = new DateTimeOffset(utc).ToUnixTimeSeconds();
         }
 
         private static void AddStrategyTag(IDictionary<string, object?> payload, string? comment, AdditionalInfoCollection? additionalInfo)
@@ -293,6 +291,47 @@ namespace Quantower.MultiStrat.Infrastructure
         private static string? SafeString(string? value)
         {
             return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        private static DateTime? GetDateTimeValue(object target, params string[] propertyNames)
+        {
+            foreach (var propertyName in propertyNames)
+            {
+                var value = GetPropertyValue(target, propertyName);
+                if (value == null)
+                {
+                    continue;
+                }
+
+                switch (value)
+                {
+                    case DateTime dt:
+                        return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+                    case DateTimeOffset dto:
+                        return dto.UtcDateTime;
+                    case long unix:
+                        return DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime;
+                    case double unixDouble:
+                        return DateTimeOffset.FromUnixTimeSeconds((long)unixDouble).UtcDateTime;
+                    case string s when DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed):
+                        return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+                }
+            }
+
+            return null;
+        }
+
+        private static object? GetPropertyValue(object target, string propertyName)
+        {
+            var type = target.GetType();
+            var property = type.GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (property != null)
+            {
+                return property.GetValue(target);
+            }
+
+            var field = type.GetField(propertyName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            return field?.GetValue(target);
         }
     }
 }
