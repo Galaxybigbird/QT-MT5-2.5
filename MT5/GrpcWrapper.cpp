@@ -10,6 +10,11 @@
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
+#include <sstream>
+#include <iomanip>
+#include <optional>
+#include <cstdint>
+#include <cstring>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -25,6 +30,373 @@
 #define GRPC_TIMEOUT -3
 #define GRPC_STREAM_CLOSED -4
 #define GRPC_PARSE_ERROR -5
+
+namespace {
+
+bool ReadVarint(const std::string& data, size_t& offset, uint64_t& value) {
+    value = 0;
+    int shift = 0;
+    while (offset < data.size() && shift < 64) {
+        uint8_t byte = static_cast<uint8_t>(data[offset++]);
+        value |= static_cast<uint64_t>(byte & 0x7F) << shift;
+        if ((byte & 0x80) == 0) {
+            return true;
+        }
+        shift += 7;
+    }
+    return false;
+}
+
+bool ReadLengthDelimited(const std::string& data, size_t& offset, std::string& out) {
+    uint64_t length = 0;
+    if (!ReadVarint(data, offset, length)) {
+        return false;
+    }
+    if (offset + length > data.size()) {
+        return false;
+    }
+    out.assign(data.data() + offset, static_cast<size_t>(length));
+    offset += static_cast<size_t>(length);
+    return true;
+}
+
+bool ReadFixed64Double(const std::string& data, size_t& offset, double& out) {
+    if (offset + 8 > data.size()) {
+        return false;
+    }
+
+    uint64_t raw = 0;
+    std::memcpy(&raw, data.data() + offset, 8);
+    offset += 8;
+    std::memcpy(&out, &raw, 8);
+    return true;
+}
+
+bool SkipField(int wireType, const std::string& data, size_t& offset) {
+    switch (wireType) {
+        case 0: { // varint
+            uint64_t dummy;
+            return ReadVarint(data, offset, dummy);
+        }
+        case 1: { // 64-bit
+            if (offset + 8 > data.size()) return false;
+            offset += 8;
+            return true;
+        }
+        case 2: { // length-delimited
+            uint64_t length = 0;
+            if (!ReadVarint(data, offset, length)) return false;
+            if (offset + length > data.size()) return false;
+            offset += static_cast<size_t>(length);
+            return true;
+        }
+        case 5: { // 32-bit
+            if (offset + 4 > data.size()) return false;
+            offset += 4;
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+std::string EscapeJson(const std::string& value) {
+    std::ostringstream oss;
+    for (char ch : value) {
+        switch (ch) {
+            case '\\': oss << "\\\\"; break;
+            case '\"': oss << "\\\""; break;
+            case '\b': oss << "\\b"; break;
+            case '\f': oss << "\\f"; break;
+            case '\n': oss << "\\n"; break;
+            case '\r': oss << "\\r"; break;
+            case '\t': oss << "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(ch) < 0x20) {
+                    oss << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                        << static_cast<int>(static_cast<unsigned char>(ch));
+                } else {
+                    oss << ch;
+                }
+                break;
+        }
+    }
+    return oss.str();
+}
+
+bool ParseTradeMessage(const std::string& protoData, std::string& tradeJson) {
+    struct TradeFields {
+        std::optional<std::string> id;
+        std::optional<std::string> base_id;
+        std::optional<int64_t> timestamp;
+        std::optional<std::string> action;
+        std::optional<double> quantity;
+        std::optional<double> price;
+        std::optional<int32_t> total_quantity;
+        std::optional<int32_t> contract_num;
+        std::optional<std::string> order_type;
+        std::optional<int32_t> measurement_pips;
+        std::optional<double> raw_measurement;
+        std::optional<std::string> instrument;
+        std::optional<std::string> account_name;
+        std::optional<double> nt_balance;
+        std::optional<double> nt_daily_pnl;
+        std::optional<std::string> nt_trade_result;
+        std::optional<int32_t> nt_session_trades;
+        std::optional<uint64_t> mt5_ticket;
+        std::optional<double> nt_points_per_1k_loss;
+        std::optional<std::string> event_type;
+        std::optional<double> elastic_current_profit;
+        std::optional<int32_t> elastic_profit_level;
+        std::optional<std::string> qt_trade_id;
+        std::optional<std::string> qt_position_id;
+        std::optional<std::string> strategy_tag;
+        std::optional<std::string> origin_platform;
+    } fields;
+
+    size_t offset = 0;
+    while (offset < protoData.size()) {
+        uint64_t key = 0;
+        if (!ReadVarint(protoData, offset, key)) {
+            return false;
+        }
+
+        uint32_t fieldNumber = static_cast<uint32_t>(key >> 3);
+        uint32_t wireType = static_cast<uint32_t>(key & 0x07);
+
+        switch (fieldNumber) {
+            case 1: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.id = value;
+                break;
+            }
+            case 2: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.base_id = value;
+                break;
+            }
+            case 3: {
+                uint64_t value = 0;
+                if (!ReadVarint(protoData, offset, value)) return false;
+                fields.timestamp = static_cast<int64_t>(value);
+                break;
+            }
+            case 4: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.action = value;
+                break;
+            }
+            case 5: {
+                double value = 0.0;
+                if (!ReadFixed64Double(protoData, offset, value)) return false;
+                fields.quantity = value;
+                break;
+            }
+            case 6: {
+                double value = 0.0;
+                if (!ReadFixed64Double(protoData, offset, value)) return false;
+                fields.price = value;
+                break;
+            }
+            case 7: {
+                uint64_t value = 0;
+                if (!ReadVarint(protoData, offset, value)) return false;
+                fields.total_quantity = static_cast<int32_t>(value);
+                break;
+            }
+            case 8: {
+                uint64_t value = 0;
+                if (!ReadVarint(protoData, offset, value)) return false;
+                fields.contract_num = static_cast<int32_t>(value);
+                break;
+            }
+            case 9: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.order_type = value;
+                break;
+            }
+            case 10: {
+                uint64_t value = 0;
+                if (!ReadVarint(protoData, offset, value)) return false;
+                fields.measurement_pips = static_cast<int32_t>(value);
+                break;
+            }
+            case 11: {
+                double value = 0.0;
+                if (!ReadFixed64Double(protoData, offset, value)) return false;
+                fields.raw_measurement = value;
+                break;
+            }
+            case 12: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.instrument = value;
+                break;
+            }
+            case 13: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.account_name = value;
+                break;
+            }
+            case 14: {
+                double value = 0.0;
+                if (!ReadFixed64Double(protoData, offset, value)) return false;
+                fields.nt_balance = value;
+                break;
+            }
+            case 15: {
+                double value = 0.0;
+                if (!ReadFixed64Double(protoData, offset, value)) return false;
+                fields.nt_daily_pnl = value;
+                break;
+            }
+            case 16: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.nt_trade_result = value;
+                break;
+            }
+            case 17: {
+                uint64_t value = 0;
+                if (!ReadVarint(protoData, offset, value)) return false;
+                fields.nt_session_trades = static_cast<int32_t>(value);
+                break;
+            }
+            case 18: {
+                uint64_t value = 0;
+                if (!ReadVarint(protoData, offset, value)) return false;
+                fields.mt5_ticket = value;
+                break;
+            }
+            case 19: {
+                double value = 0.0;
+                if (!ReadFixed64Double(protoData, offset, value)) return false;
+                fields.nt_points_per_1k_loss = value;
+                break;
+            }
+            case 20: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.event_type = value;
+                break;
+            }
+            case 21: {
+                double value = 0.0;
+                if (!ReadFixed64Double(protoData, offset, value)) return false;
+                fields.elastic_current_profit = value;
+                break;
+            }
+            case 22: {
+                uint64_t value = 0;
+                if (!ReadVarint(protoData, offset, value)) return false;
+                fields.elastic_profit_level = static_cast<int32_t>(value);
+                break;
+            }
+            case 23: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.qt_trade_id = value;
+                break;
+            }
+            case 24: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.qt_position_id = value;
+                break;
+            }
+            case 25: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.strategy_tag = value;
+                break;
+            }
+            case 26: {
+                std::string value;
+                if (!ReadLengthDelimited(protoData, offset, value)) return false;
+                fields.origin_platform = value;
+                break;
+            }
+            default:
+                if (!SkipField(wireType, protoData, offset)) {
+                    return false;
+                }
+                break;
+        }
+    }
+
+    std::ostringstream json;
+    json << "{";
+    bool first = true;
+
+    auto appendString = [&](const char* key, const std::optional<std::string>& value) {
+        if (!value) return;
+        if (!first) json << ','; else first = false;
+        json << '\"' << key << "\":\"" << EscapeJson(*value) << "\"";
+    };
+
+    auto appendDouble = [&](const char* key, const std::optional<double>& value) {
+        if (!value) return;
+        if (!first) json << ','; else first = false;
+        json << '\"' << key << "\":";
+        json << std::setprecision(15) << std::defaultfloat << *value;
+    };
+
+    auto appendInt = [&](const char* key, const std::optional<int32_t>& value) {
+        if (!value) return;
+        if (!first) json << ','; else first = false;
+        json << '\"' << key << "\":" << *value;
+    };
+
+    auto appendInt64 = [&](const char* key, const std::optional<int64_t>& value) {
+        if (!value) return;
+        if (!first) json << ','; else first = false;
+        json << '\"' << key << "\":" << *value;
+    };
+
+    auto appendUint64 = [&](const char* key, const std::optional<uint64_t>& value) {
+        if (!value) return;
+        if (!first) json << ','; else first = false;
+        json << '\"' << key << "\":" << *value;
+    };
+
+    appendString("id", fields.id);
+    appendString("base_id", fields.base_id);
+    appendInt64("timestamp", fields.timestamp);
+    appendString("action", fields.action);
+    appendDouble("quantity", fields.quantity);
+    appendDouble("price", fields.price);
+    appendInt("total_quantity", fields.total_quantity);
+    appendInt("contract_num", fields.contract_num);
+    appendString("order_type", fields.order_type);
+    appendInt("measurement_pips", fields.measurement_pips);
+    appendDouble("raw_measurement", fields.raw_measurement);
+    appendString("instrument", fields.instrument);
+    appendString("account_name", fields.account_name);
+    appendDouble("nt_balance", fields.nt_balance);
+    appendDouble("nt_daily_pnl", fields.nt_daily_pnl);
+    appendString("nt_trade_result", fields.nt_trade_result);
+    appendInt("nt_session_trades", fields.nt_session_trades);
+    appendUint64("mt5_ticket", fields.mt5_ticket);
+    appendDouble("nt_points_per_1k_loss", fields.nt_points_per_1k_loss);
+    appendString("event_type", fields.event_type);
+    appendDouble("elastic_current_profit", fields.elastic_current_profit);
+    appendInt("elastic_profit_level", fields.elastic_profit_level);
+    appendString("qt_trade_id", fields.qt_trade_id);
+    appendString("qt_position_id", fields.qt_position_id);
+    appendString("strategy_tag", fields.strategy_tag);
+    appendString("origin_platform", fields.origin_platform);
+
+    json << "}";
+    tradeJson = json.str();
+    return true;
+}
+
+} // namespace
 
 // Forward declarations
 extern "C" {
@@ -422,12 +794,11 @@ bool ParseGrpcResponse(const std::string& data, std::string& tradeJson) {
                     if (frameData.length() >= 5 + msgLen) {
                         std::string protoData = frameData.substr(5, msgLen);
                         
-                        // Simple protobuf to JSON conversion for Trade message
-                        // This is a simplified parser - in production, use proper protobuf library
-                        if (protoData.length() > 0) {
-                            tradeJson = "{\"id\":\"grpc_trade_" + std::to_string(std::time(nullptr)) + 
-                                       "\",\"action\":\"BUY\",\"quantity\":1.0,\"price\":1.0000,\"instrument\":\"EURUSD\"}";
-                            return true;
+                        // Decode protobuf Trade payload into JSON using a minimal decoder
+                        if (!protoData.empty()) {
+                            if (ParseTradeMessage(protoData, tradeJson)) {
+                                return true;
+                            }
                         }
                     }
                 }

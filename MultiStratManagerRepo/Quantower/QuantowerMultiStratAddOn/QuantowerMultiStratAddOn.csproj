@@ -12,7 +12,7 @@
 
   <PropertyGroup>
     <QuantowerVersion Condition="'$(QuantowerVersion)' == '' and '$(QUANTOWER_VERSION)' != ''">$(QUANTOWER_VERSION)</QuantowerVersion>
-    <QuantowerVersion Condition="'$(QuantowerVersion)' == ''">v1.144.12</QuantowerVersion>
+    <QuantowerVersion Condition="'$(QuantowerVersion)' == ''">v1.144.9</QuantowerVersion>
     <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == '' and '$(QUANTOWER_SDK_DIR)' != ''">$(QUANTOWER_SDK_DIR)</QuantowerSdkDir>
     <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == '' and '$(OS)' == 'Windows_NT'">C:\Quantower\TradingPlatform\$(QuantowerVersion)\bin\</QuantowerSdkDir>
     <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == ''">/mnt/c/Quantower/TradingPlatform/$(QuantowerVersion)/bin/</QuantowerSdkDir>
