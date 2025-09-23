@@ -8,6 +8,8 @@
 
 ---
 
+> **Legacy Notice**: This report documents the final NinjaTrader deployment prior to the Quantower migration. The Quantower plug-in supersedes these components and introduces new project files under `MultiStratManagerRepo/Quantower/`.
+
 ## 📦 **Files Successfully Deployed**
 
 ### **Core Files (5 deployed)**
