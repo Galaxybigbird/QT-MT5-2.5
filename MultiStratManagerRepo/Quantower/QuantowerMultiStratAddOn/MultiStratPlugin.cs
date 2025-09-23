@@ -76,21 +76,26 @@ namespace Quantower.MultiStrat
         {
             _managerService.Log -= OnBridgeLog;
 
-            if (_managerService.IsConnected)
+            try
             {
-                try
+                if (_managerService.IsConnected)
                 {
-                    _managerService.DisconnectAsync().GetAwaiter().GetResult();
+                    try
+                    {
+                        _managerService.DisconnectAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        AddLogEntry("ERROR", $"Error while stopping bridge: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
-                {
-                    AddLogEntry("ERROR", $"Error while stopping bridge: {ex.Message}");
-                }
+
+                _managerService.Dispose();
             }
-
-            _managerService.Dispose();
-
-            base.Dispose();
+            finally
+            {
+                base.Dispose();
+            }
         }
 
         private UIElement BuildLayout()
@@ -144,7 +149,7 @@ namespace Quantower.MultiStrat
                 Margin = new Thickness(8, 0, 0, 0),
                 IsEnabled = false
             };
-            _disconnectButton.Click += (_, __) => Disconnect();
+            _disconnectButton.Click += async (_, __) => await DisconnectAsync().ConfigureAwait(true);
             header.Children.Add(_disconnectButton);
 
             root.Children.Add(header);
@@ -748,11 +753,11 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private void Disconnect()
+        private async Task DisconnectAsync()
         {
             try
             {
-                _managerService.DisconnectAsync().GetAwaiter().GetResult();
+                await _managerService.DisconnectAsync().ConfigureAwait(true);
             }
             catch (Exception ex)
             {

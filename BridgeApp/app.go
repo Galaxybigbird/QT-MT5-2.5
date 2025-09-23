@@ -1002,8 +1002,12 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 				}
 
 				// Capture available tickets and any pending closes before unlocking
-				available := append([]uint64(nil), a.baseIdToTickets[mt5Result.ID]...)
-				pend := append([]pendingClose(nil), a.pendingCloses[mt5Result.ID]...)
+				listCopy := a.baseIdToTickets[mt5Result.ID]
+				available := make([]uint64, len(listCopy))
+				copy(available, listCopy)
+				pendCopy := a.pendingCloses[mt5Result.ID]
+				pend := make([]pendingClose, len(pendCopy))
+				copy(pend, pendCopy)
 				a.mt5TicketMux.Unlock()
 
 				log.Printf("gRPC: Stored MT5 ticket mapping - Ticket: %d -> BaseID: %s (count=%d)", mt5Result.Ticket, mt5Result.ID, len(available))
@@ -1192,8 +1196,12 @@ func (a *App) HandleMT5TradeResult(result interface{}) error {
 					}
 
 					// Capture available tickets and pending before unlock
-					available := append([]uint64(nil), a.baseIdToTickets[baseId]...)
-					pend := append([]pendingClose(nil), a.pendingCloses[baseId]...)
+					ticketCopy := a.baseIdToTickets[baseId]
+					available := make([]uint64, len(ticketCopy))
+					copy(available, ticketCopy)
+					pendingCopy := a.pendingCloses[baseId]
+					pend := make([]pendingClose, len(pendingCopy))
+					copy(pend, pendingCopy)
 					a.mt5TicketMux.Unlock()
 
 					log.Printf("gRPC: Stored MT5 ticket mapping - Ticket: %d -> BaseID: %s (count=%d)", ticket, baseId, len(available))

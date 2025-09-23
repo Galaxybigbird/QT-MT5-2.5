@@ -18,6 +18,7 @@ namespace Quantower.Bridge.Client
 
         private readonly string _source;
         private readonly string _component;
+        private readonly object _streamSync = new();
 
         private CancellationTokenSource? _streamCancellation;
         private Task? _streamTask;
@@ -84,6 +85,10 @@ namespace Quantower.Bridge.Client
             try
             {
                 var trade = JsonToProtoTrade(tradeJson);
+                if (trade == null)
+                {
+                    return OperationResult.Failure("Invalid trade payload");
+                }
                 var response = await _client.SubmitTradeAsync(trade).ConfigureAwait(false);
                 return OperationResult.Ok(JsonSerializer.Serialize(new { status = response.Status, message = response.Message }));
             }
@@ -193,10 +198,10 @@ namespace Quantower.Bridge.Client
         {
             StopTradingStream();
 
-            _streamCancellation = new CancellationTokenSource();
-            var token = _streamCancellation.Token;
+            var cts = new CancellationTokenSource();
+            var token = cts.Token;
 
-            _streamTask = Task.Run(async () =>
+            var streamTask = Task.Run(async () =>
             {
                 var rand = new Random();
                 var attempt = 0;
@@ -237,15 +242,62 @@ namespace Quantower.Bridge.Client
                     }
                 }
             }, token);
+
+            lock (_streamSync)
+            {
+                _streamCancellation = cts;
+                _streamTask = streamTask;
+            }
         }
 
         public void StopTradingStream()
         {
-            try { _streamCancellation?.Cancel(); } catch { }
-            try { _streamTask?.Wait(2000); } catch { }
-            _streamTask = null;
-            _streamCancellation?.Dispose();
-            _streamCancellation = null;
+            CancellationTokenSource? toCancel;
+            Task? toAwait;
+
+            lock (_streamSync)
+            {
+                toCancel = _streamCancellation;
+                _streamCancellation = null;
+                toAwait = _streamTask;
+                _streamTask = null;
+            }
+
+            if (toCancel != null)
+            {
+                try
+                {
+                    toCancel.Cancel();
+                }
+                catch (Exception ex)
+                {
+                    LogFireAndForget("WARN", _component, $"Failed to cancel trading stream: {ex.Message}");
+                }
+            }
+
+            if (toAwait != null)
+            {
+                try
+                {
+                    toAwait.Wait(2000);
+                }
+                catch (Exception ex)
+                {
+                    LogFireAndForget("WARN", _component, $"Failed to stop trading stream task: {ex.Message}");
+                }
+            }
+
+            if (toCancel != null)
+            {
+                try
+                {
+                    toCancel.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    LogFireAndForget("DEBUG", _component, $"Error disposing cancellation source: {ex.Message}");
+                }
+            }
         }
 
         public void Dispose()
@@ -256,36 +308,62 @@ namespace Quantower.Bridge.Client
 
         #region JSON ↔ Proto helpers
 
-        private Trade JsonToProtoTrade(string json)
+        private Trade? JsonToProtoTrade(string json)
         {
-            var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            return new Trade
+            if (string.IsNullOrWhiteSpace(json))
             {
-                Id = GetStringValue(root, "id", "trade_id"),
-                BaseId = GetStringValue(root, "base_id", "qt_position_id", "position_id"),
-                Timestamp = GetInt64Value(root, "timestamp"),
-                Action = GetStringValue(root, "action"),
-                Quantity = GetDoubleValue(root, "quantity"),
-                Price = GetDoubleValue(root, "price"),
-                TotalQuantity = GetInt32Value(root, "total_quantity"),
-                ContractNum = GetInt32Value(root, "contract_num"),
-                OrderType = GetStringValue(root, "order_type"),
-                MeasurementPips = GetInt32Value(root, "measurement_pips", "measurement", "pips"),
-                RawMeasurement = GetDoubleValue(root, "raw_measurement"),
-                Instrument = GetStringValue(root, "instrument", "instrument_name", "symbol"),
-                AccountName = GetStringValue(root, "account_name", "account"),
-                NtBalance = GetDoubleValue(root, "nt_balance"),
-                NtDailyPnl = GetDoubleValue(root, "nt_daily_pnl"),
-                NtTradeResult = GetStringValue(root, "nt_trade_result"),
-                NtSessionTrades = GetInt32Value(root, "nt_session_trades"),
-                NtPointsPer1KLoss = GetDoubleValue(root, "nt_points_per_1k_loss"),
-                QtTradeId = GetStringValue(root, "qt_trade_id", "quantower_trade_id"),
-                QtPositionId = GetStringValue(root, "qt_position_id", "quantower_position_id", "position_id"),
-                StrategyTag = GetStringValue(root, "strategy_tag", "strategy"),
-                OriginPlatform = GetStringValue(root, "origin_platform", "source_platform", "platform", "origin")
-            };
+                LogFireAndForget("ERROR", _component, "Trade payload is empty");
+                return null;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                var action = GetStringValue(root, "action");
+                if (string.IsNullOrWhiteSpace(action))
+                {
+                    LogFireAndForget("ERROR", _component, "Trade JSON missing action field");
+                    return null;
+                }
+
+                return new Trade
+                {
+                    Id = GetStringValue(root, "id", "trade_id"),
+                    BaseId = GetStringValue(root, "base_id", "qt_position_id", "position_id"),
+                    Timestamp = GetInt64Value(root, "timestamp"),
+                    Action = action,
+                    Quantity = GetDoubleValue(root, "quantity"),
+                    Price = GetDoubleValue(root, "price"),
+                    TotalQuantity = GetInt32Value(root, "total_quantity"),
+                    ContractNum = GetInt32Value(root, "contract_num"),
+                    OrderType = GetStringValue(root, "order_type"),
+                    MeasurementPips = GetInt32Value(root, "measurement_pips", "measurement", "pips"),
+                    RawMeasurement = GetDoubleValue(root, "raw_measurement"),
+                    Instrument = GetStringValue(root, "instrument", "instrument_name", "symbol"),
+                    AccountName = GetStringValue(root, "account_name", "account"),
+                    NtBalance = GetDoubleValue(root, "nt_balance"),
+                    NtDailyPnl = GetDoubleValue(root, "nt_daily_pnl"),
+                    NtTradeResult = GetStringValue(root, "nt_trade_result"),
+                    NtSessionTrades = GetInt32Value(root, "nt_session_trades"),
+                    NtPointsPer1KLoss = GetDoubleValue(root, "nt_points_per_1k_loss"),
+                    QtTradeId = GetStringValue(root, "qt_trade_id", "quantower_trade_id"),
+                    QtPositionId = GetStringValue(root, "qt_position_id", "quantower_position_id", "position_id"),
+                    StrategyTag = GetStringValue(root, "strategy_tag", "strategy"),
+                    OriginPlatform = GetStringValue(root, "origin_platform", "source_platform", "platform", "origin")
+                };
+            }
+            catch (JsonException ex)
+            {
+                LogFireAndForget("ERROR", _component, $"Failed to parse trade JSON: {ex.Message}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                LogFireAndForget("ERROR", _component, $"Unexpected error parsing trade JSON: {ex.Message}");
+                return null;
+            }
         }
 
         private string ProtoTradeToJson(Trade trade)

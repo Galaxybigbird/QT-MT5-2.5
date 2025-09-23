@@ -20,8 +20,13 @@ namespace Quantower.MultiStrat.Indicators
         {
             try
             {
-                int minRequired = Math.Max(period / 2 + 3, Math.Min(period, 10));
-                if (quotes == null || quotes.Count < minRequired)
+                if (quotes == null)
+                {
+                    return null;
+                }
+
+                int minRequired = (2 * period) - 1;
+                if (quotes.Count < minRequired)
                 {
                     return null;
                 }
@@ -55,8 +60,7 @@ namespace Quantower.MultiStrat.Indicators
         {
             try
             {
-                int minRequired = Math.Max(period / 2 + 3, Math.Min(period + 1, 10));
-                if (quotes == null || quotes.Count < minRequired)
+                if (quotes == null || quotes.Count < period + 1)
                 {
                     return null;
                 }
@@ -105,7 +109,7 @@ namespace Quantower.MultiStrat.Indicators
         {
             try
             {
-                if (values == null || values.Count < Math.Max(period / 2 + 3, Math.Min(period, 10)))
+                if (values == null || values.Count < period)
                 {
                     return null;
                 }
