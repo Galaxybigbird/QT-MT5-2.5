@@ -63,7 +63,7 @@
   </ItemGroup>
 
   <ItemGroup>
-  <Protobuf Include="proto\trading.proto" GrpcServices="Client" ProtoRoot="proto" />
+    <Protobuf Include="proto\trading.proto" GrpcServices="Client" ProtoRoot="proto" />
   </ItemGroup>
 
   <ItemGroup>
