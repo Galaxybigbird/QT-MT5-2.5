@@ -3,12 +3,18 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <DisableImplicitNuGetFallbackFolder>true</DisableImplicitNuGetFallbackFolder>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RestoreFallbackFolders></RestoreFallbackFolders>
   </PropertyGroup>
 
   <PropertyGroup>
+    <QuantowerVersion Condition="'$(QuantowerVersion)' == '' and '$(QUANTOWER_VERSION)' != ''">$(QUANTOWER_VERSION)</QuantowerVersion>
+    <QuantowerVersion Condition="'$(QuantowerVersion)' == ''">v1.144.12</QuantowerVersion>
     <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == '' and '$(QUANTOWER_SDK_DIR)' != ''">$(QUANTOWER_SDK_DIR)</QuantowerSdkDir>
-    <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == '' and '$(OS)' == 'Windows_NT'">C:\Quantower\TradingPlatform\v1.144.12\bin\</QuantowerSdkDir>
-    <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == ''">/mnt/c/Quantower/TradingPlatform/v1.144.12/bin/</QuantowerSdkDir>
+    <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == '' and '$(OS)' == 'Windows_NT'">C:\Quantower\TradingPlatform\$(QuantowerVersion)\bin\</QuantowerSdkDir>
+    <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == ''">/mnt/c/Quantower/TradingPlatform/$(QuantowerVersion)/bin/</QuantowerSdkDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,6 +24,15 @@
   <ItemGroup>
     <Compile Include="..\Infrastructure\QuantowerEventBridge.cs" />
     <Compile Include="..\Infrastructure\QuantowerTradeMapper.cs" />
+    <Compile Include="MultiStratManagerService.cs" />
+    <Compile Include="AccountSubscription.cs" />
+    <Compile Include="MultiStratPlugin.cs" />
+    <Compile Include="QuantowerBridgeService.cs" />
+    <Compile Include="Utilities\SimpleJson.cs" />
+    <Compile Include="Indicators\IndicatorCalculator.cs" />
+    <Compile Include="Persistence\SettingsRepository.cs" />
+    <Compile Include="Services\TrailingElasticService.cs" />
+    <Compile Include="Services\SltpRemovalService.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,6 +42,14 @@
     </Reference>
     <Reference Include="TradingPlatform.Common" Condition="Exists('$(QuantowerSdkDir)TradingPlatform.Common.dll')">
       <HintPath>$(QuantowerSdkDir)TradingPlatform.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TradingPlatform.PresentationLayer">
+      <HintPath>$(QuantowerSdkDir)TradingPlatform.PresentationLayer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TradingPlatform.PresentationLayer.Plugins">
+      <HintPath>$(QuantowerSdkDir)TradingPlatform.PresentationLayer.Plugins.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
