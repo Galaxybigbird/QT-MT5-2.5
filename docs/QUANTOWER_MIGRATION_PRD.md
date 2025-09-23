@@ -72,7 +72,7 @@ Quantower Add-on (.NET 6) ── gRPC ──> BridgeApp (Go) ── gRPC ──>
   - Publish trades/elastic/trailing updates through `BridgeGrpcClient`.
 - [ ] Port reusable logic (elastic trailing, SQLite if required) into platform-agnostic services.
 - [ ] Implement UI using Quantower panel framework (WPF or WinForms host).
-- [ ] Provide deployment instructions for Quantower (copy to `%AppData%\Quantower\Addons`).
+- [ ] Provide deployment instructions for Quantower (copy to `%AppData%\Quantower\Settings\Scripts\plugins`).
 
 ### 4.6 MT5 EA & Wrapper
 - [ ] Update proto structures in `MT5/Generated/` after schema change.

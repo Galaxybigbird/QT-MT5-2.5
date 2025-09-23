@@ -187,7 +187,7 @@ func (s *Server) Stop() {
 	}
 }
 
-// SubmitTrade handles trade submission from NinjaTrader
+// SubmitTrade handles trade submission from Addon (NT/QT)
 func (s *Server) SubmitTrade(ctx context.Context, req *trading.Trade) (*trading.GenericResponse, error) {
 	log.Printf("gRPC: Received trade submission - ID: %s, Action: %s, Quantity: %.2f",
 		req.Id, req.Action, req.Quantity)
@@ -690,7 +690,7 @@ func (s *Server) HealthCheck(ctx context.Context, req *trading.HealthRequest) (*
 	case "hedgebot", "MT5_EA":
 		s.app.SetHedgebotActive(true)
 		// noisy; omit per-request log
-	case "addon", "NT_ADDON", "nt_addon_init", "NT_ADDON_KEEPALIVE":
+	case "addon", "NT_ADDON", "nt_addon_init", "NT_ADDON_KEEPALIVE", "QT_ADDON", "QT":
 		s.app.SetAddonConnected(true)
 		// noisy; omit per-request log
 	}
@@ -760,7 +760,7 @@ func (s *Server) SystemHeartbeat(ctx context.Context, req *trading.HeartbeatRequ
 
 	// Treat NT addon heartbeat as proof-of-life
 	switch strings.ToUpper(req.GetComponent()) {
-	case "ADDON", "NT_ADDON", "NT_ADDON_INIT", "NT_ADDON_KEEPALIVE", "NT", "NINJATRADER":
+	case "ADDON", "NT_ADDON", "NT_ADDON_INIT", "NT_ADDON_KEEPALIVE", "NT", "NINJATRADER", "QT_ADDON", "QT":
 		s.app.SetAddonConnected(true)
 	}
 
@@ -777,7 +777,7 @@ func (s *Server) Log(ctx context.Context, req *trading.LogEvent) (*trading.LogAc
 
 	// Treat NT addon log traffic as proof-of-life to mark addon connected
 	switch strings.ToUpper(req.GetSource()) {
-	case "ADDON", "NT_ADDON", "NT_ADDON_INIT", "NT_ADDON_KEEPALIVE", "NT", "NINJATRADER":
+	case "ADDON", "NT_ADDON", "NT_ADDON_INIT", "NT_ADDON_KEEPALIVE", "NT", "NINJATRADER", "QT_ADDON", "QT":
 		s.app.SetAddonConnected(true)
 	}
 
@@ -985,7 +985,7 @@ func md5Hex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// NTCloseHedge handles hedge closure requests from NinjaTrader
+// NTCloseHedge handles hedge closure requests (legacy NT endpoint name; called by addon)
 func (s *Server) NTCloseHedge(ctx context.Context, req *trading.HedgeCloseNotification) (*trading.GenericResponse, error) {
 	log.Printf("gRPC: NT close hedge request - BaseID: %s", req.BaseId)
 

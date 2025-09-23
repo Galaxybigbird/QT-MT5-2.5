@@ -76,6 +76,8 @@ type InternalHedgeCloseNotification struct {
 	Timestamp           string  `json:"timestamp"`
 	ClosureReason       string  `json:"closure_reason"`
 	MT5Ticket           uint64  `json:"mt5_ticket,omitempty"`
+	QTPositionID        string  `json:"qt_position_id,omitempty"`
+	QTTradeID           string  `json:"qt_trade_id,omitempty"`
 }
 
 type InternalMT5TradeResult struct {
@@ -190,6 +192,8 @@ func convertProtoToInternalHedgeClose(proto *trading.HedgeCloseNotification) *In
 		Timestamp:           proto.Timestamp,
 		ClosureReason:       proto.ClosureReason,
 		MT5Ticket:           proto.Mt5Ticket,
+		QTPositionID:        proto.QtPositionId,
+		QTTradeID:           proto.QtTradeId,
 	}
 }
 
@@ -205,6 +209,8 @@ func convertInternalToProtoHedgeClose(internal *InternalHedgeCloseNotification) 
 		Timestamp:           internal.Timestamp,
 		ClosureReason:       internal.ClosureReason,
 		Mt5Ticket:           internal.MT5Ticket,
+		QtPositionId:        internal.QTPositionID,
+		QtTradeId:           internal.QTTradeID,
 	}
 }
 

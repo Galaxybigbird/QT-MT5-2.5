@@ -27,6 +27,16 @@ string ULOG_CTX_INSTRUMENT = "";
 long   ULOG_CTX_MT5_TICKET = 0;
 string ULOG_CTX_ERROR_CODE = "";
 
+// Persistent microsecond base aligned to epoch for dedup and replay
+long   ULOG_BASE_US = 0;
+bool   ULOG_BASE_READY = false;
+
+void ULogRefreshBase()
+{
+   ULOG_BASE_US = ((long)TimeCurrent()) * (long)1000000 - (long)GetMicrosecondCount();
+   ULOG_BASE_READY = true;
+}
+
 // Context setters/clearers (call before emitting logs)
 void ULogSetInstrument(const string instrument) { ULOG_CTX_INSTRUMENT = instrument; }
 void ULogClearInstrument() { ULOG_CTX_INSTRUMENT = ""; }
@@ -54,8 +64,13 @@ bool _ULogShouldEmit(const string level, const string message)
       _init = true;
    }
 
+   if(!ULOG_BASE_READY)
+   {
+      ULogRefreshBase();
+   }
+
    string key = level + "|" + message;
-   long now_us = (long)GetMicrosecondCount();
+   long now_us = ULOG_BASE_US + (long)GetMicrosecondCount();
    int freeIdx = -1;
    int oldestIdx = 0;
    long oldestTs = ULOG_DEDUP_LAST_US[0];
@@ -87,6 +102,7 @@ void ULogInit()
 {
    ArrayResize(ULOG_BUFFER, ULOG_MAX);
    ULOG_COUNT = 0;
+   ULogRefreshBase();
 }
 
 void ULogPush(const string level, const string message, const string base_id)

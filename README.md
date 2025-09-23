@@ -75,6 +75,12 @@ The system is composed of three main parts:
 3.  Run the compiled executable (e.g., `./main` or `main.exe`) or just type the command 'wails dev' within the (BridgeApp/) directory from the terminal.
 4.  Ensure the bridge is listening on the configured port (e.g., 5000).
 
+### Quantower Plugin (in progress)
+1. Navigate to [`MultiStratManagerRepo/Quantower/QuantowerMultiStratAddOn`](MultiStratManagerRepo/Quantower/QuantowerMultiStratAddOn/).
+2. Build/publish the plug-in (e.g. `dotnet publish -c Release -o ./publish --no-restore /p:EnableWindowsTargeting=true`).
+3. Copy the output into Quantower's plug-in directory, typically `%UserProfile%\Documents\Quantower\Settings\Scripts\plugins\MultiStratQuantower` (use [`scripts/deploy-quantower-plugin.ps1`](scripts/deploy-quantower-plugin.ps1) to automate this step).
+4. Restart Quantower and launch the "Multi-Strat Bridge" panel from the Sidebar to configure the gRPC endpoint and monitor bridge logs.
+
 ### Network Configuration
 *   Verify that the NT Addon, MT5 EA, and Bridge application can communicate over the network (typically all on `localhost` using the configured port and/or the UI). Firewall exceptions might be needed.
 

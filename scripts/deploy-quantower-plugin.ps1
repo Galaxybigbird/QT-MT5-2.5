@@ -39,7 +39,16 @@ if (!(Test-Path $projectPath)) {
 $publishDir = Join-Path $PSScriptRoot "..\MultiStratManagerRepo\Quantower\QuantowerMultiStratAddOn\bin\$Configuration\net8.0-windows\publish"
 
 Write-Host "Publishing Quantower plugin ($Configuration)..." -ForegroundColor Cyan
-& dotnet publish $projectPath -c $Configuration -o $publishDir --nologo --no-restore -p:DisableImplicitNuGetFallbackFolder=true -p:RestoreFallbackFolders= -p:EnableWindowsTargeting=true | Write-Output
+$publishOutput = & dotnet publish $projectPath -c $Configuration -o $publishDir --nologo --no-restore -p:DisableImplicitNuGetFallbackFolder=true -p:RestoreFallbackFolders= -p:EnableWindowsTargeting=true 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "dotnet publish failed with exit code $LASTEXITCODE"
+    if ($publishOutput) {
+        Write-Error "dotnet publish output:"
+        $publishOutput | ForEach-Object { Write-Error $_ }
+    }
+    exit $LASTEXITCODE
+}
+$publishOutput | Write-Verbose
 
 if (!(Test-Path $publishDir)) {
     throw "Publish directory not found: $publishDir"

@@ -13,7 +13,7 @@ _Last reviewed: 2025-09-22_
 - **Project Targets:** Build for `net8.0-windows`, prefer `x64`. Add post-build step to copy DLLs into Quantower settings.
 - **Deployment Paths:**
   - Strategies/indicators: `%UserProfile%\Documents\Quantower\Settings\Scripts\Strategies` (or `...\Scripts\Indicators`).
-  - UI/Plugin DLLs: `Quantower\Addons\<YourAddon>` or as dictated by the VS extension.
+  - UI/Plugin DLLs: `%UserProfile%\Documents\Quantower\Settings\Scripts\plugins\<PluginName>` (or the equivalent folder under a portable installation).
 - **Versioning:** Maintain per-version copies of Quantower assemblies; update project references when upgrading the platform.
 
 ## Lifecycle & Entry Points
@@ -37,7 +37,7 @@ _Last reviewed: 2025-09-22_
 
 ## Distribution
 - **Packaging:** No signing required. Ship compiled DLL in zip with deployment instructions.
-- **Installation:** Users copy DLL (and resources) into appropriate `Scripts` or `Addons` directory. One plugin per subfolder recommended.
+- **Installation:** Users copy DLL (and resources) into the appropriate `Settings\Scripts` subdirectory (Strategies, Indicators, or `plugins`). One plugin per subfolder recommended.
 - **Compatibility Testing:** Validate against both stable and beta builds; update references when platform upgrades.
 
 ## Caveats

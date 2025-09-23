@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -15,6 +16,8 @@ namespace Quantower.Bridge.Client
         private readonly TradingService.TradingServiceClient _client;
         private readonly StreamingService.StreamingServiceClient _streamingClient;
         private readonly LoggingService.LoggingServiceClient _loggingClient;
+        private static readonly ConcurrentDictionary<string, GrpcChannel> ChannelCache = new();
+
 
         private readonly string _source;
         private readonly string _component;
@@ -33,20 +36,25 @@ namespace Quantower.Bridge.Client
             _source = string.IsNullOrWhiteSpace(source) ? "qt" : source;
             _component = string.IsNullOrWhiteSpace(component) ? "qt_addon" : component;
 
-            var handler = new SocketsHttpHandler
+            var canonical = serverAddress;
+            var channel = ChannelCache.GetOrAdd(canonical, key =>
             {
-                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-                KeepAlivePingDelay = TimeSpan.FromSeconds(15),
-                KeepAlivePingTimeout = TimeSpan.FromSeconds(5),
-                EnableMultipleHttp2Connections = true
-            };
+                var handler = new SocketsHttpHandler
+                {
+                    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+                    KeepAlivePingDelay = TimeSpan.FromSeconds(15),
+                    KeepAlivePingTimeout = TimeSpan.FromSeconds(5),
+                    EnableMultipleHttp2Connections = true
+                };
 
-            _channel = GrpcChannel.ForAddress(serverAddress, new GrpcChannelOptions
-            {
-                HttpHandler = handler,
-                DisposeHttpClient = true
+                return GrpcChannel.ForAddress(key, new GrpcChannelOptions
+                {
+                    HttpHandler = handler,
+                    DisposeHttpClient = true
+                });
             });
 
+            _channel = channel;
             _client = new TradingService.TradingServiceClient(_channel);
             _streamingClient = new StreamingService.StreamingServiceClient(_channel);
             _loggingClient = new LoggingService.LoggingServiceClient(_channel);
@@ -91,7 +99,8 @@ namespace Quantower.Bridge.Client
                 {
                     return OperationResult.Failure("Invalid trade payload");
                 }
-                var response = await _client.SubmitTradeAsync(trade).ConfigureAwait(false);
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                var response = await _client.SubmitTradeAsync(trade, deadline: deadline).ConfigureAwait(false);
                 return OperationResult.Ok(JsonSerializer.Serialize(new { status = response.Status, message = response.Message }));
             }
             catch (Exception ex)
@@ -104,8 +113,10 @@ namespace Quantower.Bridge.Client
         {
             try
             {
-                var request = new HealthRequest { Source = source };
-                var response = await _client.HealthCheckAsync(request).ConfigureAwait(false);
+                var effectiveSource = string.IsNullOrWhiteSpace(source) ? _source : source;
+                var request = new HealthRequest { Source = effectiveSource };
+                var deadline = DateTime.UtcNow.AddSeconds(3);
+                var response = await _client.HealthCheckAsync(request, deadline: deadline).ConfigureAwait(false);
                 IsConnected = response.Status == "healthy";
 
                 var responseJson = JsonSerializer.Serialize(new
@@ -139,7 +150,8 @@ namespace Quantower.Bridge.Client
             try
             {
                 var update = JsonToProtoElasticUpdate(updateJson);
-                var response = await _client.SubmitElasticUpdateAsync(update).ConfigureAwait(false);
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                var response = await _client.SubmitElasticUpdateAsync(update, deadline: deadline).ConfigureAwait(false);
                 return response.Status == "success" ? OperationResult.Ok() : OperationResult.Failure(response.Message);
             }
             catch (Exception ex)
@@ -153,7 +165,8 @@ namespace Quantower.Bridge.Client
             try
             {
                 var update = JsonToProtoTrailingUpdate(updateJson);
-                var response = await _client.SubmitTrailingUpdateAsync(update).ConfigureAwait(false);
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                var response = await _client.SubmitTrailingUpdateAsync(update, deadline: deadline).ConfigureAwait(false);
                 return response.Status == "success" ? OperationResult.Ok() : OperationResult.Failure(response.Message);
             }
             catch (Exception ex)
@@ -167,7 +180,8 @@ namespace Quantower.Bridge.Client
             try
             {
                 var request = JsonToProtoHedgeClose(notificationJson);
-                var response = await _client.NotifyHedgeCloseAsync(request).ConfigureAwait(false);
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                var response = await _client.NotifyHedgeCloseAsync(request, deadline: deadline).ConfigureAwait(false);
                 return response.Status == "success" ? OperationResult.Ok() : OperationResult.Failure(response.Message);
             }
             catch (Exception ex)
@@ -192,7 +206,7 @@ namespace Quantower.Bridge.Client
 
         private async Task<GenericResponse> CloseHedgeInternalAsync(HedgeCloseNotification request)
         {
-            var call = _client.NTCloseHedgeAsync(request);
+            var call = _client.NTCloseHedgeAsync(request, deadline: DateTime.UtcNow.AddSeconds(10));
             return await call.ResponseAsync.ConfigureAwait(false);
         }
 
@@ -312,7 +326,7 @@ namespace Quantower.Bridge.Client
             _disposed = true;
 
             StopTradingStream();
-            _channel?.Dispose();
+            // Channel is shared via cache; do not dispose here to allow reuse
             GC.SuppressFinalize(this);
         }
 
@@ -411,7 +425,7 @@ namespace Quantower.Bridge.Client
 
         private ElasticHedgeUpdate JsonToProtoElasticUpdate(string json)
         {
-            var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
             double currentProfit = GetDoubleValue(root, "current_profit", "elastic_current_profit", "price");
@@ -431,7 +445,7 @@ namespace Quantower.Bridge.Client
 
         private TrailingStopUpdate JsonToProtoTrailingUpdate(string json)
         {
-            var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
             return new TrailingStopUpdate
@@ -448,7 +462,7 @@ namespace Quantower.Bridge.Client
 
         private HedgeCloseNotification JsonToProtoHedgeClose(string json)
         {
-            var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
             return new HedgeCloseNotification

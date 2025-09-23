@@ -71,9 +71,10 @@ namespace Quantower.Bridge.Client
                     ShutdownInternal();
                     _client = newClient;
                     _initialized = true;
+                    // Transfer ownership safely so finally won't dispose the assigned instance
+                    newClient = null;
                 }
 
-                newClient = null;
                 return true;
             }
             catch (Exception ex)
@@ -303,14 +304,34 @@ namespace Quantower.Bridge.Client
                 throw new ArgumentException("Server address cannot be empty", nameof(serverAddress));
             }
 
-            serverAddress = serverAddress.Trim();
-            if (!serverAddress.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-                !serverAddress.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            var input = serverAddress.Trim();
+
+            // Try absolute first
+            if (!Uri.TryCreate(input, UriKind.Absolute, out var uri))
             {
-                serverAddress = $"http://{serverAddress}";
+                // Prepend default scheme and retry
+                if (!Uri.TryCreate($"http://{input}", UriKind.Absolute, out uri))
+                {
+                    throw new ArgumentException($"Invalid server address: {serverAddress}", nameof(serverAddress));
+                }
             }
 
-            return serverAddress;
+            var scheme = uri.Scheme.ToLowerInvariant();
+            if (scheme != "http" && scheme != "https")
+            {
+                throw new ArgumentException($"Unsupported URI scheme '{uri.Scheme}'. Use http or https.", nameof(serverAddress));
+            }
+
+            var host = uri.Host.ToLowerInvariant();
+            int port = uri.IsDefaultPort ? -1 : uri.Port;
+
+            // Normalize default ports
+            if ((scheme == "http" && port == 80) || (scheme == "https" && port == 443))
+            {
+                port = -1;
+            }
+
+            return port > 0 ? $"{scheme}://{host}:{port}" : $"{scheme}://{host}";
         }
     }
 
