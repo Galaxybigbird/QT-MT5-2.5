@@ -424,15 +424,15 @@ namespace Quantower.MultiStrat
 
             Console.WriteLine($"[QT][{level}] {message}");
         }
-    }
 
-    public enum BridgeLogLevel
-    {
-        Debug,
-        Info,
-        Warn,
-        Error
-    }
+        public enum BridgeLogLevel
+        {
+            Debug,
+            Info,
+            Warn,
+            Error
+        }
 
-    public sealed record BridgeLogEntry(DateTime TimestampUtc, BridgeLogLevel Level, string Message, string? TradeId, string? BaseId, string? Details);
+        public sealed record BridgeLogEntry(DateTime TimestampUtc, BridgeLogLevel Level, string Message, string? TradeId, string? BaseId, string? Details);
+    }
 }

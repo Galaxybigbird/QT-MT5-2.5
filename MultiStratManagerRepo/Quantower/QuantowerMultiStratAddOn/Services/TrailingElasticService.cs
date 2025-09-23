@@ -4,7 +4,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Quantower.MultiStrat.Indicators;
+using Quantower.MultiStrat.Utilities;
 using TradingPlatform.BusinessLayer;
+using IndicatorQuote = Quantower.MultiStrat.Indicators.Quote;
 
 namespace Quantower.MultiStrat.Services
 {
@@ -38,7 +40,7 @@ namespace Quantower.MultiStrat.Services
         }
 
         private readonly ConcurrentDictionary<string, ElasticTracker> _trackers = new(StringComparer.OrdinalIgnoreCase);
-        private readonly ConcurrentDictionary<string, List<Quote>> _quoteHistory = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, List<IndicatorQuote>> _quoteHistory = new(StringComparer.OrdinalIgnoreCase);
 
         public bool EnableElasticHedging { get; set; } = true;
         public bool EnableTrailing { get; set; } = true;
@@ -111,7 +113,7 @@ namespace Quantower.MultiStrat.Services
             _trackers.TryRemove(baseId, out _);
         }
 
-        public void TrackQuote(Symbol symbol, Quote quote)
+        public void TrackQuote(Symbol symbol, IndicatorQuote quote)
         {
             if (symbol == null || quote == null)
             {
@@ -124,7 +126,7 @@ namespace Quantower.MultiStrat.Services
                 return;
             }
 
-            var history = _quoteHistory.GetOrAdd(key, _ => new List<Quote>());
+            var history = _quoteHistory.GetOrAdd(key, _ => new List<IndicatorQuote>());
             lock (history)
             {
                 history.Add(quote);
@@ -153,7 +155,7 @@ namespace Quantower.MultiStrat.Services
                 return;
             }
 
-            var quote = new Quote
+            var quote = new IndicatorQuote
             {
                 Date = trade.DateTime,
                 Open = trade.Price,
@@ -189,7 +191,7 @@ namespace Quantower.MultiStrat.Services
 
                 UpdateWaterMarks(tracker, currentPrice);
 
-                var profitDollars = GetPnLMoney(position.GrossPnL);
+                var profitDollars = PnLUtils.GetMoney(position.GrossPnL);
                 var triggerUnits = ConvertUnits(ElasticTriggerUnits, position, tracker, currentPrice, profitDollars);
 
                 if (!tracker.Triggered && triggerUnits >= ProfitUpdateThreshold)
@@ -286,7 +288,7 @@ namespace Quantower.MultiStrat.Services
                     currentPrice = tracker.LastSourcePrice <= 0 ? tracker.EntryPrice : tracker.LastSourcePrice;
                 }
 
-                var activationUnits = ConvertUnits(TrailingActivationUnits, position, tracker, currentPrice, GetPnLMoney(position.GrossPnL));
+                var activationUnits = ConvertUnits(TrailingActivationUnits, position, tracker, currentPrice, PnLUtils.GetMoney(position.GrossPnL));
                 if (activationUnits < TrailingActivationValue)
                 {
                     return null;
@@ -553,38 +555,6 @@ namespace Quantower.MultiStrat.Services
             }
 
             return position.OpenPrice;
-        }
-
-        private static double GetPnLMoney(PnLItem? item)
-        {
-            if (item == null)
-            {
-                return 0.0;
-            }
-
-            try
-            {
-                return item.Money;
-            }
-            catch
-            {
-                var moneyProp = item.GetType().GetProperty("Money");
-                if (moneyProp != null)
-                {
-                    var value = moneyProp.GetValue(item);
-                    if (value is double d)
-                    {
-                        return d;
-                    }
-
-                    if (value is decimal dec)
-                    {
-                        return (double)dec;
-                    }
-                }
-            }
-
-            return 0.0;
         }
 
         private static string DetermineTrailingType(double? atr, double? dema)

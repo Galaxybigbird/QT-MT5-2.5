@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Quantower.MultiStrat.Indicators;
@@ -19,13 +22,16 @@ namespace Quantower.MultiStrat
         private readonly ObservableCollection<AccountSubscription> _accounts = new();
         private readonly ReadOnlyObservableCollection<AccountSubscription> _accountsView;
         private readonly SettingsRepository _settingsRepository = new();
+        private readonly RiskConfiguration _riskSettings = new();
         private readonly HashSet<string> _savedAccountIds = new(StringComparer.OrdinalIgnoreCase);
         private readonly Services.TrailingElasticService _trailingService = new();
         private readonly Services.SltpRemovalService _sltpService = new();
         private readonly Dictionary<string, TrackingState> _trackingStates = new(StringComparer.OrdinalIgnoreCase);
         private readonly object _trackingLock = new();
         private readonly TimeSpan _trackingInterval = TimeSpan.FromSeconds(2);
+        private readonly object _riskLock = new();
         private bool _disposed;
+        private Timer? _riskTimer;
 
         public MultiStratManagerService()
         {
@@ -36,6 +42,7 @@ namespace Quantower.MultiStrat
             _bridgeService.PositionRemoved += HandlePositionRemoved;
             _accountsView = new ReadOnlyObservableCollection<AccountSubscription>(_accounts);
             LoadSettings();
+            StartRiskTimer();
         }
 
         public event Action<QuantowerBridgeService.BridgeLogEntry>? Log;
@@ -68,6 +75,154 @@ namespace Quantower.MultiStrat
             await _bridgeService.StopAsync().ConfigureAwait(false);
             StopAllTracking();
             OnPropertyChanged(nameof(IsConnected));
+            SaveSettings();
+        }
+
+        public RiskSnapshot GetRiskSnapshot()
+        {
+            ThrowIfDisposed();
+
+            lock (_riskLock)
+            {
+                var accounts = new List<AccountRiskSnapshot>(_riskSettings.Accounts.Count);
+                foreach (var kvp in _riskSettings.Accounts)
+                {
+                    accounts.Add(new AccountRiskSnapshot(
+                        kvp.Key,
+                        kvp.Value.BalanceBaseline,
+                        kvp.Value.LimitTriggered,
+                        kvp.Value.LastKnownPnL,
+                        kvp.Value.LastTriggerUtc));
+                }
+
+                return new RiskSnapshot(
+                    _riskSettings.DailyTakeProfit,
+                    _riskSettings.DailyLossLimit,
+                    _riskSettings.AutoFlatten,
+                    _riskSettings.DisableOnLimit,
+                    _riskSettings.LastResetDateUtc,
+                    accounts.AsReadOnly());
+            }
+        }
+
+        public void UpdateRiskSettings(RiskSettingsUpdate update)
+        {
+            ThrowIfDisposed();
+
+            lock (_riskLock)
+            {
+                _riskSettings.DailyTakeProfit = Math.Max(0, update.DailyTakeProfit);
+                _riskSettings.DailyLossLimit = Math.Max(0, update.DailyLossLimit);
+                _riskSettings.AutoFlatten = update.AutoFlatten;
+                _riskSettings.DisableOnLimit = update.DisableOnLimit;
+                SaveSettings();
+            }
+        }
+
+        public void ResetDailyRisk(string? accountId)
+        {
+            ThrowIfDisposed();
+
+            lock (_riskLock)
+            {
+                if (string.IsNullOrWhiteSpace(accountId))
+                {
+                    foreach (var kvp in _riskSettings.Accounts)
+                    {
+                        var account = FindAccountById(kvp.Key);
+                        if (account != null)
+                        {
+                            kvp.Value.BalanceBaseline = account.Balance;
+                        }
+
+                        kvp.Value.LimitTriggered = false;
+                        kvp.Value.LastKnownPnL = 0;
+                        kvp.Value.LastTriggerUtc = DateTime.MinValue;
+                    }
+
+                    _riskSettings.LastResetDateUtc = DateTime.UtcNow.Date;
+                }
+                else
+                {
+                    var account = FindAccountById(accountId);
+                    var state = GetOrCreateRiskState(accountId, account);
+                    state.BalanceBaseline = account?.Balance ?? state.BalanceBaseline;
+                    state.LimitTriggered = false;
+                    state.LastKnownPnL = 0;
+                    state.LastTriggerUtc = DateTime.MinValue;
+                }
+
+                SaveSettings();
+            }
+        }
+
+        public Task<bool> FlattenAccountAsync(string accountId, bool disableAfter, string reason = "manual")
+        {
+            ThrowIfDisposed();
+
+            var subscription = _accounts.FirstOrDefault(s => string.Equals(s.AccountId, accountId, StringComparison.OrdinalIgnoreCase));
+            if (subscription == null)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Flatten request ignored – unknown account {accountId}");
+                return Task.FromResult(false);
+            }
+
+            return FlattenAccountInternalAsync(subscription, reason, disableAfter);
+        }
+
+        public Task<bool> FlattenAllAsync(bool disableAfter, string reason = "manual")
+        {
+            ThrowIfDisposed();
+
+            var tasks = new List<Task<bool>>();
+            foreach (var subscription in _accounts)
+            {
+                if (subscription.Account != null)
+                {
+                    tasks.Add(FlattenAccountInternalAsync(subscription, reason, disableAfter));
+                }
+            }
+
+            return Task.WhenAll(tasks).ContinueWith(t => t.Result.All(result => result), TaskScheduler.Default);
+        }
+
+        public TrailingSettingsSnapshot GetTrailingSettings()
+        {
+            ThrowIfDisposed();
+
+            return new TrailingSettingsSnapshot(
+                _trailingService.EnableElasticHedging,
+                _trailingService.ElasticTriggerUnits,
+                _trailingService.ProfitUpdateThreshold,
+                _trailingService.ElasticIncrementUnits,
+                _trailingService.ElasticIncrementValue,
+                _trailingService.EnableTrailing,
+                _trailingService.TrailingActivationUnits,
+                _trailingService.TrailingActivationValue,
+                _trailingService.TrailingStopUnits,
+                _trailingService.TrailingStopValue,
+                _trailingService.DemaAtrMultiplier,
+                _trailingService.AtrPeriod,
+                _trailingService.DemaPeriod);
+        }
+
+        public void UpdateTrailingSettings(TrailingSettingsUpdate update)
+        {
+            ThrowIfDisposed();
+
+            _trailingService.EnableElasticHedging = update.EnableElastic;
+            _trailingService.ElasticTriggerUnits = update.ElasticTriggerUnits;
+            _trailingService.ProfitUpdateThreshold = update.ProfitUpdateThreshold;
+            _trailingService.ElasticIncrementUnits = update.ElasticIncrementUnits;
+            _trailingService.ElasticIncrementValue = update.ElasticIncrementValue;
+            _trailingService.EnableTrailing = update.EnableTrailing;
+            _trailingService.TrailingActivationUnits = update.TrailingActivationUnits;
+            _trailingService.TrailingActivationValue = update.TrailingActivationValue;
+            _trailingService.TrailingStopUnits = update.TrailingStopUnits;
+            _trailingService.TrailingStopValue = update.TrailingStopValue;
+            _trailingService.DemaAtrMultiplier = update.DemaAtrMultiplier;
+            _trailingService.AtrPeriod = update.AtrPeriod;
+            _trailingService.DemaPeriod = update.DemaPeriod;
             SaveSettings();
         }
 
@@ -169,6 +324,8 @@ namespace Quantower.MultiStrat
                 _bridgeService.PositionRemoved -= HandlePositionRemoved;
                 _bridgeService.Dispose();
                 _sltpService.Dispose();
+                _riskTimer?.Dispose();
+                _riskTimer = null;
             }
             catch
             {
@@ -202,10 +359,181 @@ namespace Quantower.MultiStrat
                         }
                     }
                 }
+
+                if (data.TryGetValue("risk", out var riskValue))
+                {
+                    ReadRiskConfiguration(riskValue);
+                }
+
+                if (data.TryGetValue("trailing", out var trailingValue))
+                {
+                    ReadTrailingConfiguration(trailingValue);
+                }
             }
             catch (Exception ex)
             {
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to load manager settings: {ex.Message}");
+            }
+        }
+
+        private void ReadRiskConfiguration(object? raw)
+        {
+            try
+            {
+                if (raw is JsonElement json)
+                {
+                    if (json.TryGetProperty("daily_take_profit", out var dtp) && dtp.TryGetDouble(out var takeProfit))
+                    {
+                        _riskSettings.DailyTakeProfit = Math.Max(0, takeProfit);
+                    }
+
+                    if (json.TryGetProperty("daily_loss_limit", out var dll) && dll.TryGetDouble(out var lossLimit))
+                    {
+                        _riskSettings.DailyLossLimit = Math.Max(0, lossLimit);
+                    }
+
+                    if (json.TryGetProperty("auto_flatten", out var autoFlatten) && autoFlatten.ValueKind != JsonValueKind.Undefined)
+                    {
+                        _riskSettings.AutoFlatten = autoFlatten.GetBoolean();
+                    }
+
+                    if (json.TryGetProperty("disable_on_limit", out var disable) && disable.ValueKind != JsonValueKind.Undefined)
+                    {
+                        _riskSettings.DisableOnLimit = disable.GetBoolean();
+                    }
+
+                    if (json.TryGetProperty("last_reset_date", out var last) && last.ValueKind == JsonValueKind.String && DateTime.TryParse(last.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var reset))
+                    {
+                        _riskSettings.LastResetDateUtc = reset.ToUniversalTime();
+                    }
+
+                    if (json.TryGetProperty("baselines", out var baselines) && baselines.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var property in baselines.EnumerateObject())
+                        {
+                            if (property.Value.TryGetDouble(out var baseline))
+                            {
+                                var state = _riskSettings.Accounts.GetOrAdd(property.Name, _ => new AccountRiskState());
+                                state.BalanceBaseline = baseline;
+                            }
+                        }
+                    }
+
+                    if (json.TryGetProperty("limits", out var limits) && limits.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var property in limits.EnumerateObject())
+                        {
+                            var state = _riskSettings.Accounts.GetOrAdd(property.Name, _ => new AccountRiskState());
+                            state.LimitTriggered = property.Value.ValueKind == JsonValueKind.True;
+                        }
+                    }
+
+                    if (json.TryGetProperty("last_known_pnl", out var pnl) && pnl.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var property in pnl.EnumerateObject())
+                        {
+                            if (property.Value.TryGetDouble(out var lastPnl))
+                            {
+                                var state = _riskSettings.Accounts.GetOrAdd(property.Name, _ => new AccountRiskState());
+                                state.LastKnownPnL = lastPnl;
+                            }
+                        }
+                    }
+
+                    if (json.TryGetProperty("last_trigger", out var trigger) && trigger.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var property in trigger.EnumerateObject())
+                        {
+                            if (property.Value.ValueKind == JsonValueKind.String && DateTime.TryParse(property.Value.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var triggerTime))
+                            {
+                                var state = _riskSettings.Accounts.GetOrAdd(property.Name, _ => new AccountRiskState());
+                                state.LastTriggerUtc = triggerTime.ToUniversalTime();
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to parse risk settings: {ex.Message}");
+            }
+        }
+
+        private void ReadTrailingConfiguration(object? raw)
+        {
+            try
+            {
+                if (raw is JsonElement json)
+                {
+                    if (json.TryGetProperty("enable_elastic", out var enableElastic) && enableElastic.ValueKind != JsonValueKind.Undefined)
+                    {
+                        _trailingService.EnableElasticHedging = enableElastic.GetBoolean();
+                    }
+
+                    if (json.TryGetProperty("elastic_trigger_units", out var triggerUnits) && triggerUnits.ValueKind == JsonValueKind.String && Enum.TryParse(triggerUnits.GetString(), true, out Services.TrailingElasticService.ProfitUnitType triggerType))
+                    {
+                        _trailingService.ElasticTriggerUnits = triggerType;
+                    }
+
+                    if (json.TryGetProperty("profit_update_threshold", out var threshold) && threshold.TryGetDouble(out var profThreshold))
+                    {
+                        _trailingService.ProfitUpdateThreshold = profThreshold;
+                    }
+
+                    if (json.TryGetProperty("elastic_increment_units", out var incUnits) && incUnits.ValueKind == JsonValueKind.String && Enum.TryParse(incUnits.GetString(), true, out Services.TrailingElasticService.ProfitUnitType incType))
+                    {
+                        _trailingService.ElasticIncrementUnits = incType;
+                    }
+
+                    if (json.TryGetProperty("elastic_increment_value", out var incValue) && incValue.TryGetDouble(out var incVal))
+                    {
+                        _trailingService.ElasticIncrementValue = incVal;
+                    }
+
+                    if (json.TryGetProperty("enable_trailing", out var enableTrailing) && enableTrailing.ValueKind != JsonValueKind.Undefined)
+                    {
+                        _trailingService.EnableTrailing = enableTrailing.GetBoolean();
+                    }
+
+                    if (json.TryGetProperty("trailing_activation_units", out var activationUnits) && activationUnits.ValueKind == JsonValueKind.String && Enum.TryParse(activationUnits.GetString(), true, out Services.TrailingElasticService.ProfitUnitType activationType))
+                    {
+                        _trailingService.TrailingActivationUnits = activationType;
+                    }
+
+                    if (json.TryGetProperty("trailing_activation_value", out var activationValue) && activationValue.TryGetDouble(out var actVal))
+                    {
+                        _trailingService.TrailingActivationValue = actVal;
+                    }
+
+                    if (json.TryGetProperty("trailing_stop_units", out var stopUnits) && stopUnits.ValueKind == JsonValueKind.String && Enum.TryParse(stopUnits.GetString(), true, out Services.TrailingElasticService.ProfitUnitType stopType))
+                    {
+                        _trailingService.TrailingStopUnits = stopType;
+                    }
+
+                    if (json.TryGetProperty("trailing_stop_value", out var stopValue) && stopValue.TryGetDouble(out var stVal))
+                    {
+                        _trailingService.TrailingStopValue = stVal;
+                    }
+
+                    if (json.TryGetProperty("dema_atr_multiplier", out var multiplier) && multiplier.TryGetDouble(out var multVal))
+                    {
+                        _trailingService.DemaAtrMultiplier = multVal;
+                    }
+
+                    if (json.TryGetProperty("atr_period", out var atr) && atr.TryGetInt32(out var atrPeriod))
+                    {
+                        _trailingService.AtrPeriod = Math.Max(1, atrPeriod);
+                    }
+
+                    if (json.TryGetProperty("dema_period", out var dema) && dema.TryGetInt32(out var demaPeriod))
+                    {
+                        _trailingService.DemaPeriod = Math.Max(1, demaPeriod);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to parse trailing settings: {ex.Message}");
             }
         }
 
@@ -233,6 +561,57 @@ namespace Quantower.MultiStrat
                     ["enabled_accounts"] = enabled.ToArray()
                 };
 
+                lock (_riskLock)
+                {
+                    var baselines = new Dictionary<string, object?>();
+                    var triggers = new Dictionary<string, object?>();
+                    var lastPnl = new Dictionary<string, object?>();
+
+                    foreach (var kvp in _riskSettings.Accounts)
+                    {
+                        baselines[kvp.Key] = kvp.Value.BalanceBaseline;
+                        if (kvp.Value.LimitTriggered)
+                        {
+                            triggers[kvp.Key] = true;
+                        }
+
+                        if (Math.Abs(kvp.Value.LastKnownPnL) > double.Epsilon)
+                        {
+                            lastPnl[kvp.Key] = kvp.Value.LastKnownPnL;
+                        }
+                    }
+
+                    payload["risk"] = new Dictionary<string, object?>
+                    {
+                        ["daily_take_profit"] = _riskSettings.DailyTakeProfit,
+                        ["daily_loss_limit"] = _riskSettings.DailyLossLimit,
+                        ["auto_flatten"] = _riskSettings.AutoFlatten,
+                        ["disable_on_limit"] = _riskSettings.DisableOnLimit,
+                        ["last_reset_date"] = _riskSettings.LastResetDateUtc.ToString("o", CultureInfo.InvariantCulture),
+                        ["baselines"] = baselines,
+                        ["limits"] = triggers,
+                        ["last_known_pnl"] = lastPnl,
+                        ["last_trigger"] = _riskSettings.Accounts.ToDictionary(k => k.Key, v => (object)v.Value.LastTriggerUtc.ToString("o", CultureInfo.InvariantCulture))
+                    };
+                }
+
+                payload["trailing"] = new Dictionary<string, object?>
+                {
+                    ["enable_elastic"] = _trailingService.EnableElasticHedging,
+                    ["elastic_trigger_units"] = _trailingService.ElasticTriggerUnits.ToString(),
+                    ["profit_update_threshold"] = _trailingService.ProfitUpdateThreshold,
+                    ["elastic_increment_units"] = _trailingService.ElasticIncrementUnits.ToString(),
+                    ["elastic_increment_value"] = _trailingService.ElasticIncrementValue,
+                    ["enable_trailing"] = _trailingService.EnableTrailing,
+                    ["trailing_activation_units"] = _trailingService.TrailingActivationUnits.ToString(),
+                    ["trailing_activation_value"] = _trailingService.TrailingActivationValue,
+                    ["trailing_stop_units"] = _trailingService.TrailingStopUnits.ToString(),
+                    ["trailing_stop_value"] = _trailingService.TrailingStopValue,
+                    ["dema_atr_multiplier"] = _trailingService.DemaAtrMultiplier,
+                    ["atr_period"] = _trailingService.AtrPeriod,
+                    ["dema_period"] = _trailingService.DemaPeriod
+                };
+
                 _settingsRepository.Save(payload);
             }
             catch (Exception ex)
@@ -250,6 +629,75 @@ namespace Quantower.MultiStrat
             public string? SymbolName { get; set; }
             public Timer Timer { get; set; } = null!;
         }
+
+        private sealed class RiskConfiguration
+        {
+            public double DailyTakeProfit { get; set; }
+            public double DailyLossLimit { get; set; }
+            public bool AutoFlatten { get; set; }
+            public bool DisableOnLimit { get; set; }
+            public DateTime LastResetDateUtc { get; set; } = DateTime.UtcNow.Date;
+            public ConcurrentDictionary<string, AccountRiskState> Accounts { get; } = new(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private sealed class AccountRiskState
+        {
+            public double BalanceBaseline { get; set; }
+            public bool LimitTriggered { get; set; }
+            public DateTime LastTriggerUtc { get; set; }
+            public double LastKnownPnL { get; set; }
+        }
+
+        public readonly record struct RiskSnapshot(
+            double DailyTakeProfit,
+            double DailyLossLimit,
+            bool AutoFlatten,
+            bool DisableOnLimit,
+            DateTime LastResetDateUtc,
+            IReadOnlyList<AccountRiskSnapshot> Accounts);
+
+        public readonly record struct AccountRiskSnapshot(
+            string AccountId,
+            double BalanceBaseline,
+            bool LimitTriggered,
+            double LastKnownPnL,
+            DateTime LastTriggerUtc);
+
+        public readonly record struct RiskSettingsUpdate(
+            double DailyTakeProfit,
+            double DailyLossLimit,
+            bool AutoFlatten,
+            bool DisableOnLimit);
+
+        public readonly record struct TrailingSettingsSnapshot(
+            bool EnableElastic,
+            Services.TrailingElasticService.ProfitUnitType ElasticTriggerUnits,
+            double ProfitUpdateThreshold,
+            Services.TrailingElasticService.ProfitUnitType ElasticIncrementUnits,
+            double ElasticIncrementValue,
+            bool EnableTrailing,
+            Services.TrailingElasticService.ProfitUnitType TrailingActivationUnits,
+            double TrailingActivationValue,
+            Services.TrailingElasticService.ProfitUnitType TrailingStopUnits,
+            double TrailingStopValue,
+            double DemaAtrMultiplier,
+            int AtrPeriod,
+            int DemaPeriod);
+
+        public readonly record struct TrailingSettingsUpdate(
+            bool EnableElastic,
+            Services.TrailingElasticService.ProfitUnitType ElasticTriggerUnits,
+            double ProfitUpdateThreshold,
+            Services.TrailingElasticService.ProfitUnitType ElasticIncrementUnits,
+            double ElasticIncrementValue,
+            bool EnableTrailing,
+            Services.TrailingElasticService.ProfitUnitType TrailingActivationUnits,
+            double TrailingActivationValue,
+            Services.TrailingElasticService.ProfitUnitType TrailingStopUnits,
+            double TrailingStopValue,
+            double DemaAtrMultiplier,
+            int AtrPeriod,
+            int DemaPeriod);
 
         private void HandleTrade(Trade trade)
         {
@@ -449,6 +897,221 @@ namespace Quantower.MultiStrat
             }
         }
 
+        private void StartRiskTimer()
+        {
+            _riskTimer ??= new Timer(OnRiskTimer, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        }
+
+        private void OnRiskTimer(object? state)
+        {
+            if (_disposed || !IsConnected)
+            {
+                return;
+            }
+
+            try
+            {
+                EvaluateDailyReset();
+
+                foreach (var subscription in _accounts)
+                {
+                    if (subscription.IsEnabled)
+                    {
+                        EvaluateRisk(subscription);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Risk timer error: {ex.Message}");
+            }
+        }
+
+        private void EvaluateDailyReset()
+        {
+            lock (_riskLock)
+            {
+                var today = DateTime.UtcNow.Date;
+                if (today <= _riskSettings.LastResetDateUtc.Date)
+                {
+                    return;
+                }
+
+                foreach (var kvp in _riskSettings.Accounts)
+                {
+                    var account = FindAccountById(kvp.Key);
+                    if (account != null)
+                    {
+                        kvp.Value.BalanceBaseline = account.Balance;
+                    }
+
+                    kvp.Value.LimitTriggered = false;
+                    kvp.Value.LastKnownPnL = 0;
+                    kvp.Value.LastTriggerUtc = DateTime.MinValue;
+                }
+
+                _riskSettings.LastResetDateUtc = today;
+                SaveSettings();
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, "Daily risk baselines reset");
+            }
+        }
+
+        private void EvaluateRisk(AccountSubscription subscription)
+        {
+            var account = subscription.Account;
+            if (account == null)
+            {
+                return;
+            }
+
+            AccountRiskState state;
+            double pnl;
+
+            lock (_riskLock)
+            {
+                state = GetOrCreateRiskState(subscription.AccountId, account);
+                pnl = CalculateAccountPnl(account, subscription.AccountId, state);
+            }
+
+            if (_riskSettings.DailyTakeProfit <= 0 && _riskSettings.DailyLossLimit <= 0)
+            {
+                return;
+            }
+
+            bool limitHit = false;
+            string reason = string.Empty;
+
+            if (_riskSettings.DailyTakeProfit > 0 && pnl >= _riskSettings.DailyTakeProfit)
+            {
+                limitHit = true;
+                reason = "take_profit";
+            }
+            else if (_riskSettings.DailyLossLimit > 0 && pnl <= -Math.Abs(_riskSettings.DailyLossLimit))
+            {
+                limitHit = true;
+                reason = "loss_limit";
+            }
+
+            if (!limitHit)
+            {
+                return;
+            }
+
+            lock (_riskLock)
+            {
+                if (state.LimitTriggered)
+                {
+                    return;
+                }
+
+                state.LimitTriggered = true;
+                state.LastTriggerUtc = DateTime.UtcNow;
+            }
+
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Risk limit {reason} triggered for account {subscription.DisplayName}: pnl={pnl:F2}");
+
+            if (_riskSettings.AutoFlatten)
+            {
+                _ = FlattenAccountInternalAsync(subscription, reason, _riskSettings.DisableOnLimit);
+            }
+            else if (_riskSettings.DisableOnLimit)
+            {
+                subscription.IsEnabled = false;
+                StopTrackingByAccount(subscription.AccountId);
+            }
+
+            SaveSettings();
+        }
+
+        private double CalculateAccountPnl(Account account, string accountId, AccountRiskState state)
+        {
+            var balance = account.Balance;
+            if (Math.Abs(state.BalanceBaseline) < double.Epsilon)
+            {
+                state.BalanceBaseline = balance;
+            }
+
+            var balanceDelta = balance - state.BalanceBaseline;
+            double unrealized = 0.0;
+
+            foreach (var position in EnumeratePositions(accountId))
+            {
+                var pnlItem = position.NetPnL ?? position.GrossPnL;
+                unrealized += PnLUtils.GetMoney(pnlItem);
+            }
+
+            var total = balanceDelta + unrealized;
+            state.LastKnownPnL = total;
+            return total;
+        }
+
+        private AccountRiskState GetOrCreateRiskState(string accountId, Account? account = null)
+        {
+            var key = string.IsNullOrWhiteSpace(accountId) ? string.Empty : accountId;
+            var state = _riskSettings.Accounts.GetOrAdd(key, _ => new AccountRiskState());
+
+            if (Math.Abs(state.BalanceBaseline) < double.Epsilon && account != null)
+            {
+                state.BalanceBaseline = account.Balance;
+            }
+
+            return state;
+        }
+
+        private static IEnumerable<Position> EnumeratePositions(string accountId)
+        {
+            var core = Core.Instance;
+            if (core?.Positions == null)
+            {
+                yield break;
+            }
+
+            foreach (var position in core.Positions)
+            {
+                if (string.Equals(GetAccountId(position.Account), accountId, StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return position;
+                }
+            }
+        }
+
+        private Task<bool> FlattenAccountInternalAsync(AccountSubscription subscription, string reason, bool disableAfter)
+        {
+            return Task.Run(() =>
+            {
+                var accountId = subscription.AccountId;
+                var positions = EnumeratePositions(accountId).ToList();
+                var success = true;
+
+                if (positions.Count == 0)
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"No open positions to flatten for account {subscription.DisplayName}");
+                }
+
+                foreach (var position in positions)
+                {
+                    try
+                    {
+                        position.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        success = false;
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to close position {position.Symbol?.Name}: {ex.Message}");
+                    }
+                }
+
+                if (disableAfter)
+                {
+                    subscription.IsEnabled = false;
+                    StopTrackingByAccount(subscription.AccountId);
+                }
+
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Flatten operation completed for account {subscription.DisplayName} (reason={reason}, success={success})");
+                return success;
+            });
+        }
+
         private void OnTrackingTimer(object? state)
         {
             if (state is TrackingState trackingState)
@@ -538,6 +1201,19 @@ namespace Quantower.MultiStrat
             }
         }
 
+        private Account? FindAccountById(string accountId)
+        {
+            foreach (var subscription in _accounts)
+            {
+                if (string.Equals(subscription.AccountId, accountId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return subscription.Account;
+                }
+            }
+
+            return null;
+        }
+
         private bool IsAccountEnabled(Position position)
         {
             var accountId = GetAccountId(position.Account);
@@ -565,6 +1241,52 @@ namespace Quantower.MultiStrat
         private static string? GetAccountId(Account? account)
         {
             return account?.Id ?? account?.Name;
+        }
+
+        private void AttachSubscription(AccountSubscription subscription)
+        {
+            subscription.PropertyChanged -= OnAccountSubscriptionChanged;
+            subscription.PropertyChanged += OnAccountSubscriptionChanged;
+
+            if (subscription.Account != null)
+            {
+                lock (_riskLock)
+                {
+                    GetOrCreateRiskState(subscription.AccountId, subscription.Account);
+                }
+            }
+        }
+
+        private void DetachSubscription(AccountSubscription subscription)
+        {
+            subscription.PropertyChanged -= OnAccountSubscriptionChanged;
+        }
+
+        private void OnAccountSubscriptionChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not AccountSubscription subscription || e.PropertyName != nameof(AccountSubscription.IsEnabled))
+            {
+                return;
+            }
+
+            if (subscription.IsEnabled)
+            {
+                if (subscription.Account != null)
+                {
+                    lock (_riskLock)
+                    {
+                        GetOrCreateRiskState(subscription.AccountId, subscription.Account);
+                    }
+                }
+
+                RefreshAccountPositions(subscription.AccountId);
+            }
+            else
+            {
+                StopTrackingByAccount(subscription.AccountId);
+            }
+
+            SaveSettings();
         }
 
         private string GetBaseId(Position position)

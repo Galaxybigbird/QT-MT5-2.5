@@ -7,6 +7,7 @@
     <DisableImplicitNuGetFallbackFolder>true</DisableImplicitNuGetFallbackFolder>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <RestoreFallbackFolders></RestoreFallbackFolders>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -29,6 +30,7 @@
     <Compile Include="MultiStratPlugin.cs" />
     <Compile Include="QuantowerBridgeService.cs" />
     <Compile Include="Utilities\SimpleJson.cs" />
+    <Compile Include="Utilities\PnLUtils.cs" />
     <Compile Include="Indicators\IndicatorCalculator.cs" />
     <Compile Include="Persistence\SettingsRepository.cs" />
     <Compile Include="Services\TrailingElasticService.cs" />

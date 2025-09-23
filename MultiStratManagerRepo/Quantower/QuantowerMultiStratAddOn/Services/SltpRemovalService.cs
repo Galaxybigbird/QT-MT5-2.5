@@ -36,7 +36,7 @@ namespace Quantower.MultiStrat.Services
                 return;
             }
 
-            var key = trade.TradeId ?? trade.OrderId ?? Guid.NewGuid().ToString("N");
+            var key = trade.Id ?? trade.OrderId ?? Guid.NewGuid().ToString("N");
             var cts = new CancellationTokenSource();
 
             var previous = _pendingRemovals.AddOrUpdate(key, cts, (_, existing) =>
@@ -182,7 +182,7 @@ namespace Quantower.MultiStrat.Services
                 try
                 {
                     var result = order.Cancel("qt_sltp_cleanup");
-                    if (!(result?.IsSuccessful ?? true))
+                    if (result != null && result.Status != TradingOperationResultStatus.Success)
                     {
                         Console.Error.WriteLine($"[QT][SLTP] Cancel rejected for order {order.Id}: {result?.Message}");
                     }
@@ -291,7 +291,7 @@ namespace Quantower.MultiStrat.Services
 
         private static bool IsProtectiveOrder(Order order, Position? position)
         {
-            if (order.Status == OrderStatus.Filled || order.Status == OrderStatus.Canceled || order.Status == OrderStatus.Rejected)
+            if (order.Status == OrderStatus.Filled || order.Status == OrderStatus.Cancelled || order.Status == OrderStatus.Refused)
             {
                 return false;
             }
