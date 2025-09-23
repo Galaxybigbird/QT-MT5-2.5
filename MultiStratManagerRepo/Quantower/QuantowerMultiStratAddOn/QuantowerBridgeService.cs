@@ -75,7 +75,7 @@ namespace Quantower.MultiStrat
 
         public void Stop()
         {
-            Task.Run(() => StopAsync()).GetAwaiter().GetResult();
+            StopAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         public void Dispose()

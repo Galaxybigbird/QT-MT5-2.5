@@ -12,24 +12,15 @@ namespace Quantower.MultiStrat.Utilities
                 return 0.0;
             }
 
-            if (double.IsFinite(item.Value))
-            {
-                return item.Value;
-            }
+            var valueObject = (object)item.Value;
 
-            var valueProp = item.GetType().GetProperty("Value");
-            if (valueProp != null)
+            return valueObject switch
             {
-                var value = valueProp.GetValue(item);
-                return value switch
-                {
-                    double d => d,
-                    decimal dec => (double)dec,
-                    _ => 0.0
-                };
-            }
-
-            return 0.0;
+                double d when double.IsFinite(d) => d,
+                double _ => 0.0,
+                decimal dec => (double)dec,
+                _ => 0.0
+            };
         }
     }
 }

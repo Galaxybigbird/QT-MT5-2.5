@@ -1165,12 +1165,27 @@ namespace MT5GrpcClient
         /// </summary>
         /// <returns>0 on success, negative error code on failure</returns>
         
+        private static readonly TimeSpan StreamingShutdownTimeout = TimeSpan.FromSeconds(5);
+
+        private static void ObserveStreamingTask(Task task)
+        {
+            _ = task.ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    System.Diagnostics.Trace.TraceWarning($"MT5 streaming task faulted: {t.Exception}");
+                }
+
+                t.Dispose();
+            }, TaskScheduler.Default);
+        }
+
         public static int GrpcCleanup()
         {
             try
             {
                 _isStreamingActive = false;
-                
+
                 if (_cancellationTokenSource != null)
                 {
                     _cancellationTokenSource.Cancel();
@@ -1180,9 +1195,29 @@ namespace MT5GrpcClient
 
                 if (_streamingTask != null)
                 {
-                    _streamingTask.Wait(5000); // Wait up to 5 seconds
-                    _streamingTask.Dispose();
+                    var task = _streamingTask;
                     _streamingTask = null;
+
+                    try
+                    {
+                        var completion = Task.WhenAny(task, Task.Delay(StreamingShutdownTimeout));
+                        completion.ConfigureAwait(false).GetAwaiter().GetResult();
+
+                        if (task.IsCompleted)
+                        {
+                            task.ConfigureAwait(false).GetAwaiter().GetResult();
+                            task.Dispose();
+                        }
+                        else
+                        {
+                            ObserveStreamingTask(task);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Trace.TraceWarning($"MT5 streaming shutdown encountered an error: {ex}");
+                        ObserveStreamingTask(task);
+                    }
                 }
 
                 if (_channel != null)

@@ -38,7 +38,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="TradingPlatform.BusinessLayer">
+    <Reference Include="TradingPlatform.BusinessLayer" Condition="Exists('$(QuantowerSdkDir)TradingPlatform.BusinessLayer.dll')">
       <HintPath>$(QuantowerSdkDir)TradingPlatform.BusinessLayer.dll</HintPath>
       <Private>false</Private>
     </Reference>
@@ -46,11 +46,11 @@
       <HintPath>$(QuantowerSdkDir)TradingPlatform.Common.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="TradingPlatform.PresentationLayer">
+    <Reference Include="TradingPlatform.PresentationLayer" Condition="Exists('$(QuantowerSdkDir)TradingPlatform.PresentationLayer.dll')">
       <HintPath>$(QuantowerSdkDir)TradingPlatform.PresentationLayer.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="TradingPlatform.PresentationLayer.Plugins">
+    <Reference Include="TradingPlatform.PresentationLayer.Plugins" Condition="Exists('$(QuantowerSdkDir)TradingPlatform.PresentationLayer.Plugins.dll')">
       <HintPath>$(QuantowerSdkDir)TradingPlatform.PresentationLayer.Plugins.dll</HintPath>
       <Private>false</Private>
     </Reference>

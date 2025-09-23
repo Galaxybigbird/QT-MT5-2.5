@@ -23,6 +23,8 @@ namespace Quantower.Bridge.Client
         private CancellationTokenSource? _streamCancellation;
         private Task? _streamTask;
 
+        private bool _disposed;
+
         public bool IsConnected { get; private set; }
         public string LastError { get; private set; } = string.Empty;
 
@@ -302,8 +304,16 @@ namespace Quantower.Bridge.Client
 
         public void Dispose()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+
             StopTradingStream();
-            _channel.Dispose();
+            _channel?.Dispose();
+            GC.SuppressFinalize(this);
         }
 
         #region JSON ↔ Proto helpers

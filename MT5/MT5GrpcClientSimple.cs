@@ -20,12 +20,13 @@ namespace MT5GrpcClient
         private static StreamingService.StreamingServiceClient _streamingClient;
         private static ConcurrentQueue<string> _tradeQueue = new ConcurrentQueue<string>();
         private static CancellationTokenSource _cancellationTokenSource;
+        private static readonly object _ctsSync = new object();
         private static Task _streamingTask;
-        private static bool _isInitialized;
-        private static bool _isStreamingActive;
+        private static volatile bool _isInitialized;
+        private static volatile bool _isStreamingActive;
         private static string _serverAddress = "";
         private static DateTime _lastHealthCheck = DateTime.MinValue;
-        private static bool _isConnected;
+        private static volatile bool _isConnected;
 
         // Error codes for MT5
         private const int ERROR_SUCCESS = 0;
@@ -37,6 +38,39 @@ namespace MT5GrpcClient
         private const int ERROR_TIMEOUT = -6;
         private const int ERROR_SERIALIZATION = -7;
         private const int ERROR_CLEANUP_FAILED = -8;
+
+        private static bool TryGetCancellationToken(out CancellationToken token)
+        {
+            lock (_ctsSync)
+            {
+                if (_cancellationTokenSource == null)
+                {
+                    token = CancellationToken.None;
+                    return false;
+                }
+
+                token = _cancellationTokenSource.Token;
+                return true;
+            }
+        }
+
+        private static void SetCancellationTokenSource(CancellationTokenSource source)
+        {
+            lock (_ctsSync)
+            {
+                _cancellationTokenSource = source;
+            }
+        }
+
+        private static CancellationTokenSource ClearCancellationTokenSource()
+        {
+            lock (_ctsSync)
+            {
+                var existing = _cancellationTokenSource;
+                _cancellationTokenSource = null;
+                return existing;
+            }
+        }
 
         /// <summary>
         /// Initialize gRPC client connection to Bridge Server
@@ -71,7 +105,7 @@ namespace MT5GrpcClient
                 _client = new TradingService.TradingServiceClient(_channel);
                 _streamingClient = new StreamingService.StreamingServiceClient(_channel);
                 
-                _cancellationTokenSource = new CancellationTokenSource();
+                SetCancellationTokenSource(new CancellationTokenSource());
                 _tradeQueue = new ConcurrentQueue<string>();
                 
                 // Test connection with health check
@@ -117,14 +151,11 @@ namespace MT5GrpcClient
                     {
                         while (true)
                         {
-                            var cts = _cancellationTokenSource;
-                            if (cts == null)
+                            if (!TryGetCancellationToken(out var token))
                             {
                                 await Task.Delay(100, CancellationToken.None).ConfigureAwait(false);
                                 continue;
                             }
-
-                            var token = cts.Token;
                             if (token.IsCancellationRequested)
                             {
                                 break;
@@ -492,24 +523,60 @@ namespace MT5GrpcClient
         /// <summary>
         /// Cleanup gRPC client and release resources
         /// </summary>
+        private static readonly TimeSpan StreamingShutdownTimeout = TimeSpan.FromSeconds(5);
+
+        private static void ObserveTask(Task task)
+        {
+            _ = task.ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    // Surface exception for diagnostic purposes without throwing on the cleanup path.
+                    System.Diagnostics.Trace.TraceWarning($"MT5 streaming task faulted: {t.Exception}");
+                }
+
+                t.Dispose();
+            }, TaskScheduler.Default);
+        }
+
         private static int GrpcCleanup()
         {
             try
             {
                 _isStreamingActive = false;
-                
-                if (_cancellationTokenSource != null)
+
+                var cts = ClearCancellationTokenSource();
+                if (cts != null)
                 {
-                    _cancellationTokenSource.Cancel();
-                    _cancellationTokenSource.Dispose();
-                    _cancellationTokenSource = null;
+                    cts.Cancel();
+                    cts.Dispose();
                 }
 
                 if (_streamingTask != null)
                 {
-                    _streamingTask.Wait(5000); // Wait up to 5 seconds
-                    _streamingTask.Dispose();
+                    var task = _streamingTask;
                     _streamingTask = null;
+
+                    try
+                    {
+                        var completion = Task.WhenAny(task, Task.Delay(StreamingShutdownTimeout));
+                        completion.ConfigureAwait(false).GetAwaiter().GetResult();
+
+                        if (task.IsCompleted)
+                        {
+                            task.ConfigureAwait(false).GetAwaiter().GetResult();
+                            task.Dispose();
+                        }
+                        else
+                        {
+                            ObserveTask(task);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Trace.TraceWarning($"MT5 streaming shutdown encountered an error: {ex}");
+                        ObserveTask(task);
+                    }
                 }
 
                 if (_channel != null)

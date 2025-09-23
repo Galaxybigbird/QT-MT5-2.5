@@ -80,13 +80,21 @@ namespace Quantower.MultiStrat
             {
                 if (_managerService.IsConnected)
                 {
-                    try
+                    var disconnectTask = _managerService.DisconnectAsync();
+
+                    if (!disconnectTask.IsCompleted)
                     {
-                        _managerService.DisconnectAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+                        _ = disconnectTask.ContinueWith(t =>
+                        {
+                            if (t.IsFaulted)
+                            {
+                                AddLogEntry("ERROR", $"Error while stopping bridge: {t.Exception?.GetBaseException().Message}");
+                            }
+                        }, TaskScheduler.Default);
                     }
-                    catch (Exception ex)
+                    else if (disconnectTask.IsFaulted)
                     {
-                        AddLogEntry("ERROR", $"Error while stopping bridge: {ex.Message}");
+                        AddLogEntry("ERROR", $"Error while stopping bridge: {disconnectTask.Exception?.GetBaseException().Message}");
                     }
                 }
 
@@ -1025,10 +1033,37 @@ namespace Quantower.MultiStrat
 
         private void AttachContent(UIElement element)
         {
+            // Quantower's Plugin base type does not expose the hosting window publicly. We rely on
+            // reflection to wire up our WPF layout. Guard each step so failures are visible.
             var windowProperty = GetType().BaseType?.GetProperty("Window") ?? GetType().GetProperty("Window");
-            var windowInstance = windowProperty?.GetValue(this);
-            var contentProperty = windowInstance?.GetType().GetProperty("Content");
-            contentProperty?.SetValue(windowInstance, element);
+            if (windowProperty == null)
+            {
+                AddLogEntry("ERROR", "Unable to locate plugin window property; UI may not render correctly.");
+                return;
+            }
+
+            var windowInstance = windowProperty.GetValue(this);
+            if (windowInstance == null)
+            {
+                AddLogEntry("ERROR", "Plugin window instance was null; UI cannot mount.");
+                return;
+            }
+
+            var contentProperty = windowInstance.GetType().GetProperty("Content");
+            if (contentProperty == null)
+            {
+                AddLogEntry("ERROR", "Plugin window does not expose a Content property; UI cannot mount.");
+                return;
+            }
+
+            try
+            {
+                contentProperty.SetValue(windowInstance, element);
+            }
+            catch (Exception ex)
+            {
+                AddLogEntry("ERROR", $"Failed to attach plugin content: {ex.Message}");
+            }
         }
     }
 }
