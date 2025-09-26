@@ -42,6 +42,10 @@ export function GetTradeQueue() {
   return window['go']['main']['App']['GetTradeQueue']();
 }
 
+export function HandleCloseHedgeRequest(arg1) {
+  return window['go']['main']['App']['HandleCloseHedgeRequest'](arg1);
+}
+
 export function HandleElasticUpdate(arg1) {
   return window['go']['main']['App']['HandleElasticUpdate'](arg1);
 }
@@ -52,10 +56,6 @@ export function HandleHedgeCloseNotification(arg1) {
 
 export function HandleMT5TradeResult(arg1) {
   return window['go']['main']['App']['HandleMT5TradeResult'](arg1);
-}
-
-export function HandleCloseHedgeRequest(arg1) {
-  return window['go']['main']['App']['HandleCloseHedgeRequest'](arg1);
 }
 
 export function HandleTrailingStopUpdate(arg1) {

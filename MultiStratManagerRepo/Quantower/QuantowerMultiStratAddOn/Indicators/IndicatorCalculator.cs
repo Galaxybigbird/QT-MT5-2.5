@@ -20,6 +20,10 @@ namespace Quantower.MultiStrat.Indicators
         {
             try
             {
+                if (period <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(period), period, "DEMA period must be greater than zero.");
+                }
                 if (quotes == null)
                 {
                     return null;
@@ -60,6 +64,10 @@ namespace Quantower.MultiStrat.Indicators
         {
             try
             {
+                if (period <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(period), period, "ATR period must be greater than zero.");
+                }
                 if (quotes == null || quotes.Count < period + 1)
                 {
                     return null;
@@ -109,6 +117,10 @@ namespace Quantower.MultiStrat.Indicators
         {
             try
             {
+                if (period <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(period), period, "EMA period must be greater than zero.");
+                }
                 if (values == null || values.Count < period)
                 {
                     return new List<double>();

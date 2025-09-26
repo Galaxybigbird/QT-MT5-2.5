@@ -324,13 +324,11 @@ namespace Quantower.MultiStrat.Infrastructure
                 switch (value)
                 {
                     case DateTime dt:
-                        return dt.Kind switch
+                        if (dt.Kind == DateTimeKind.Unspecified)
                         {
-                            DateTimeKind.Utc         => dt,
-                            DateTimeKind.Local       => dt.ToUniversalTime(),
-                            DateTimeKind.Unspecified => DateTime.SpecifyKind(dt, DateTimeKind.Utc),
-                            _                        => dt
-                        };
+                            return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+                        }
+                        return dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
                     case DateTimeOffset dto:
                         return dto.UtcDateTime;
                     case long unix:
@@ -355,10 +353,9 @@ namespace Quantower.MultiStrat.Infrastructure
                             var utc = hasOffset ? parsed.ToUniversalTime() : parsed;
                             return DateTime.SpecifyKind(utc, DateTimeKind.Utc);
                         }
-                        break;
+                        continue;
                 }
-                        break;
-                }
+                continue;
             }
 
             return null;

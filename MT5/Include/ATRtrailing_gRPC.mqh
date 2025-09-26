@@ -67,48 +67,35 @@ void CleanupATRTrailing()
     // Clear all visualization
     ClearVisualization();
     
-    // Delete ALL objects with our name prefixes to ensure complete cleanup
+    // Delete only objects created by this module
     int totalObjects = ObjectsTotal(0);
     for(int i = totalObjects - 1; i >= 0; i--)
     {
         string objName = ObjectName(0, i);
-        
-        // Check if this is one of our objects using more comprehensive criteria
-        if(StringFind(objName, "ATR") >= 0 || 
-           StringFind(objName, "Trailing") >= 0 ||
-           StringFind(objName, "DEMA") >= 0 ||
-           StringFind(objName, "Trail") >= 0 || 
-           StringFind(objName, "SL") >= 0 || 
-           StringFind(objName, "Test") >= 0 || 
-           StringFind(objName, "Vol") >= 0 || 
-           StringFind(objName, "Buy") >= 0 || 
-           StringFind(objName, "Sell") >= 0 || 
-           StringFind(objName, "Level") >= 0 || 
-           StringFind(objName, "Label") >= 0 || 
-           StringFind(objName, "Msg") >= 0 ||
-           StringFind(objName, "Button") >= 0)
+
+        if(StringFind(objName, "ATRGRPC_") == 0)
         {
             ObjectDelete(0, objName);
         }
     }
-    
+
     // Also delete all test-specific objects and labels
     for(int i = 0; i <= 100; i++)
     {
-        ObjectDelete(0, "TestLabel" + IntegerToString(i));
-        ObjectDelete(0, "Test_" + IntegerToString(i));
-        ObjectDelete(0, "TestResult" + IntegerToString(i));
+        ObjectDelete(0, "ATRGRPC_TestLabel_" + IntegerToString(i));
+        ObjectDelete(0, "ATRGRPC_Test_" + IntegerToString(i));
+        ObjectDelete(0, "ATRGRPC_TestResult_" + IntegerToString(i));
     }
-    
-    // Clean all buttons
+
+    // Delete module-specific buttons
     for(int i = ObjectsTotal(0) - 1; i >= 0; i--)
     {
         string objName = ObjectName(0, i);
-        if(ObjectGetInteger(0, objName, OBJPROP_TYPE) == OBJ_BUTTON)
+        if(StringFind(objName, "ATRGRPC_") == 0 && ObjectGetInteger(0, objName, OBJPROP_TYPE) == OBJ_BUTTON)
         {
             ObjectDelete(0, objName);
         }
-    }    
+    }
     ChartRedraw();
 }
 
@@ -373,7 +360,15 @@ bool ShouldActivateTrailing(ulong ticket, double entryPrice, double currentPrice
     }
     double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
     double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-    double pipValue = tickValue * (pointValue / tickSize); // This might be problematic if tickSize is 0, though unlikely for valid symbols
+    double pipValue = 0.0;
+    if (tickSize != 0.0)
+    {
+        pipValue = tickValue * (pointValue / tickSize);
+    }
+    else
+    {
+        PrintFormat("TrailingStop::ShouldActivateTrailing (Ticket: %s) - TickSize is zero. Using pipValue=0 to avoid division by zero.", IntegerToString(ticket));
+    }
 
     // WHACK-A-MOLE FIX: Reduce initial logging spam - only log occasionally
     static datetime last_input_log = 0;

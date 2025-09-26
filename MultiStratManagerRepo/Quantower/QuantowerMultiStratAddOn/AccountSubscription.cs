@@ -83,9 +83,11 @@ namespace Quantower.MultiStrat
 
             lock (_accountSync)
             {
-                var previousAccount = _account;
+                if (!ReferenceEquals(_account, account))
+                {
+                    accountChanged = true;
+                }
                 _account = account;
-                accountChanged = !ReferenceEquals(previousAccount, account);
 
                 var newAccountId = SafeAccountIdentifier(account);
                 if (!string.Equals(AccountId, newAccountId, StringComparison.Ordinal))

@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Quantower.Bridge.Client
@@ -6,7 +7,7 @@ namespace Quantower.Bridge.Client
     internal interface ITradingClient : IDisposable
     {
         bool IsConnected { get; }
-        Task<OperationResult> SubmitTradeAsync(string tradeJson);
+        Task<OperationResult> SubmitTradeAsync(string tradeJson, CancellationToken cancellationToken = default);
         Task<OperationResult> HealthCheckAsync(string source);
         Task<OperationResult> SubmitElasticUpdateAsync(string updateJson);
         Task<OperationResult> SubmitTrailingUpdateAsync(string updateJson);

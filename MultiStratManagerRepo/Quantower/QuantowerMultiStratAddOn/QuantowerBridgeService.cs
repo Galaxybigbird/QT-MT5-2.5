@@ -13,6 +13,8 @@ namespace Quantower.MultiStrat
     {
         private const string LogComponent = "qt_addon";
 
+        private static readonly TimeSpan TradeSubmitTimeout = TimeSpan.FromSeconds(10);
+
         private readonly ConcurrentDictionary<string, byte> _pendingTrades = new();
         private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
 
@@ -98,6 +100,7 @@ namespace Quantower.MultiStrat
             }
 
             EmitLog(BridgeLogLevel.Info, $"Connecting to {_grpcAddress}");
+            BridgeGrpcClient.SubmitTradeTimeout = TradeSubmitTimeout;
             var ok = await BridgeGrpcClient.Initialize(_grpcAddress, source: "qt", component: LogComponent).ConfigureAwait(false);
             if (!ok)
             {
@@ -193,6 +196,10 @@ namespace Quantower.MultiStrat
                 try
                 {
                     var success = await BridgeGrpcClient.SubmitTradeAsync(tradeJson).ConfigureAwait(false);
+                    if (!success)
+                    {
+                        EmitLog(BridgeLogLevel.Warn, "SubmitTrade failed", tradeId, tradeId, BridgeGrpcClient.LastError);
+                    }
                     return success;
                 }
                 finally
@@ -274,7 +281,7 @@ namespace Quantower.MultiStrat
             }
 
             EmitLog(BridgeLogLevel.Info, $"Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge", closureId, closureId);
-            ObserveAsyncOperation(BridgeGrpcClient.CloseHedgeAsync(payload), "CloseHedge", closureId ?? "n/a");
+            ObserveAsyncOperation(BridgeGrpcClient.SubmitCloseHedgeAsync(payload), "SubmitCloseHedge", closureId ?? "n/a");
 
             try
             {

@@ -356,7 +356,15 @@ bool ShouldActivateTrailing(ulong ticket, double entryPrice, double currentPrice
     }
     double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
     double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-    double pipValue = tickValue * (pointValue / tickSize); // This might be problematic if tickSize is 0, though unlikely for valid symbols
+    double pipValue = 0.0;
+    if (tickSize != 0.0)
+    {
+        pipValue = tickValue * (pointValue / tickSize);
+    }
+    else
+    {
+        PrintFormat("TrailingStop::ShouldActivateTrailing (Ticket: %s) - TickSize is zero. Using pipValue=0 to avoid division by zero.", IntegerToString(ticket));
+    }
 
     // WHACK-A-MOLE FIX: Reduce initial logging spam - only log occasionally
     static datetime last_input_log = 0;

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Concurrent;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
+using Grpc.Core;
 using Trading.Proto;
 
 namespace Quantower.Bridge.Client
@@ -17,10 +19,31 @@ namespace Quantower.Bridge.Client
         private static readonly ConcurrentDictionary<string, string> CorrelationByBaseId = new();
 
         private static TimeSpan _healthCheckTimeout = TimeSpan.FromSeconds(2);
+        private static TimeSpan _submitTradeTimeout = TimeSpan.FromSeconds(10);
         public static TimeSpan HealthCheckTimeout
         {
             get => _healthCheckTimeout;
             set => _healthCheckTimeout = value > TimeSpan.Zero ? value : TimeSpan.FromSeconds(2);
+        }
+
+        public static TimeSpan SubmitTradeTimeout
+        {
+            get => _submitTradeTimeout;
+            set
+            {
+                if (value == Timeout.InfiniteTimeSpan)
+                {
+                    _submitTradeTimeout = Timeout.InfiniteTimeSpan;
+                }
+                else if (value < TimeSpan.Zero)
+                {
+                    _submitTradeTimeout = TimeSpan.Zero;
+                }
+                else
+                {
+                    _submitTradeTimeout = value;
+                }
+            }
         }
 
         private static string GetOrCreateCorrelation(string baseId)
@@ -95,26 +118,56 @@ namespace Quantower.Bridge.Client
             }
         }
 
-        public static async Task<bool> SubmitTradeAsync(string tradeJson)
+        public static async Task<bool> SubmitTradeAsync(string tradeJson, CancellationToken cancellationToken = default)
         {
             if (!TryGetClient(out var client))
             {
                 return false;
             }
 
+            CancellationTokenSource? linkedCts = null;
             try
             {
-                var result = await client!.SubmitTradeAsync(tradeJson).ConfigureAwait(false);
+                var effectiveToken = cancellationToken;
+                if (_submitTradeTimeout > TimeSpan.Zero)
+                {
+                    if (_submitTradeTimeout != Timeout.InfiniteTimeSpan)
+                    {
+                        linkedCts = cancellationToken.CanBeCanceled
+                            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                            : new CancellationTokenSource();
+                        linkedCts.CancelAfter(_submitTradeTimeout);
+                        effectiveToken = linkedCts.Token;
+                    }
+                }
+
+                var result = await client!.SubmitTradeAsync(tradeJson, effectiveToken).ConfigureAwait(false);
                 if (!result.Success)
                 {
                     LastError = string.IsNullOrEmpty(result.ErrorMessage) ? "SubmitTrade failed" : result.ErrorMessage;
                 }
                 return result.Success;
             }
+            catch (OperationCanceledException)
+            {
+                LastError = "SubmitTrade cancelled";
+                return false;
+            }
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled || ex.StatusCode == StatusCode.DeadlineExceeded)
+            {
+                LastError = ex.StatusCode == StatusCode.DeadlineExceeded
+                    ? "SubmitTrade deadline exceeded"
+                    : "SubmitTrade cancelled";
+                return false;
+            }
             catch (Exception ex)
             {
                 LastError = ex.Message;
                 return false;
+            }
+            finally
+            {
+                linkedCts?.Dispose();
             }
         }
 
@@ -231,6 +284,11 @@ namespace Quantower.Bridge.Client
                 LastError = ex.Message;
                 return false;
             }
+        }
+
+        public static Task<bool> SubmitCloseHedgeAsync(string notificationJson)
+        {
+            return CloseHedgeAsync(notificationJson);
         }
 
         public static void StartTradingStream(Action<string>? onTradeReceived)

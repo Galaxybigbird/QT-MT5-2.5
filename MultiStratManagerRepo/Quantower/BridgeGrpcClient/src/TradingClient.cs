@@ -92,7 +92,7 @@ namespace Quantower.Bridge.Client
             }
         }
 
-        public async Task<OperationResult> SubmitTradeAsync(string tradeJson)
+        public async Task<OperationResult> SubmitTradeAsync(string tradeJson, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -102,7 +102,7 @@ namespace Quantower.Bridge.Client
                     return OperationResult.Failure("Invalid trade payload");
                 }
                 var deadline = DateTime.UtcNow.AddSeconds(10);
-                var response = await _client.SubmitTradeAsync(trade, deadline: deadline).ConfigureAwait(false);
+                var response = await _client.SubmitTradeAsync(trade, deadline: deadline, cancellationToken: cancellationToken).ConfigureAwait(false);
                 return OperationResult.Ok(JsonSerializer.Serialize(new { status = response.Status, message = response.Message }));
             }
             catch (Exception ex)

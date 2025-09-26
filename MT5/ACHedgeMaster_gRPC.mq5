@@ -358,6 +358,8 @@ string g_open_mt5_actions[];     // Stores the MT5 position type ("buy" or "sell
 string g_open_mt5_original_nt_actions[];    // Stores original NT action for rehydrated open MT5 positions
 double g_open_mt5_original_nt_quantities[]; // Stores original NT quantity for rehydrated open MT5 positions
 
+const int INT_SENTINEL = -2147483647;
+
 // DUPLICATE NOTIFICATION PREVENTION: Track positions closed by NT to prevent duplicate notifications
 long g_nt_closed_position_ids[];  // Stores position IDs that were closed by NT (to prevent duplicate notifications)
 datetime g_nt_closed_timestamps[]; // Stores timestamps when positions were closed by NT (for cleanup)
@@ -1415,8 +1417,8 @@ void ProcessTradeFromJson(const string& trade_json)
         double evtProfit = GetJSONDouble(trade_json, "elastic_current_profit");
         if(evtProfit == 0.0)
             evtProfit = GetJSONDouble(trade_json, "current_profit");
-        int evtProfitLevel = GetJSONIntValue(trade_json, "elastic_profit_level", INT_MIN);
-        if(evtProfitLevel == INT_MIN)
+        int evtProfitLevel = GetJSONIntValue(trade_json, "elastic_profit_level", INT_SENTINEL);
+        if(evtProfitLevel == INT_SENTINEL)
             evtProfitLevel = GetJSONIntValue(trade_json, "profit_level", 0);
         { string __log=""; StringConcatenate(__log, "ELASTIC_HEDGE: Received elastic update for BaseID: ", evtBaseId, ", Profit: $", DoubleToString(evtProfit, 2), ", Level: ", (string)IntegerToString(evtProfitLevel)); Print(__log); ULogInfoPrint(__log); }
         ProcessElasticHedgeUpdate(evtBaseId, evtProfit, evtProfitLevel);
@@ -2056,9 +2058,9 @@ void ProcessRegularTrade(const string& action, double quantity, double price, co
     }
 
     // Update global futures tracking based on successful trades
-    if(action == "buy" || action == "BUY") {
+    if(__isBuy) {
         globalFutures += successfulTrades;
-    } else {
+    } else if(__isSell) {
         globalFutures -= successfulTrades;
     }
 
@@ -3542,7 +3544,23 @@ bool PartialClosePosition(ulong ticket, double lotsToClose, int profitLevel)
     // Normalize lots
     double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
     double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-    lotsToClose = NormalizeDouble(MathFloor(lotsToClose / lotStep) * lotStep, 2);
+    int volumeDigits = 2;
+    if (lotStep > 0.0)
+    {
+        double step = lotStep;
+        int digits = 0;
+        while (step < 1.0 && digits < 8)
+        {
+            step *= 10.0;
+            digits++;
+        }
+        volumeDigits = (int)MathMax(0, digits);
+        lotsToClose = NormalizeDouble(MathFloor(lotsToClose / lotStep) * lotStep, volumeDigits);
+    }
+    else
+    {
+        lotsToClose = NormalizeDouble(lotsToClose, volumeDigits);
+    }
 
     if (lotsToClose < minLot) {
         Print("ELASTIC_HEDGE: Lots to close (", lotsToClose, ") is less than minimum (", minLot, ")");
@@ -3985,7 +4003,7 @@ void SendTrailingUpdateNotification(string baseId, double newStopPrice, string r
 string ExtractBaseIdFromComment(string comment_str)
 {
     string base_id = "";
-    if (comment_str == NULL || StringLen(comment_str) == 0) 
+    if (StringLen(comment_str) == 0) 
         return "";
 
     // First, handle the new NT_Hedge_{BUY|SELL}_<base_id> format

@@ -24,6 +24,10 @@ export namespace main {
 	    event_type?: string;
 	    elastic_current_profit?: number;
 	    elastic_profit_level?: number;
+	    qt_trade_id?: string;
+	    qt_position_id?: string;
+	    strategy_tag?: string;
+	    origin_platform?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Trade(source);
@@ -53,6 +57,10 @@ export namespace main {
 	        this.event_type = source["event_type"];
 	        this.elastic_current_profit = source["elastic_current_profit"];
 	        this.elastic_profit_level = source["elastic_profit_level"];
+	        this.qt_trade_id = source["qt_trade_id"];
+	        this.qt_position_id = source["qt_position_id"];
+	        this.strategy_tag = source["strategy_tag"];
+	        this.origin_platform = source["origin_platform"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

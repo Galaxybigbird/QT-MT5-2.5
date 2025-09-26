@@ -315,7 +315,9 @@ func (a *App) enqueueCloseTrade(baseID string, ticket uint64, instrument, accoun
 		return err
 	}
 	a.clientCloseMux.Lock()
-	a.clientInitiatedTickets[ticket] = time.Now()
+	if ticket != 0 {
+		a.clientInitiatedTickets[ticket] = time.Now()
+	}
 	a.clientCloseMux.Unlock()
 	log.Printf("gRPC: Enqueued CLOSE_HEDGE ticket %d for BaseID %s", ticket, baseID)
 	return nil

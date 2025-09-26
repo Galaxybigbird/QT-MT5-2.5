@@ -963,6 +963,13 @@ namespace Quantower.MultiStrat
                 return;
             }
 
+            var existingBaseId = TryResolveTrackedBaseId(position);
+            if (!string.IsNullOrWhiteSpace(existingBaseId))
+            {
+                StopTracking(existingBaseId);
+                return;
+            }
+
             StopTracking(GetBaseId(position));
         }
 
@@ -1548,6 +1555,48 @@ namespace Quantower.MultiStrat
             var symbolName = position.Symbol?.Name ?? "symbol";
             var openTicks = position.OpenTime == default ? DateTime.UtcNow.Ticks : position.OpenTime.Ticks;
             return $"{accountId}:{symbolName}:{openTicks}";
+        }
+
+        private string? TryResolveTrackedBaseId(Position position)
+        {
+            var baseIdCandidate = GetBaseId(position);
+            var positionId = position.Id;
+            var uniqueId = position.UniqueId;
+            var accountId = GetAccountId(position.Account);
+            var symbolName = position.Symbol?.Name;
+
+            lock (_trackingLock)
+            {
+                if (!string.IsNullOrWhiteSpace(baseIdCandidate) && _trackingStates.ContainsKey(baseIdCandidate))
+                {
+                    return baseIdCandidate;
+                }
+
+                foreach (var pair in _trackingStates)
+                {
+                    var state = pair.Value;
+
+                    if (!string.IsNullOrWhiteSpace(positionId) && string.Equals(state.PositionId, positionId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return pair.Key;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(uniqueId) && string.Equals(state.UniqueId, uniqueId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return pair.Key;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(accountId)
+                        && !string.IsNullOrWhiteSpace(symbolName)
+                        && string.Equals(state.AccountId, accountId, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(state.SymbolName, symbolName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return pair.Key;
+                    }
+                }
+            }
+
+            return null;
         }
 
         private void ThrowIfDisposed()

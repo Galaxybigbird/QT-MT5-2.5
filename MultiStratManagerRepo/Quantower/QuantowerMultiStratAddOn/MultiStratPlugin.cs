@@ -260,8 +260,14 @@ namespace Quantower.MultiStrat
                     if (q.StartsWith("?")) q = q.Substring(1);
                     foreach (var part in q.Split('&'))
                     {
-                        var kv = part.Split('=');
-                        if (kv.Length >= 2 && kv[0] == "d") { data = Uri.UnescapeDataString(kv[1]); break; }
+                        if (string.IsNullOrEmpty(part)) continue;
+                        var idx = part.IndexOf('=');
+                        if (idx <= 0) continue;
+                        var key = part.Substring(0, idx);
+                        if (!key.Equals("d", StringComparison.Ordinal)) continue;
+                        var value = part.Substring(idx + 1);
+                        data = Uri.UnescapeDataString(value);
+                        break;
                     }
                 }
                 var payload = new Dictionary<string, object?>();
@@ -307,6 +313,11 @@ namespace Quantower.MultiStrat
                         {
                             var disable = payload.TryGetValue("disableAfter", out var disObj) && disObj is bool b && b;
                             _ = _managerService.FlattenAllAsync(disable, "Quantower UI flatten");
+                        }
+                        break;
+                    case "reset_daily":
+                        {
+                            _managerService.ResetDailyRisk(null);
                         }
                         break;
                     case "update_trailing":

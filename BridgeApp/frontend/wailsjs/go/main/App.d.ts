@@ -22,13 +22,13 @@ export function GetTradeHistory():Promise<Array<main.Trade>>;
 
 export function GetTradeQueue():Promise<any>;
 
+export function HandleCloseHedgeRequest(arg1:any):Promise<void>;
+
 export function HandleElasticUpdate(arg1:any):Promise<void>;
 
 export function HandleHedgeCloseNotification(arg1:any):Promise<void>;
 
 export function HandleMT5TradeResult(arg1:any):Promise<void>;
-
-export function HandleCloseHedgeRequest(arg1:any):Promise<void>;
 
 export function HandleTrailingStopUpdate(arg1:any):Promise<void>;
 

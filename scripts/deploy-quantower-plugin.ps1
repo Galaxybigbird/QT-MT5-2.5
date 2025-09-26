@@ -117,7 +117,7 @@ if ($exit -ne 0) {
     if ($LASTEXITCODE -ne 0) {
         Write-Error "dotnet restore failed with exit code $LASTEXITCODE"
         if ($restoreOut) { $restoreOut | ForEach-Object { Write-Error $_ } }
-        exit $LASTEXITCODE
+        throw "dotnet restore failed ($LASTEXITCODE)"
     }
     $publishArgs = @($projectPath,'-c',$Configuration,'-o',$publishDir,'--nologo') + $props
     $publishOutput = & dotnet publish @publishArgs 2>&1
@@ -129,7 +129,7 @@ if ($exit -ne 0) {
         Write-Error "dotnet publish output:"
         $publishOutput | ForEach-Object { Write-Error $_ }
     }
-    exit $exit
+    throw "dotnet publish failed ($exit)"
 }
 $publishOutput | Write-Verbose
 
@@ -213,8 +213,19 @@ Write-Host "Final files in destination:" -ForegroundColor DarkCyan
 if ($qtSdkBin) {
     try {
         $binPlugins = Join-Path $qtSdkBin 'plug-ins'
+        if (!(Test-Path $binPlugins)) {
+            New-Item -ItemType Directory -Path $binPlugins -Force | Out-Null
+        }
         $binDest = Join-Path $binPlugins $PluginFolderName
-        if (!(Test-Path $binDest)) { New-Item -ItemType Directory -Path $binDest -Force | Out-Null }
+        if (Test-Path $binDest) {
+            Write-Host "Cleaning SDK mirror folder: $binDest" -ForegroundColor DarkYellow
+            try {
+                Remove-Item -Path $binDest -Recurse -Force -ErrorAction Stop
+            } catch {
+                Write-Warning ("Could not fully clean SDK mirror folder (likely locked by Quantower). Continuing. Error: {0}" -f $_.Exception.Message)
+            }
+        }
+        New-Item -ItemType Directory -Path $binDest -Force | Out-Null
 
         # Copy HTML folder if present (handle both 'HTML' and 'html')
         $htmlDirCandidates = @(

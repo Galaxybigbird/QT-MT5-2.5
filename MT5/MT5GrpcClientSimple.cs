@@ -122,6 +122,8 @@ namespace MT5GrpcClient
                 }
 
                 _serverAddress = $"http://{serverAddress}:{port}";
+               // Allow HTTP/2 over plaintext (required for gRPC on http://)
+               AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
                 
                 // Create gRPC channel with connection options
                 var channelOptions = new GrpcChannelOptions
@@ -131,8 +133,7 @@ namespace MT5GrpcClient
                 };
 
                 _channel = GrpcChannel.ForAddress(_serverAddress, channelOptions);
-                _client = new TradingService.TradingServiceClient(_channel);
-                _streamingClient = new StreamingService.StreamingServiceClient(_channel);
+                _client = new TradingService.TradingServiceClient(_channel);                _streamingClient = new StreamingService.StreamingServiceClient(_channel);
                 
                 SetCancellationTokenSource(new CancellationTokenSource());
                 _tradeQueue = new ConcurrentQueue<string>();

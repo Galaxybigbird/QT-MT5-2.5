@@ -52,7 +52,10 @@ namespace Quantower.MultiStrat.Services
                 {
                     var delay = Math.Max(1, RemovalDelaySeconds);
                     await Task.Delay(TimeSpan.FromSeconds(delay), cts.Token).ConfigureAwait(false);
-                    RemoveProtectiveOrders(core, trade, order, position);
+                    if (!cts.IsCancellationRequested)
+                    {
+                        RemoveProtectiveOrders(core, trade, order, position);
+                    }
                 }
                 catch (TaskCanceledException)
                 {
@@ -103,20 +106,6 @@ namespace Quantower.MultiStrat.Services
             {
                 return order.Side == direction.Value;
             }
-
-            if (direction.HasValue)
-            {
-                // For entry trades: Buy side increases with positive quantity, Sell side increases with positive quantity
-                 if (direction == Side.Buy && trade.Quantity > 0)
-                 {
-                     return true;
-                 }
- 
-                 if (direction == Side.Sell && trade.Quantity > 0)
-                 {
-                     return true;
-                 }
-             }
 
             return false;
         }

@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Threading;
 using Grpc.Core;
 using Trading.Proto;
 
@@ -124,7 +125,10 @@ namespace MT5GrpcClient
                 try
                 {
                     var client = new LoggingService.LoggingServiceClient(channel);
-                    var ack = client.Log(evt);
+                    var deadline = DateTime.UtcNow.AddSeconds(2);
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+                    var ack = client.Log(evt, deadline: deadline, cancellationToken: cts.Token);
                     return ack.Accepted > 0 ? ERROR_SUCCESS : ERROR_CONNECTION_FAILED;
                 }
                 finally

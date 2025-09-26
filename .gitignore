@@ -181,3 +181,7 @@ dev-debug.log
 # tasks.json
 # tasks/
 .taskmaster/
+
+# Runtime logs
+logs*.txt
+publish.log

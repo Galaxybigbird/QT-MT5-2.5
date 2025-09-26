@@ -138,14 +138,14 @@ static std::string GetManagedAssemblyPath() {
     std::wstring managed2 = dir + L"\\MT5GrpcClient.dll";
     DWORD attr1 = GetFileAttributesW(managed1.c_str());
     if (attr1 != INVALID_FILE_ATTRIBUTES && !(attr1 & FILE_ATTRIBUTE_DIRECTORY)) {
-        return std::string(managed1.begin(), managed1.end());
+        return WStringToString(managed1.c_str());
     }
     DWORD attr2 = GetFileAttributesW(managed2.c_str());
     if (attr2 != INVALID_FILE_ATTRIBUTES && !(attr2 & FILE_ATTRIBUTE_DIRECTORY)) {
-        return std::string(managed2.begin(), managed2.end());
+        return WStringToString(managed2.c_str());
     }
     // Default to MT5GrpcManaged.dll name
-    return std::string(managed1.begin(), managed1.end());
+    return WStringToString(managed1.c_str());
 }
 
 // Call managed method helper

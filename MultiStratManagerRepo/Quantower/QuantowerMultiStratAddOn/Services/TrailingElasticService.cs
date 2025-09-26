@@ -80,15 +80,23 @@ namespace Quantower.MultiStrat.Services
                 tracker.BaseId = baseId;
                 tracker.SymbolKey = GetSymbolKey(position.Symbol);
                 tracker.AccountId = GetAccountId(position.Account);
-                tracker.Quantity = Math.Max(tracker.Quantity, Math.Abs(position.Quantity));
+                tracker.Quantity = Math.Abs(position.Quantity);
                 tracker.Side = ResolveSide(position);
 
                 if (wasInitialized)
                 {
-                    if (tracker.EntryPrice <= 0)
+                    if (position.OpenPrice > 0 && !double.IsNaN(position.OpenPrice) && !double.IsInfinity(position.OpenPrice))
                     {
                         tracker.EntryPrice = position.OpenPrice;
                     }
+
+                    var refreshedPrice = ResolveCurrentPrice(position);
+                    if (refreshedPrice > 0 && !double.IsNaN(refreshedPrice) && !double.IsInfinity(refreshedPrice))
+                    {
+                        tracker.LastSourcePrice = refreshedPrice;
+                        UpdateWaterMarks(tracker, refreshedPrice);
+                    }
+
                     return;
                 }
 

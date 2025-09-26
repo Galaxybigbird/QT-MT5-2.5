@@ -76,7 +76,14 @@ namespace NTGrpcClient
 
             try
             {
-                return resolver(_source, component);
+                var result = resolver(_source, component);
+                if (string.IsNullOrWhiteSpace(result))
+                {
+                    LastError = "Component resolver returned empty result; using fallback component";
+                    return BuildFallbackComponent(component);
+                }
+
+                return result;
             }
             catch (Exception ex)
             {
