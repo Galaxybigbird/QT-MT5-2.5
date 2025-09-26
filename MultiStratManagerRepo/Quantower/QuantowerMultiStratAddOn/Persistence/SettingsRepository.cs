@@ -118,7 +118,34 @@ namespace Quantower.MultiStrat.Persistence
 
                     if (DateTimeOffset.TryParse(str, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces, out var dto))
                     {
-                        return dto;
+                        var hasExplicitOffset = false;
+                        if (str.EndsWith("Z", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasExplicitOffset = true;
+                        }
+                        else
+                        {
+                            var tIndex = Math.Max(str.LastIndexOf('T'), str.LastIndexOf(' '));
+                            var plusIndex = str.LastIndexOf('+');
+                            var minusIndex = str.LastIndexOf('-');
+                            if (tIndex >= 0)
+                            {
+                                if (plusIndex > tIndex)
+                                {
+                                    hasExplicitOffset = true;
+                                }
+                                else if (minusIndex > tIndex)
+                                {
+                                    hasExplicitOffset = true;
+                                }
+                            }
+                            else if (plusIndex > 0)
+                            {
+                                hasExplicitOffset = true;
+                            }
+                        }
+
+                        return hasExplicitOffset ? (object)dto : dto.UtcDateTime;
                     }
 
                     if (DateTime.TryParse(str, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var dt))

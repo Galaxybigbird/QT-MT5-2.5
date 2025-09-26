@@ -103,10 +103,23 @@ namespace Quantower.Bridge.Client
                 }
                 var deadline = DateTime.UtcNow.AddSeconds(10);
                 var response = await _client.SubmitTradeAsync(trade, deadline: deadline, cancellationToken: cancellationToken).ConfigureAwait(false);
-                return OperationResult.Ok(JsonSerializer.Serialize(new { status = response.Status, message = response.Message }));
+                var status = response.Status ?? string.Empty;
+                var responseJson = JsonSerializer.Serialize(new { status = response.Status, message = response.Message });
+                var isSuccess = status.Equals("success", StringComparison.OrdinalIgnoreCase);
+                if (isSuccess)
+                {
+                    LastError = string.Empty;
+                    return OperationResult.Ok(responseJson);
+                }
+
+                LastError = string.IsNullOrWhiteSpace(response.Message)
+                    ? $"SubmitTrade failed with status '{status}'"
+                    : response.Message;
+                return OperationResult.Failure(LastError);
             }
             catch (Exception ex)
             {
+                LastError = ex.Message;
                 return OperationResult.Failure(ex.Message);
             }
         }

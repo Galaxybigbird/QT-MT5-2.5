@@ -21,6 +21,7 @@ namespace Quantower.MultiStrat.Utilities
 
         private static double ConvertToDouble(object? value, HashSet<object>? visited)
         {
+            bool addedToVisited = false;
             if (value != null && !value.GetType().IsValueType)
             {
                 visited ??= new HashSet<object>(ReferenceObjectComparer.Instance);
@@ -28,9 +29,12 @@ namespace Quantower.MultiStrat.Utilities
                 {
                     return 0.0;
                 }
+                addedToVisited = true;
             }
 
-            switch (value)
+            try
+            {
+                switch (value)
             {
                 case null:
                     return 0.0;
@@ -107,6 +111,13 @@ namespace Quantower.MultiStrat.Utilities
                     }
 
                     return 0.0;
+                }
+            }
+            finally
+            {
+                if (addedToVisited && visited != null)
+                {
+                    visited.Remove(value);
                 }
             }
         }

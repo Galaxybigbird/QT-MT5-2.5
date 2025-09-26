@@ -426,7 +426,11 @@ bool ShouldActivateTrailing(ulong ticket, double entryPrice, double currentPrice
 //+------------------------------------------------------------------+
 double CalculateTrailingStop(string orderType, double currentPrice, double originalStop = 0.0, double demaAtrOverride = -1.0)
 {
-    double demaAtr = (demaAtrOverride >= 0.0) ? demaAtrOverride : CalculateDEMAATR();
+    double demaAtr;
+    if(demaAtrOverride > 0.0 && demaAtrOverride != EMPTY_VALUE && MathIsValidNumber(demaAtrOverride) && demaAtrOverride < 1e8)
+        demaAtr = demaAtrOverride;
+    else
+        demaAtr = CalculateDEMAATR();
     double trailingDistance = MathMax(demaAtr * CurrentATRMultiplier, MinimumStopDistance * Point());
     
     // Calculate theoretical trailing stop level based on order type

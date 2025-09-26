@@ -182,8 +182,9 @@ namespace Quantower.MultiStrat.Infrastructure
 
                 AddStrategyTag(payload, position.Comment, position.AdditionalInfo);
                 AddClosureInstrumentAndAccount(payload, position.Symbol, position.Account);
-                payload["closed_hedge_quantity"] = position.Quantity;
-                payload["closed_hedge_action"] = ResolveAction(position.Side, position.Quantity);
+                var normalizedQuantity = Math.Abs(position.Quantity);
+                payload["closed_hedge_quantity"] = normalizedQuantity;
+                payload["closed_hedge_action"] = ResolveAction(position.Side, normalizedQuantity);
 
                 var closeTime = GetDateTimeValue(position, "CloseTime", "ExecutionTime", "Time", "DateTime", "Timestamp")
                                  ?? DateTime.UtcNow;

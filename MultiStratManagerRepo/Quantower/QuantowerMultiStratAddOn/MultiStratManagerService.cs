@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
 using Quantower.MultiStrat.Indicators;
 using Quantower.MultiStrat.Persistence;
 using Quantower.MultiStrat.Services;
@@ -1553,8 +1554,10 @@ namespace Quantower.MultiStrat
 
             var accountId = GetAccountId(position.Account) ?? "account";
             var symbolName = position.Symbol?.Name ?? "symbol";
-            var openTicks = position.OpenTime == default ? DateTime.UtcNow.Ticks : position.OpenTime.Ticks;
-            return $"{accountId}:{symbolName}:{openTicks}";
+            var seed = position.OpenTime != default
+                ? position.OpenTime.Ticks
+                : unchecked((long)(uint)RuntimeHelpers.GetHashCode(position));
+            return $"{accountId}:{symbolName}:{seed}";
         }
 
         private string? TryResolveTrackedBaseId(Position position)

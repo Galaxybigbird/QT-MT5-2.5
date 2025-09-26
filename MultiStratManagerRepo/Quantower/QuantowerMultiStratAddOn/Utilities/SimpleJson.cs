@@ -71,6 +71,11 @@ namespace Quantower.MultiStrat.Utilities
                             return l;
                         }
 
+                        if (reader.TryGetDecimal(out var decimalValue))
+                        {
+                            return decimalValue;
+                        }
+
                         return reader.GetDouble();
                     case JsonTokenType.String:
                         if (reader.TryGetDateTime(out var datetime))
@@ -178,6 +183,11 @@ namespace Quantower.MultiStrat.Utilities
                         if (element.TryGetInt64(out var intValue))
                         {
                             return intValue;
+                        }
+
+                        if (element.TryGetDecimal(out var decimalValue))
+                        {
+                            return decimalValue;
                         }
 
                         if (element.TryGetDouble(out var doubleValue))

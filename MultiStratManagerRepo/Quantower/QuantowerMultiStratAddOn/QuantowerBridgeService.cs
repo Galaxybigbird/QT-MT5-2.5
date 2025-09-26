@@ -176,6 +176,7 @@ namespace Quantower.MultiStrat
 
                 tradeId = GetStringValue(root, "id") ??
                           GetStringValue(root, "trade_id") ??
+                          GetStringValue(root, "qt_trade_id") ??
                           GetStringValue(root, "base_id") ??
                           GetStringValue(root, "qt_position_id") ??
                           GetStringValue(root, "position_id");

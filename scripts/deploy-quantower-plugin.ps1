@@ -81,12 +81,25 @@ function Detect-QuantowerSdk {
 
 
 
+function Clear-PublishDirectory {
+    param(
+        [Parameter(Mandatory=$false)]
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    if (Test-Path $Path) {
+        try { Remove-Item -Path $Path -Recurse -Force -ErrorAction Stop } catch { throw "Failed to clear publish directory: $Path" }
+    }
+}
+
 $projectPath = Join-Path $PSScriptRoot '..\MultiStratManagerRepo\Quantower\QuantowerMultiStratAddOn\QuantowerMultiStratAddOn.csproj'
 if (!(Test-Path $projectPath)) {
     throw "Quantower plugin project not found at $projectPath"
 }
 
 $publishDir = Join-Path $PSScriptRoot "..\MultiStratManagerRepo\Quantower\QuantowerMultiStratAddOn\bin\$Configuration\net8.0-windows\publish"
+Clear-PublishDirectory -Path $publishDir
 
 # Auto-detect Quantower SDK version and bin path (portable install preferred)
 $detected = Detect-QuantowerSdk
@@ -119,6 +132,7 @@ if ($exit -ne 0) {
         if ($restoreOut) { $restoreOut | ForEach-Object { Write-Error $_ } }
         throw "dotnet restore failed ($LASTEXITCODE)"
     }
+    Clear-PublishDirectory -Path $publishDir
     $publishArgs = @($projectPath,'-c',$Configuration,'-o',$publishDir,'--nologo') + $props
     $publishOutput = & dotnet publish @publishArgs 2>&1
     $exit = $LASTEXITCODE

@@ -484,9 +484,9 @@ namespace MT5GrpcClient
         {
             try
             {
-                GrpcCleanup();
+                var cleanupResult = GrpcCleanup();
                 _isConnected = false;
-                return ERROR_SUCCESS;
+                return cleanupResult;
             }
             catch (Exception)
             {

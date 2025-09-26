@@ -18,6 +18,11 @@ namespace Quantower.MultiStrat.Services
 
         public void HandleTrade(Trade trade)
         {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                return;
+            }
+
             if (!Enabled || trade == null)
             {
                 return;

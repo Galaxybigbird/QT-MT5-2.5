@@ -159,7 +159,9 @@ namespace Trading.Proto
 
                     try
                     {
-                        _logging.Log(ev);
+                        var deadline = DateTime.UtcNow.AddSeconds(2);
+                        var callOptions = new CallOptions(deadline: deadline);
+                        _logging.Log(ev, callOptions);
                         _consecutiveFailures = 0;
                         _firstFailureAt = DateTime.MinValue;
                     }

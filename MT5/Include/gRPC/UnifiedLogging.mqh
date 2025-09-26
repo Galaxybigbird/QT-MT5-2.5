@@ -288,7 +288,10 @@ string _ULogBuildLogJson(const ULogEvent event)
    bool first = true;
    string json = "{";
 
-   _ULogJsonAppendInt(json, "timestamp_ns", event.ts_ns, first);
+      if(event.ts_ns > ULOG_JSON_MAX_SAFE_INT)
+      _ULogJsonAppendString(json, "timestamp_ns", StringFormat("%I64d", event.ts_ns), first);
+   else
+      _ULogJsonAppendInt(json, "timestamp_ns", event.ts_ns, first);
    _ULogJsonAppendString(json, "source", "mt5", first);
    _ULogJsonAppendString(json, "level", event.level, first);
    _ULogJsonAppendString(json, "component", "EA", first);
