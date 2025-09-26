@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"reflect"
 	"strconv"
@@ -43,26 +44,17 @@ type App struct {
 	// MT5 ticket to BaseID mapping
 	mt5TicketMux      sync.RWMutex
 	mt5TicketToBaseId map[uint64]string   // MT5 ticket -> BaseID
-	baseIdToMT5Ticket map[string]uint64   // BaseID -> last seen MT5 ticket (compat)
 	baseIdToTickets   map[string][]uint64 // BaseID -> all MT5 tickets for this base
-
-	// Quantower tracking
-	qtMux            sync.RWMutex
-	qtTradeToBase    map[string]string
-	qtPositionToBase map[string]string
 
 	// Metadata to aid resolution when BaseID mismatches occur
 	baseIdToInstrument map[string]string // BaseID -> instrument symbol
 	baseIdToAccount    map[string]string // BaseID -> account name
 
-	// Pending NT-initiated CLOSE_HEDGE requests when no MT5 ticket is known yet
-	pendingCloses map[string][]pendingClose // BaseID -> queued close intents
+	// Track client-initiated close requests by MT5 ticket to tag subsequent MT5 close results as acks
+	clientCloseMux         sync.Mutex
+	clientInitiatedTickets map[uint64]time.Time // ticket -> time marked
 
-	// Track NT-initiated close requests by MT5 ticket to tag subsequent MT5 close results as acks
-	ntCloseMux         sync.Mutex
-	ntInitiatedTickets map[uint64]time.Time // ticket -> time marked
-
-	// Cache NT sizing hints per BaseID so elastic events can carry them
+	// Cache sizing hints per BaseID so elastic events can carry them
 	baseIdToElastic map[string]elasticInfo // BaseID -> elastic sizing and context
 
 	// Recent elastic-close context to align/suppress subsequent generic MT5TradeResult closes
@@ -76,9 +68,9 @@ type App struct {
 }
 
 type elasticInfo struct {
-	NtPoints   float64
-	Instrument string
-	Account    string
+	PointsPer1kLoss float64
+	Instrument      string
+	Account         string
 }
 
 // elasticMark captures an elastic close signal context for short-lived correlation
@@ -208,69 +200,126 @@ func normalizeTrade(t *Trade) {
 	}
 }
 
-// trackQuantowerIdentifiers maps Quantower identifiers back to the originating BaseID.
-func (a *App) trackQuantowerIdentifiers(t *Trade) {
-	if t == nil {
-		return
+func (a *App) popTicket(baseID string) (uint64, bool) {
+	if strings.TrimSpace(baseID) == "" {
+		return 0, false
 	}
-	base := strings.TrimSpace(t.BaseID)
-	tradeID := strings.TrimSpace(t.QTTradeID)
-	positionID := strings.TrimSpace(t.QTPositionID)
+	a.mt5TicketMux.Lock()
+	defer a.mt5TicketMux.Unlock()
 
-	if tradeID == "" && positionID == "" {
-		return
+	list := a.baseIdToTickets[baseID]
+	if len(list) == 0 {
+		return 0, false
 	}
-
-	a.qtMux.Lock()
-	defer a.qtMux.Unlock()
-
-	if tradeID != "" {
-		a.qtTradeToBase[tradeID] = base
+	var ticket uint64
+	if len(list) == 1 {
+		ticket = list[0]
+		delete(a.baseIdToTickets, baseID)
+	} else {
+		ticket = list[0]
+		a.baseIdToTickets[baseID] = list[1:]
 	}
-	if positionID != "" {
-		a.qtPositionToBase[positionID] = base
-	}
+	return ticket, true
 }
 
-// pendingClose tracks a queued NT-initiated close request waiting for ticket resolution
-type pendingClose struct {
-	qty        int
-	instrument string
-	account    string
-}
-
-// waitForTickets polls the in-memory ticket map for a BaseID until tickets appear or timeout.
-// Returns the discovered tickets (may be empty) and does not mutate state.
-func (a *App) waitForTickets(baseID string, maxWait time.Duration, poll time.Duration) []uint64 {
-	if maxWait <= 0 || poll <= 0 {
-		return nil
-	}
+func (a *App) popTicketWithWait(baseID string, maxWait, poll time.Duration) (uint64, bool) {
 	deadline := time.Now().Add(maxWait)
 	for {
-		a.mt5TicketMux.RLock()
-		t := a.baseIdToTickets[baseID]
-		a.mt5TicketMux.RUnlock()
-		if len(t) > 0 {
-			return t
+		ticket, ok := a.popTicket(baseID)
+		if ok {
+			return ticket, true
 		}
 		if time.Now().After(deadline) {
-			return nil
+			return 0, false
 		}
 		time.Sleep(poll)
 	}
 }
 
-// resolveBaseIDToTickets attempts to find tickets for a BaseID strictly by direct mapping only.
-// Cross-reference based resolution is DISABLED to avoid mis-closing the wrong hedge.
-// Returns tickets and the actual BaseID they were found under (same as requested on success).
-func (a *App) resolveBaseIDToTickets(requestedBaseID string) ([]uint64, string) {
-	a.mt5TicketMux.RLock()
-	defer a.mt5TicketMux.RUnlock()
-
-	if tickets, found := a.baseIdToTickets[requestedBaseID]; found && len(tickets) > 0 {
-		return tickets, requestedBaseID
+func (a *App) pushTicket(baseID string, ticket uint64) {
+	if strings.TrimSpace(baseID) == "" || ticket == 0 {
+		return
 	}
-	return nil, ""
+	a.mt5TicketMux.Lock()
+	defer a.mt5TicketMux.Unlock()
+
+	current := a.baseIdToTickets[baseID]
+	updated := append([]uint64{ticket}, current...)
+	a.baseIdToTickets[baseID] = updated
+}
+
+func (a *App) removeTicketFromPool(baseID string, ticket uint64) {
+	a.mt5TicketMux.Lock()
+	defer a.mt5TicketMux.Unlock()
+
+	if list, ok := a.baseIdToTickets[baseID]; ok {
+		filtered := list[:0]
+		for _, v := range list {
+			if v != ticket {
+				filtered = append(filtered, v)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(a.baseIdToTickets, baseID)
+		} else {
+			a.baseIdToTickets[baseID] = filtered
+		}
+	}
+	delete(a.mt5TicketToBaseId, ticket)
+}
+
+func (a *App) recordInstrumentAccount(baseID, instrument, account string) {
+	if strings.TrimSpace(baseID) == "" {
+		return
+	}
+	if instrument == "" && account == "" {
+		return
+	}
+	a.mt5TicketMux.Lock()
+	if instrument != "" {
+		a.baseIdToInstrument[baseID] = instrument
+	}
+	if account != "" {
+		a.baseIdToAccount[baseID] = account
+	}
+	a.mt5TicketMux.Unlock()
+}
+
+func (a *App) enqueueCloseTrade(baseID string, ticket uint64, instrument, account string, request interface{}) error {
+	trade := Trade{
+		ID:              fmt.Sprintf("close_%d", time.Now().UnixNano()),
+		BaseID:          baseID,
+		Time:            time.Now(),
+		Action:          "CLOSE_HEDGE",
+		Quantity:        1,
+		Price:           0.0,
+		TotalQuantity:   1,
+		ContractNum:     1,
+		OrderType:       "CLOSE",
+		MeasurementPips: 0,
+		RawMeasurement:  0.0,
+		Instrument:      instrument,
+		AccountName:     account,
+		NTBalance:       0.0,
+		NTDailyPnL:      0.0,
+		NTTradeResult:   "closed",
+		NTSessionTrades: 0,
+		MT5Ticket:       ticket,
+	}
+	if trade.Instrument == "" {
+		trade.Instrument = getInstrumentFromRequest(request)
+	}
+	if trade.AccountName == "" {
+		trade.AccountName = getAccountFromRequest(request)
+	}
+	if err := a.AddToTradeQueue(trade); err != nil {
+		return err
+	}
+	a.clientCloseMux.Lock()
+	a.clientInitiatedTickets[ticket] = time.Now()
+	a.clientCloseMux.Unlock()
+	log.Printf("gRPC: Enqueued CLOSE_HEDGE ticket %d for BaseID %s", ticket, baseID)
+	return nil
 }
 
 // NewApp creates a new App application struct
@@ -288,16 +337,12 @@ func NewApp() *App {
 		// gRPC configuration from environment
 		grpcPort: grpcPort,
 		// Initialize MT5 ticket mappings
-		mt5TicketToBaseId:  make(map[uint64]string),
-		baseIdToMT5Ticket:  make(map[string]uint64),
-		baseIdToTickets:    make(map[string][]uint64),
-		baseIdToInstrument: make(map[string]string),
-		baseIdToAccount:    make(map[string]string),
-		pendingCloses:      make(map[string][]pendingClose),
-		ntInitiatedTickets: make(map[uint64]time.Time),
-		baseIdToElastic:    make(map[string]elasticInfo),
-		qtTradeToBase:      make(map[string]string),
-		qtPositionToBase:   make(map[string]string),
+		mt5TicketToBaseId:      make(map[uint64]string),
+		baseIdToTickets:        make(map[string][]uint64),
+		baseIdToInstrument:     make(map[string]string),
+		baseIdToAccount:        make(map[string]string),
+		clientInitiatedTickets: make(map[uint64]time.Time),
+		baseIdToElastic:        make(map[string]elasticInfo),
 	}
 
 	// Initialize gRPC server
@@ -341,15 +386,6 @@ func (a *App) startup(ctx context.Context) {
 	// Start server initialization
 	a.startServer()
 
-	// Start background reconciler to dispatch pending closes by any available tickets
-	go func() {
-		// Lower cadence to reduce pending->dispatch latency; event-driven kicks still occur on state changes
-		ticker := time.NewTicker(50 * time.Millisecond)
-		defer ticker.Stop()
-		for range ticker.C {
-			a.reconcilePendingCloses()
-		}
-	}()
 }
 
 // startServer initializes the gRPC server
@@ -571,7 +607,6 @@ func (a *App) AddToTradeQueue(trade interface{}) error {
 	log.Printf("AddToTradeQueue: Successfully converted trade - ID: %s, Action: %s", t.ID, t.Action)
 	normalizeTrade(&t)
 	log.Printf("AddToTradeQueue: Normalized trade - canonical_id: %s (qt_trade_id=%s base_id=%s)", t.ID, t.QTTradeID, t.BaseID)
-	a.trackQuantowerIdentifiers(&t)
 
 	// If this is an EVENT trade, emit a concise debug snapshot of the enrichment payload
 	if strings.EqualFold(strings.TrimSpace(t.Action), "EVENT") {
@@ -596,7 +631,7 @@ func (a *App) AddToTradeQueue(trade interface{}) error {
 
 			info := a.baseIdToElastic[b]
 			if points > 0 {
-				info.NtPoints = points
+				info.PointsPer1kLoss = points
 			}
 			if inst != "" {
 				info.Instrument = inst
@@ -615,56 +650,6 @@ func (a *App) AddToTradeQueue(trade interface{}) error {
 	default:
 		return fmt.Errorf("trade queue is full")
 	}
-}
-
-// alignBaseIDForBaseIdOnly is DISABLED to prevent any BaseID re-alignment that could
-// mis-route hedge closures. We now require exact BaseID->ticket mapping.
-// Always returns "" to indicate no alignment should occur.
-func (a *App) alignBaseIDForBaseIdOnly(requestedBaseID, reqInstrument, reqAccount string) (string, string) {
-	return "", ""
-}
-
-// shouldDeferBaseIdOnly determines if we should avoid immediately enqueueing a base_id-only
-// CLOSE_HEDGE because it's ambiguous which MT5 position would match. We consider it ambiguous
-// when more than one BaseID currently has tickets for the same instrument/account (when known).
-// Returns (defer, candidatesForInstAcct, totalBasesWithTickets).
-func (a *App) shouldDeferBaseIdOnly(inst, acct string) (bool, int, int) {
-	a.mt5TicketMux.RLock()
-	defer a.mt5TicketMux.RUnlock()
-
-	// Count bases with any tickets overall
-	totalWithTickets := 0
-	for _, tickets := range a.baseIdToTickets {
-		if len(tickets) > 0 {
-			totalWithTickets++
-		}
-	}
-
-	// If instrument/account known, filter by those
-	candidates := 0
-	normI := strings.TrimSpace(inst)
-	normA := strings.TrimSpace(acct)
-	for b, tickets := range a.baseIdToTickets {
-		if len(tickets) == 0 {
-			continue
-		}
-		if normI == "" && normA == "" {
-			// No filter available; use overall count
-			candidates = totalWithTickets
-			break
-		}
-		bi, hasI := a.baseIdToInstrument[b]
-		ba, hasA := a.baseIdToAccount[b]
-		matchI := (normI == "" || (hasI && bi == normI))
-		matchA := (normA == "" || (hasA && ba == normA))
-		if matchI && matchA {
-			candidates++
-		}
-	}
-
-	// Defer when more than one candidate could match, to avoid closing the wrong hedge.
-	// We'll rely on pendingCloses + later ticket resolution to close precisely by ticket.
-	return candidates > 1, candidates, totalWithTickets
 }
 
 // AddToTradeHistory adds a trade to the history
@@ -713,32 +698,158 @@ func (a *App) initElasticMaps() {
 func (a *App) HandleHedgeCloseNotification(notification interface{}) error {
 	log.Printf("gRPC: Received hedge close notification: %+v", notification)
 
-	// Parse the CLOSE_HEDGE notification
-	baseID := getBaseIDFromRequest(notification)
+	baseID := strings.TrimSpace(getBaseIDFromRequest(notification))
 	if baseID == "" {
 		log.Printf("gRPC: Warning - hedge close notification missing BaseID")
 		return fmt.Errorf("hedge close notification missing BaseID")
 	}
 
-	// Determine source of the closure by checking closure_reason
-	closureReason := getClosureReasonFromRequest(notification)
-	log.Printf("gRPC: Closure reason: %s for BaseID: %s", closureReason, baseID)
+	closureReason := strings.TrimSpace(getClosureReasonFromRequest(notification))
+	lowerReason := strings.ToLower(closureReason)
+	quantity := getQuantityFromRequest(notification)
+	inst := strings.TrimSpace(getInstrumentFromRequest(notification))
+	acct := strings.TrimSpace(getAccountFromRequest(notification))
+	mt5Ticket := getMT5TicketFromRequest(notification)
 
-	// Treat both native MT5_* reasons and elastic_* reasons as MT5-originated signals.
-	// Elastic reasons are intentful EA-side close events (partial or completion) and must NOT
-	// be turned into NT-initiated CLOSE_HEDGE requests.
-	lowerReason := strings.ToLower(strings.TrimSpace(closureReason))
-	isMT5Closure := closureReason == "MT5_position_closed" ||
-		closureReason == "MT5_stop_loss" ||
-		closureReason == "MT5_manual_close" ||
-		closureReason == "MT5_take_profit" ||
-		strings.HasPrefix(lowerReason, "elastic_")
+	if inst != "" || acct != "" {
+		a.recordInstrumentAccount(baseID, inst, acct)
+	}
 
-	if isMT5Closure {
-		// MT5 initiated the closure - need to notify NinjaTrader
-		log.Printf("gRPC: MT5-initiated closure detected - notifying NinjaTrader for BaseID: %s", baseID)
+	if strings.HasPrefix(lowerReason, "elastic_") {
+		a.markElasticClose(baseID, mt5Ticket, closureReason, quantity)
+	}
 
-		// Create a close notification trade for NinjaTrader
+	closeNotification := struct {
+		ID              string    `json:"id"`
+		BaseID          string    `json:"base_id"`
+		Time            time.Time `json:"time"`
+		Action          string    `json:"action"`
+		Quantity        float64   `json:"quantity"`
+		Price           float64   `json:"price"`
+		TotalQuantity   float64   `json:"total_quantity"`
+		ContractNum     int       `json:"contract_num"`
+		OrderType       string    `json:"order_type"`
+		MeasurementPips float64   `json:"measurement_pips"`
+		RawMeasurement  float64   `json:"raw_measurement"`
+		Instrument      string    `json:"instrument"`
+		AccountName     string    `json:"account_name"`
+		NTBalance       float64   `json:"nt_balance"`
+		NTDailyPnL      float64   `json:"nt_daily_pnl"`
+		NTTradeResult   string    `json:"nt_trade_result"`
+		NTSessionTrades int       `json:"nt_session_trades"`
+		MT5Ticket       uint64    `json:"mt5_ticket"`
+		ClosureReason   string    `json:"closure_reason"`
+	}{
+		ID:              fmt.Sprintf("mt5close_%d", time.Now().UnixNano()),
+		BaseID:          baseID,
+		Time:            time.Now(),
+		Action:          "MT5_CLOSE_NOTIFICATION",
+		Quantity:        quantity,
+		Price:           0,
+		TotalQuantity:   quantity,
+		ContractNum:     1,
+		OrderType:       "MT5_CLOSE",
+		MeasurementPips: 0,
+		RawMeasurement:  0,
+		Instrument:      inst,
+		AccountName:     acct,
+		NTBalance:       0,
+		NTDailyPnL:      0,
+		NTTradeResult:   "mt5_closed",
+		NTSessionTrades: 0,
+		MT5Ticket:       mt5Ticket,
+		ClosureReason:   closureReason,
+	}
+
+	if mt5Ticket == 0 {
+		log.Printf("WARN: MT5 close notification for base_id=%s did not include a ticket; downstream consumers may fall back to base-only handling", baseID)
+	}
+
+	a.grpcServer.BroadcastMT5CloseToAddonStreams(closeNotification)
+
+	if mt5Ticket != 0 && !strings.EqualFold(lowerReason, "elastic_partial_close") {
+		a.removeTicketFromPool(baseID, mt5Ticket)
+	}
+
+	log.Printf("gRPC: Successfully processed MT5 closure notification for BaseID: %s (reason=%s, ticket=%d)", baseID, closureReason, mt5Ticket)
+	return nil
+}
+
+func (a *App) HandleMT5TradeResult(result interface{}) error {
+	log.Printf("gRPC: Received MT5 trade result: %+v", result)
+
+	switch mt5Result := result.(type) {
+	case *grpcserver.InternalMT5TradeResult:
+		return a.handleInternalMT5TradeResult(mt5Result)
+	case map[string]interface{}:
+		converted := &grpcserver.InternalMT5TradeResult{}
+		if status, ok := mt5Result["Status"].(string); ok {
+			converted.Status = status
+		}
+		if ticketVal, ok := mt5Result["Ticket"].(float64); ok {
+			converted.Ticket = uint64(ticketVal)
+		}
+		if volumeVal, ok := mt5Result["Volume"].(float64); ok {
+			converted.Volume = volumeVal
+		}
+		if isClose, ok := mt5Result["IsClose"].(bool); ok {
+			converted.IsClose = isClose
+		}
+		if idVal, ok := mt5Result["ID"].(string); ok {
+			converted.ID = idVal
+		}
+		return a.handleInternalMT5TradeResult(converted)
+	default:
+		log.Printf("gRPC: WARNING - Unknown MT5 trade result type: %T", result)
+		return nil
+	}
+}
+
+func (a *App) handleInternalMT5TradeResult(res *grpcserver.InternalMT5TradeResult) error {
+	if res == nil {
+		return nil
+	}
+
+	baseID := strings.TrimSpace(res.ID)
+	ticket := res.Ticket
+	if baseID == "" && ticket == 0 {
+		log.Printf("gRPC: Ignoring MT5 trade result with no identifiers: %+v", res)
+		return nil
+	}
+
+	if res.IsClose {
+		closureReason := strings.TrimSpace(res.Status)
+		if closureReason == "" {
+			closureReason = "MT5_position_closed"
+		}
+		suppressBroadcast := false
+		if mk, ok := a.recentElasticFor(baseID, ticket, 3*time.Second); ok {
+			if strings.EqualFold(mk.reason, "elastic_partial_close") {
+				suppressBroadcast = true
+				closureReason = mk.reason
+			} else if strings.TrimSpace(mk.reason) != "" {
+				closureReason = mk.reason
+			}
+		}
+
+		orderType := "MT5_CLOSE"
+		a.clientCloseMux.Lock()
+		if ticket != 0 {
+			if ts, ok := a.clientInitiatedTickets[ticket]; ok {
+				if time.Since(ts) <= 5*time.Second {
+					orderType = "NT_CLOSE_ACK"
+				}
+				delete(a.clientInitiatedTickets, ticket)
+			}
+		}
+		a.clientCloseMux.Unlock()
+
+		shouldPrune := ticket != 0 && !strings.EqualFold(closureReason, "elastic_partial_close")
+		if shouldPrune {
+			a.removeTicketFromPool(baseID, ticket)
+		}
+
+		inst, acct := a.bestInstAcctFor(baseID)
 		closeNotification := struct {
 			ID              string    `json:"id"`
 			BaseID          string    `json:"base_id"`
@@ -760,500 +871,58 @@ func (a *App) HandleHedgeCloseNotification(notification interface{}) error {
 			MT5Ticket       uint64    `json:"mt5_ticket"`
 			ClosureReason   string    `json:"closure_reason"`
 		}{
-			ID:              fmt.Sprintf("mt5close_%d", time.Now().UnixNano()),
+			ID:              fmt.Sprintf("mt5close_result_%d", time.Now().UnixNano()),
 			BaseID:          baseID,
 			Time:            time.Now(),
 			Action:          "MT5_CLOSE_NOTIFICATION",
-			Quantity:        getQuantityFromRequest(notification),
-			Price:           0.0,
-			TotalQuantity:   getQuantityFromRequest(notification),
+			Quantity:        res.Volume,
+			Price:           0,
+			TotalQuantity:   res.Volume,
 			ContractNum:     1,
-			OrderType:       "MT5_CLOSE",
-			MeasurementPips: 0.0,
-			RawMeasurement:  0.0,
-			Instrument:      getInstrumentFromRequest(notification),
-			AccountName:     getAccountFromRequest(notification),
-			NTBalance:       0.0,
-			NTDailyPnL:      0.0,
+			OrderType:       orderType,
+			MeasurementPips: 0,
+			RawMeasurement:  0,
+			Instrument:      inst,
+			AccountName:     acct,
+			NTBalance:       0,
+			NTDailyPnL:      0,
 			NTTradeResult:   "mt5_closed",
 			NTSessionTrades: 0,
-			MT5Ticket:       getMT5TicketFromRequest(notification),
+			MT5Ticket:       ticket,
 			ClosureReason:   closureReason,
 		}
 
-		// If this is an elastic signaled close, mark context for correlation and avoid
-		// mutating ticket pools on partials (MT5 position remains open with reduced volume).
-		if strings.HasPrefix(lowerReason, "elastic_") {
-			a.markElasticClose(baseID, closeNotification.MT5Ticket, closureReason, closeNotification.Quantity)
-			// On elastic partials, do not attempt ticket inference (we don't want to pop tickets)
-			// and do not prune mappings below. If the EA omitted the ticket, we keep it as 0.
-			if strings.EqualFold(lowerReason, "elastic_partial_close") {
-				// Clear any stale pending NT CLOSE_HEDGE accidentally recorded for this BaseID
-				// to prevent immediate re-closing of newly opened tickets.
-				a.mt5TicketMux.Lock()
-				if _, had := a.pendingCloses[baseID]; had {
-					delete(a.pendingCloses, baseID)
-					log.Printf("gRPC: Cleared pending CLOSE_HEDGE for BaseID %s due to elastic_partial_close (prevent premature closures).", baseID)
-				}
-				a.mt5TicketMux.Unlock()
-			}
+		if suppressBroadcast {
+			log.Printf("gRPC: Suppressed MT5 close broadcast for ticket %d (BaseID: %s) due to elastic_partial_close context.", ticket, baseID)
 		} else {
-			// Non-elastic MT5 close: if MT5 didn't include a ticket, try to infer one
-			if closeNotification.MT5Ticket == 0 {
-				inferred := uint64(0)
-				a.mt5TicketMux.Lock()
-				if list, ok := a.baseIdToTickets[baseID]; ok && len(list) > 0 {
-					inferred = list[0]
-					remaining := list[1:]
-					if len(remaining) == 0 {
-						delete(a.baseIdToTickets, baseID)
-					} else {
-						a.baseIdToTickets[baseID] = remaining
-					}
-					if cur, ok2 := a.baseIdToMT5Ticket[baseID]; ok2 && cur == inferred {
-						delete(a.baseIdToMT5Ticket, baseID)
-					}
-					delete(a.mt5TicketToBaseId, inferred)
-				}
-				a.mt5TicketMux.Unlock()
-				if inferred != 0 {
-					closeNotification.MT5Ticket = inferred
-					log.Printf("DEBUG: Inferred MT5 ticket %d for close notification (BaseID: %s) due to missing ticket from MT5; ensures NT processes unique sequential closes.", inferred, baseID)
-				} else {
-					log.Printf("DEBUG: No MT5 ticket extracted from notification and none inferred; NT may fall back to base_id-only logic")
-				}
-			} else {
-				log.Printf("DEBUG: Extracted MT5 ticket %d from notification (type %T)", closeNotification.MT5Ticket, notification)
-			}
+			a.grpcServer.BroadcastMT5CloseToAddonStreams(closeNotification)
+			log.Printf("gRPC: Processed MT5 close result for ticket %d (BaseID: %s) reason=%s", ticket, baseID, closureReason)
 		}
-
-		// Broadcast MT5 closure notifications to NT streams only (not MT5 streams to prevent circular trades)
-		// This notifies NT to close corresponding positions when MT5 closes a hedge
-		log.Printf("gRPC: Broadcasting MT5 closure notification to NT streams for BaseID: %s", baseID)
-		a.grpcServer.BroadcastMT5CloseToNTStreams(closeNotification)
-
-		// Prune stored ticket mappings only for non-elastic or elastic completion signals.
-		// For elastic_partial_close we keep mappings intact (position remains open).
-		if closeNotification.MT5Ticket != 0 && !strings.EqualFold(lowerReason, "elastic_partial_close") {
-			a.mt5TicketMux.Lock()
-			delete(a.mt5TicketToBaseId, closeNotification.MT5Ticket)
-			if cur, ok := a.baseIdToMT5Ticket[baseID]; ok && cur == closeNotification.MT5Ticket {
-				delete(a.baseIdToMT5Ticket, baseID)
-			}
-			if list, ok := a.baseIdToTickets[baseID]; ok {
-				nl := make([]uint64, 0, len(list))
-				for _, v := range list {
-					if v != closeNotification.MT5Ticket {
-						nl = append(nl, v)
-					}
-				}
-				if len(nl) == 0 {
-					delete(a.baseIdToTickets, baseID)
-				} else {
-					a.baseIdToTickets[baseID] = nl
-				}
-			}
-			a.mt5TicketMux.Unlock()
-			log.Printf("gRPC: Pruned MT5 ticket mapping for closed ticket %d (BaseID: %s)", closeNotification.MT5Ticket, baseID)
-		}
-
-		log.Printf("gRPC: Successfully sent MT5 closure notification to NinjaTrader for BaseID: %s", baseID)
 		return nil
 	}
 
-	// Not an MT5/elastic close notification; ignore here (NT-originated closes are handled via HandleNTCloseHedgeRequest entrypoint)
-	log.Printf("gRPC: Non-MT5 close notification ignored in HandleHedgeCloseNotification (BaseID: %s, reason=%s)", baseID, closureReason)
-	return nil
-}
-
-func (a *App) HandleMT5TradeResult(result interface{}) error {
-	log.Printf("gRPC: Received MT5 trade result: %+v", result)
-
-	// Handle different types of results that might be passed
-	switch mt5Result := result.(type) {
-	case *grpcserver.InternalMT5TradeResult:
-		// Direct struct pointer
-		if mt5Result.Ticket != 0 && mt5Result.ID != "" {
-			if mt5Result.IsClose {
-				// Closure result: prune mapping and notify NT so NT won't keep retrying
-				base := mt5Result.ID
-				ticket := mt5Result.Ticket
-				// Before pruning/broadcasting, check for recent elastic context to avoid overriding intent
-				if mk, ok := a.recentElasticFor(base, ticket, 3*time.Second); ok {
-					// If the elastic reason was a partial, we suppress this generic MT5_position_closed broadcast
-					if strings.EqualFold(mk.reason, "elastic_partial_close") {
-						log.Printf("gRPC: Suppressing generic MT5TradeResult close for ticket %d (BaseID: %s) due to recent elastic_partial_close context.", ticket, base)
-						// Still prune the ticket mapping below to keep state consistent
-					} else {
-						// Reclassify generic reason to the elastic context (e.g., elastic_completion)
-						log.Printf("gRPC: Reclassifying MT5TradeResult close for ticket %d (BaseID: %s) from MT5_position_closed to %s due to recent elastic context.", ticket, base, mk.reason)
-					}
-				}
-				a.mt5TicketMux.Lock()
-				// Remove from reverse map and single-ticket map
-				delete(a.mt5TicketToBaseId, ticket)
-				if cur, ok := a.baseIdToMT5Ticket[base]; ok && cur == ticket {
-					delete(a.baseIdToMT5Ticket, base)
-				}
-				// Remove from ticket pool for this BaseID
-				if list, ok := a.baseIdToTickets[base]; ok && len(list) > 0 {
-					nl := make([]uint64, 0, len(list))
-					for _, v := range list {
-						if v != ticket {
-							nl = append(nl, v)
-						}
-					}
-					if len(nl) == 0 {
-						delete(a.baseIdToTickets, base)
-					} else {
-						a.baseIdToTickets[base] = nl
-					}
-				}
-				a.mt5TicketMux.Unlock()
-
-				// Determine origin for tagging: if NT recently requested this ticket to close, mark as NT ack
-				orderType := "MT5_CLOSE"
-				a.ntCloseMux.Lock()
-				if t, ok := a.ntInitiatedTickets[ticket]; ok {
-					if time.Since(t) <= 5*time.Second { // within TTL
-						orderType = "NT_CLOSE_ACK"
-					}
-					// Clean up tracked ticket regardless (one-shot)
-					delete(a.ntInitiatedTickets, ticket)
-				}
-				a.ntCloseMux.Unlock()
-
-				// Decide closure reason and whether to suppress based on recent elastic context
-				closureReason := "MT5_position_closed"
-				suppress := false
-				if mk, ok := a.recentElasticFor(base, ticket, 3*time.Second); ok {
-					if strings.EqualFold(mk.reason, "elastic_partial_close") {
-						// Suppress broadcasting this generic close; partial already communicated intent
-						suppress = true
-					} else {
-						closureReason = mk.reason // carry over elastic_completion, etc.
-					}
-				}
-
-				// Broadcast MT5 close notification to NT streams (idempotent on NT side)
-				closeNotification := struct {
-					ID              string    `json:"id"`
-					BaseID          string    `json:"base_id"`
-					Time            time.Time `json:"time"`
-					Action          string    `json:"action"`
-					Quantity        float64   `json:"quantity"`
-					Price           float64   `json:"price"`
-					TotalQuantity   float64   `json:"total_quantity"`
-					ContractNum     int       `json:"contract_num"`
-					OrderType       string    `json:"order_type"`
-					MeasurementPips float64   `json:"measurement_pips"`
-					RawMeasurement  float64   `json:"raw_measurement"`
-					Instrument      string    `json:"instrument"`
-					AccountName     string    `json:"account_name"`
-					NTBalance       float64   `json:"nt_balance"`
-					NTDailyPnL      float64   `json:"nt_daily_pnl"`
-					NTTradeResult   string    `json:"nt_trade_result"`
-					NTSessionTrades int       `json:"nt_session_trades"`
-					MT5Ticket       uint64    `json:"mt5_ticket"`
-					ClosureReason   string    `json:"closure_reason"`
-				}{
-					ID:              fmt.Sprintf("mt5close_result_%d", time.Now().UnixNano()),
-					BaseID:          base,
-					Time:            time.Now(),
-					Action:          "MT5_CLOSE_NOTIFICATION",
-					Quantity:        mt5Result.Volume,
-					Price:           0,
-					TotalQuantity:   mt5Result.Volume,
-					ContractNum:     1,
-					OrderType:       orderType,
-					MeasurementPips: 0,
-					RawMeasurement:  0,
-					Instrument:      func() string { i, _ := a.bestInstAcctFor(base); return i }(),
-					AccountName:     func() string { _, ac := a.bestInstAcctFor(base); return ac }(),
-					NTBalance:       0,
-					NTDailyPnL:      0,
-					NTTradeResult:   "mt5_closed",
-					NTSessionTrades: 0,
-					MT5Ticket:       ticket,
-					ClosureReason:   closureReason,
-				}
-				if suppress {
-					log.Printf("gRPC: Skipped broadcasting MT5 close for ticket %d (BaseID: %s) due to elastic_partial_close context.", ticket, base)
-				} else {
-					a.grpcServer.BroadcastMT5CloseToNTStreams(closeNotification)
-					log.Printf("gRPC: Pruned mapping and broadcasted MT5 close for ticket %d (BaseID: %s) with reason %s", ticket, base, closureReason)
-				}
-			} else {
-				// Open/fill result: record mapping and try to drain pendings
-				a.mt5TicketMux.Lock()
-				a.mt5TicketToBaseId[mt5Result.Ticket] = mt5Result.ID
-				a.baseIdToMT5Ticket[mt5Result.ID] = mt5Result.Ticket
-				// append unique ticket to list
-				list := a.baseIdToTickets[mt5Result.ID]
-				seen := false
-				for _, v := range list {
-					if v == mt5Result.Ticket {
-						seen = true
-						break
-					}
-				}
-				if !seen {
-					a.baseIdToTickets[mt5Result.ID] = append(list, mt5Result.Ticket)
-				}
-
-				// Capture available tickets and any pending closes before unlocking
-				listCopy := a.baseIdToTickets[mt5Result.ID]
-				available := make([]uint64, len(listCopy))
-				copy(available, listCopy)
-				pendCopy := a.pendingCloses[mt5Result.ID]
-				pend := make([]pendingClose, len(pendCopy))
-				copy(pend, pendCopy)
-				a.mt5TicketMux.Unlock()
-
-				log.Printf("gRPC: Stored MT5 ticket mapping - Ticket: %d -> BaseID: %s (count=%d)", mt5Result.Ticket, mt5Result.ID, len(available))
-
-				// If there are pending NT closes for this BaseID, dispatch them now using explicit tickets
-				if len(pend) > 0 && len(available) > 0 {
-					// Consume pending closes FIFO, allocating one ticket per pending unit until we run out
-					a.mt5TicketMux.Lock()
-					pool := a.baseIdToTickets[mt5Result.ID]
-					var remainingPend []pendingClose
-					for _, pc := range pend {
-						alloc := pc.qty
-						for alloc > 0 && len(pool) > 0 {
-							ticket := pool[0]
-							pool = pool[1:]
-							ct := Trade{
-								ID:              fmt.Sprintf("close_%d", time.Now().UnixNano()),
-								BaseID:          mt5Result.ID,
-								Time:            time.Now(),
-								Action:          "CLOSE_HEDGE",
-								Quantity:        1,
-								Price:           0,
-								TotalQuantity:   1,
-								ContractNum:     1,
-								OrderType:       "CLOSE",
-								MeasurementPips: 0,
-								RawMeasurement:  0,
-								Instrument:      pc.instrument,
-								AccountName:     pc.account,
-								NTTradeResult:   "closed",
-								MT5Ticket:       ticket,
-							}
-							if err := a.AddToTradeQueue(ct); err != nil {
-								log.Printf("gRPC: Failed to add pending CLOSE_HEDGE (ticket %d) to trade queue: %v", ticket, err)
-								// If enqueue fails, re-queue this pending and break to avoid spinning
-								remainingPend = append(remainingPend, pendingClose{qty: alloc, instrument: pc.instrument, account: pc.account})
-								break
-							}
-							alloc--
-							log.Printf("gRPC: Dispatched pending CLOSE_HEDGE using ticket %d for BaseID %s (%d left in this pending)", ticket, mt5Result.ID, alloc)
-						}
-						if alloc > 0 {
-							// Not enough tickets yet; keep remaining pending
-							remainingPend = append(remainingPend, pendingClose{qty: alloc, instrument: pc.instrument, account: pc.account})
-						}
-					}
-					// Update pools and pending list
-					a.baseIdToTickets[mt5Result.ID] = pool
-					if len(remainingPend) == 0 {
-						delete(a.pendingCloses, mt5Result.ID)
-					} else {
-						a.pendingCloses[mt5Result.ID] = remainingPend
-					}
-					a.mt5TicketMux.Unlock()
-				}
-
-				// Event-driven: after storing a new ticket, attempt a global reconcile to drain any cross-base pendings
-				go a.reconcilePendingCloses()
-			}
-		}
-	case map[string]interface{}:
-		// Legacy map format (keep for compatibility)
-		if ticketFloat, ok := mt5Result["Ticket"].(float64); ok {
-			ticket := uint64(ticketFloat)
-
-			if baseId, ok := mt5Result["ID"].(string); ok && baseId != "" {
-				isClose := false
-				if ic, okIC := mt5Result["IsClose"].(bool); okIC {
-					isClose = ic
-				}
-				if isClose {
-					// Prune mappings on close and notify NT
-					// Check for recent elastic context before processing
-					var baseElastic string
-					if mk, ok := a.recentElasticFor(baseId, ticket, 3*time.Second); ok {
-						baseElastic = mk.reason
-						if strings.EqualFold(baseElastic, "elastic_partial_close") {
-							log.Printf("gRPC: Suppressing legacy MT5TradeResult close for ticket %d (BaseID: %s) due to recent elastic_partial_close context.", ticket, baseId)
-						} else {
-							log.Printf("gRPC: Reclassifying legacy MT5TradeResult close for ticket %d (BaseID: %s) to %s due to recent elastic context.", ticket, baseId, baseElastic)
-						}
-					}
-					a.mt5TicketMux.Lock()
-					delete(a.mt5TicketToBaseId, ticket)
-					if cur, ok := a.baseIdToMT5Ticket[baseId]; ok && cur == ticket {
-						delete(a.baseIdToMT5Ticket, baseId)
-					}
-					if list, ok := a.baseIdToTickets[baseId]; ok && len(list) > 0 {
-						nl := make([]uint64, 0, len(list))
-						for _, v := range list {
-							if v != ticket {
-								nl = append(nl, v)
-							}
-						}
-						if len(nl) == 0 {
-							delete(a.baseIdToTickets, baseId)
-						} else {
-							a.baseIdToTickets[baseId] = nl
-						}
-					}
-					a.mt5TicketMux.Unlock()
-
-					// Determine origin for tagging
-					orderType := "MT5_CLOSE"
-					a.ntCloseMux.Lock()
-					if t, ok := a.ntInitiatedTickets[ticket]; ok {
-						if time.Since(t) <= 5*time.Second {
-							orderType = "NT_CLOSE_ACK"
-						}
-						delete(a.ntInitiatedTickets, ticket)
-					}
-					a.ntCloseMux.Unlock()
-
-					closureReason := "MT5_position_closed"
-					suppress := false
-					if baseElastic != "" {
-						if strings.EqualFold(baseElastic, "elastic_partial_close") {
-							suppress = true
-						} else {
-							closureReason = baseElastic
-						}
-					}
-
-					closeNotification := struct {
-						ID              string    `json:"id"`
-						BaseID          string    `json:"base_id"`
-						Time            time.Time `json:"time"`
-						Action          string    `json:"action"`
-						Quantity        float64   `json:"quantity"`
-						Price           float64   `json:"price"`
-						TotalQuantity   float64   `json:"total_quantity"`
-						ContractNum     int       `json:"contract_num"`
-						OrderType       string    `json:"order_type"`
-						MeasurementPips float64   `json:"measurement_pips"`
-						RawMeasurement  float64   `json:"raw_measurement"`
-						Instrument      string    `json:"instrument"`
-						AccountName     string    `json:"account_name"`
-						NTBalance       float64   `json:"nt_balance"`
-						NTDailyPnL      float64   `json:"nt_daily_pnl"`
-						NTTradeResult   string    `json:"nt_trade_result"`
-						NTSessionTrades int       `json:"nt_session_trades"`
-						MT5Ticket       uint64    `json:"mt5_ticket"`
-						ClosureReason   string    `json:"closure_reason"`
-					}{
-						ID:              fmt.Sprintf("mt5close_result_%d", time.Now().UnixNano()),
-						BaseID:          baseId,
-						Time:            time.Now(),
-						Action:          "MT5_CLOSE_NOTIFICATION",
-						Quantity:        0,
-						Price:           0,
-						TotalQuantity:   0,
-						ContractNum:     1,
-						OrderType:       orderType,
-						MeasurementPips: 0,
-						RawMeasurement:  0,
-						Instrument:      func() string { i, _ := a.bestInstAcctFor(baseId); return i }(),
-						AccountName:     func() string { _, ac := a.bestInstAcctFor(baseId); return ac }(),
-						NTBalance:       0,
-						NTDailyPnL:      0,
-						NTTradeResult:   "mt5_closed",
-						NTSessionTrades: 0,
-						MT5Ticket:       ticket,
-						ClosureReason:   closureReason,
-					}
-					if suppress {
-						log.Printf("gRPC: Skipped broadcasting MT5 close for ticket %d (BaseID: %s) due to elastic_partial_close context.", ticket, baseId)
-					} else {
-						a.grpcServer.BroadcastMT5CloseToNTStreams(closeNotification)
-						log.Printf("gRPC: Pruned mapping and broadcasted MT5 close for ticket %d (BaseID: %s) with reason %s", ticket, baseId, closureReason)
-					}
-				} else {
-					a.mt5TicketMux.Lock()
-					a.mt5TicketToBaseId[ticket] = baseId
-					a.baseIdToMT5Ticket[baseId] = ticket
-					// append unique ticket to list
-					list := a.baseIdToTickets[baseId]
-					seen := false
-					for _, v := range list {
-						if v == ticket {
-							seen = true
-							break
-						}
-					}
-					if !seen {
-						a.baseIdToTickets[baseId] = append(list, ticket)
-					}
-
-					// Capture available tickets and pending before unlock
-					ticketCopy := a.baseIdToTickets[baseId]
-					available := make([]uint64, len(ticketCopy))
-					copy(available, ticketCopy)
-					pendingCopy := a.pendingCloses[baseId]
-					pend := make([]pendingClose, len(pendingCopy))
-					copy(pend, pendingCopy)
-					a.mt5TicketMux.Unlock()
-
-					log.Printf("gRPC: Stored MT5 ticket mapping - Ticket: %d -> BaseID: %s (count=%d)", ticket, baseId, len(available))
-
-					if len(pend) > 0 && len(available) > 0 {
-						// Consume pending closes with the available pool
-						a.mt5TicketMux.Lock()
-						pool := a.baseIdToTickets[baseId]
-						var remainingPend []pendingClose
-						for _, pc := range pend {
-							alloc := pc.qty
-							for alloc > 0 && len(pool) > 0 {
-								tk := pool[0]
-								pool = pool[1:]
-								ct := Trade{
-									ID:            fmt.Sprintf("close_%d", time.Now().UnixNano()),
-									BaseID:        baseId,
-									Time:          time.Now(),
-									Action:        "CLOSE_HEDGE",
-									Quantity:      1,
-									TotalQuantity: 1,
-									OrderType:     "CLOSE",
-									Instrument:    pc.instrument,
-									AccountName:   pc.account,
-									MT5Ticket:     tk,
-								}
-								if err := a.AddToTradeQueue(ct); err != nil {
-									log.Printf("gRPC: Failed to add pending CLOSE_HEDGE (ticket %d) to trade queue: %v", tk, err)
-									remainingPend = append(remainingPend, pendingClose{qty: alloc, instrument: pc.instrument, account: pc.account})
-									break
-								}
-								alloc--
-							}
-							if alloc > 0 {
-								remainingPend = append(remainingPend, pendingClose{qty: alloc, instrument: pc.instrument, account: pc.account})
-							}
-						}
-						a.baseIdToTickets[baseId] = pool
-						if len(remainingPend) == 0 {
-							delete(a.pendingCloses, baseId)
-						} else {
-							a.pendingCloses[baseId] = remainingPend
-						}
-						a.mt5TicketMux.Unlock()
-					}
-				}
-			}
-		}
-	default:
-		log.Printf("gRPC: WARNING - Unknown MT5 trade result type: %T", result)
+	if baseID == "" || ticket == 0 {
+		log.Printf("gRPC: MT5 open/fill result missing base or ticket: %+v", res)
+		return nil
 	}
 
+	a.mt5TicketMux.Lock()
+	prevBase, exists := a.mt5TicketToBaseId[ticket]
+	a.mt5TicketToBaseId[ticket] = baseID
+	list := a.baseIdToTickets[baseID]
+	for _, existing := range list {
+		if existing == ticket {
+			a.mt5TicketMux.Unlock()
+			if exists && prevBase != baseID {
+				log.Printf("gRPC: MT5 ticket %d reassigned from BaseID %s to %s", ticket, prevBase, baseID)
+			}
+			return nil
+		}
+	}
+	a.baseIdToTickets[baseID] = append(list, ticket)
+	a.mt5TicketMux.Unlock()
+
+	log.Printf("gRPC: Stored MT5 ticket mapping - Ticket: %d -> BaseID: %s (open result)", ticket, baseID)
 	return nil
 }
 
@@ -1269,7 +938,7 @@ func (a *App) HandleElasticUpdate(update interface{}) error {
 	// Inject cached Quantower sizing hint and enrichment where possible
 	a.mt5TicketMux.RLock()
 	info := a.baseIdToElastic[baseID]
-	ntPts := info.NtPoints
+	ntPts := info.PointsPer1kLoss
 	inst := strings.TrimSpace(a.baseIdToInstrument[baseID])
 	acct := strings.TrimSpace(a.baseIdToAccount[baseID])
 	if inst == "" {
@@ -1287,7 +956,7 @@ func (a *App) HandleElasticUpdate(update interface{}) error {
 			a.mt5TicketMux.RLock()
 			info = a.baseIdToElastic[baseID]
 			if ntPts <= 0 {
-				ntPts = info.NtPoints
+				ntPts = info.PointsPer1kLoss
 			}
 			if inst == "" {
 				inst = strings.TrimSpace(a.baseIdToInstrument[baseID])
@@ -1350,430 +1019,90 @@ func (a *App) HandleTrailingStopUpdate(update interface{}) error {
 	return nil
 }
 
-func (a *App) HandleNTCloseHedgeRequest(request interface{}) error {
-	log.Printf("gRPC: Received NT close hedge request: %+v", request)
+func (a *App) HandleCloseHedgeRequest(request interface{}) error {
+	log.Printf("gRPC: Received close hedge request: %+v", request)
 
-	// Extract BaseID from request
-	baseID := getBaseIDFromRequest(request)
+	baseID := strings.TrimSpace(getBaseIDFromRequest(request))
+	if baseID == "" {
+		return fmt.Errorf("close hedge request missing base_id")
+	}
 
-	// If NT provided a specific MT5 ticket, prioritize closing that ticket directly.
-	if provided := getMT5TicketFromRequest(request); provided != 0 {
-		log.Printf("gRPC: NT close request has explicit MT5 ticket %d; enqueueing targeted CLOSE_HEDGE.", provided)
-		ct := Trade{
-			ID:              fmt.Sprintf("close_%d", time.Now().UnixNano()),
-			BaseID:          baseID,
-			Time:            time.Now(),
-			Action:          "CLOSE_HEDGE",
-			Quantity:        1,
-			Price:           0.0,
-			TotalQuantity:   1,
-			ContractNum:     1,
-			OrderType:       "CLOSE",
-			MeasurementPips: 0,
-			RawMeasurement:  0.0,
-			Instrument:      getInstrumentFromRequest(request),
-			AccountName:     getAccountFromRequest(request),
-			NTBalance:       0.0,
-			NTDailyPnL:      0.0,
-			NTTradeResult:   "closed",
-			NTSessionTrades: 0,
-			MT5Ticket:       provided,
+	inst := strings.TrimSpace(getInstrumentFromRequest(request))
+	acct := strings.TrimSpace(getAccountFromRequest(request))
+	if inst != "" || acct != "" {
+		a.recordInstrumentAccount(baseID, inst, acct)
+	}
+
+	qtyRaw := getQuantityFromRequest(request)
+	if qtyRaw <= 0 {
+		qtyRaw = 1
+	}
+	qty := int(math.Ceil(qtyRaw))
+	if qty < 1 {
+		qty = 1
+	}
+
+	providedTicket := getMT5TicketFromRequest(request)
+	if providedTicket != 0 {
+		if err := a.enqueueCloseTrade(baseID, providedTicket, inst, acct, request); err != nil {
+			return fmt.Errorf("failed to enqueue targeted CLOSE_HEDGE for ticket %d: %w", providedTicket, err)
 		}
-		if err := a.AddToTradeQueue(ct); err != nil {
-			return fmt.Errorf("failed to add targeted CLOSE_HEDGE (ticket %d) to queue: %v", provided, err)
-		}
-		// Persist instrument/account for this BaseID
-		inst := strings.TrimSpace(getInstrumentFromRequest(request))
-		acct := strings.TrimSpace(getAccountFromRequest(request))
-		if inst != "" {
-			a.baseIdToInstrument[baseID] = inst
-		}
-		if acct != "" {
-			a.baseIdToAccount[baseID] = acct
-		}
-		// Track NT-initiated close for origin tagging
-		a.ntCloseMux.Lock()
-		a.ntInitiatedTickets[provided] = time.Now()
-		a.ntCloseMux.Unlock()
-		// Remove ticket from pools to prevent double-use
-		a.mt5TicketMux.Lock()
-		if bid, ok := a.mt5TicketToBaseId[provided]; ok {
-			delete(a.mt5TicketToBaseId, provided)
-			if cur, ok := a.baseIdToMT5Ticket[bid]; ok && cur == provided {
-				delete(a.baseIdToMT5Ticket, bid)
-			}
-			// Also prune from slice pool if present
-			if slice, ok := a.baseIdToTickets[bid]; ok {
-				pruned := slice[:0]
-				for _, t := range slice {
-					if t != provided {
-						pruned = append(pruned, t)
-					}
-				}
-				if len(pruned) == 0 {
-					delete(a.baseIdToTickets, bid)
-				} else {
-					a.baseIdToTickets[bid] = pruned
-				}
-			}
-		}
-		a.mt5TicketMux.Unlock()
-		log.Printf("gRPC: Targeted CLOSE_HEDGE enqueued and mappings pruned for ticket %d (BaseID: %s)", provided, baseID)
+		a.clientCloseMux.Lock()
+		a.clientInitiatedTickets[providedTicket] = time.Now()
+		a.clientCloseMux.Unlock()
+		a.removeTicketFromPool(baseID, providedTicket)
+		log.Printf("gRPC: Enqueued targeted CLOSE_HEDGE for BaseID %s (ticket=%d)", baseID, providedTicket)
 		return nil
 	}
 
-	// Resolve tickets using direct BaseID mapping only
-	tickets, actualBaseID := a.resolveBaseIDToTickets(baseID)
-	if actualBaseID == "" {
-		actualBaseID = baseID // Fallback to original if no mapping found
-	}
+	const (
+		maxTicketWait = 2 * time.Second
+		pollInterval  = 50 * time.Millisecond
+	)
 
-	// Also check legacy single ticket mapping for backward compatibility
-	a.mt5TicketMux.RLock()
-	legacyTicket, hasLegacy := a.baseIdToMT5Ticket[baseID]
-	a.mt5TicketMux.RUnlock()
-
-	makeCloseTrade := func(qtyForMsg int, ticket uint64) Trade {
-		return Trade{
-			ID:              fmt.Sprintf("close_%d", time.Now().UnixNano()),
-			BaseID:          actualBaseID, // Use the actual BaseID where tickets were found
-			Time:            time.Now(),
-			Action:          "CLOSE_HEDGE",
-			Quantity:        float64(qtyForMsg),
-			Price:           0.0,
-			TotalQuantity:   qtyForMsg,
-			ContractNum:     1,
-			OrderType:       "CLOSE",
-			MeasurementPips: 0,
-			RawMeasurement:  0.0,
-			Instrument:      getInstrumentFromRequest(request),
-			AccountName:     getAccountFromRequest(request),
-			NTBalance:       0.0,
-			NTDailyPnL:      0.0,
-			NTTradeResult:   "closed",
-			NTSessionTrades: 0,
-			MT5Ticket:       ticket,
-		}
-	}
-
-	// Decide how many close trades to enqueue
-	if len(tickets) > 0 {
-		reqQty := int(getQuantityFromRequest(request))
-		if reqQty <= 0 {
-			reqQty = len(tickets)
-		}
-		// If fewer tickets available than requested, only wait a very short time;
-		// remainder will be handled by the reconciler as tickets arrive.
-		if reqQty > len(tickets) {
-			waited := a.waitForTickets(actualBaseID, 100*time.Millisecond, 25*time.Millisecond)
-			if len(waited) > len(tickets) {
-				tickets = waited
-			}
-		}
-		toAllocate := reqQty
-		if toAllocate > len(tickets) {
-			toAllocate = len(tickets)
-		}
-		log.Printf("gRPC: Adding %d/%d CLOSE_HEDGE messages with explicit MT5 tickets for BaseID: %s", toAllocate, len(tickets), baseID)
-
-		// TICKET_ALLOCATION_FIX: Remove tickets from available pool as we allocate them to ensure each closure gets a unique ticket
-		a.mt5TicketMux.Lock()
-		availableTickets := a.baseIdToTickets[actualBaseID]
-		for i := 0; i < toAllocate && len(availableTickets) > 0; i++ {
-			// Take the first available ticket and remove it from the pool
-			t := availableTickets[0]
-			availableTickets = availableTickets[1:]            // Remove allocated ticket from pool
-			a.baseIdToTickets[actualBaseID] = availableTickets // Update the pool
-
-			ct := makeCloseTrade(1, t)
-			if err := a.AddToTradeQueue(ct); err != nil {
+	allocated := make([]uint64, 0, qty)
+	for i := 0; i < qty; i++ {
+		ticket, ok := a.popTicketWithWait(baseID, maxTicketWait, pollInterval)
+		if !ok {
+			// restore any tickets already popped before returning
+			for _, tk := range allocated {
+				a.pushTicket(baseID, tk)
+				a.mt5TicketMux.Lock()
+				a.mt5TicketToBaseId[tk] = baseID
 				a.mt5TicketMux.Unlock()
-				log.Printf("gRPC: Failed to add CLOSE_HEDGE (ticket %d) to trade queue: %v", t, err)
-				return fmt.Errorf("failed to add CLOSE_HEDGE (ticket %d) to trade queue: %v", t, err)
 			}
-			// Track NT-initiated close for origin tagging
-			a.ntCloseMux.Lock()
-			a.ntInitiatedTickets[t] = time.Now()
-			a.ntCloseMux.Unlock()
-			log.Printf("gRPC: Allocated ticket %d for CLOSE_HEDGE (%d remaining for BaseID: %s)", t, len(availableTickets), actualBaseID)
+			return fmt.Errorf("no MT5 tickets available for base_id %s", baseID)
 		}
-
-		// Clean up empty ticket pools
-		if len(availableTickets) == 0 {
-			delete(a.baseIdToTickets, actualBaseID)
-		}
-		a.mt5TicketMux.Unlock()
-
-		remaining := reqQty - toAllocate
-		if remaining > 0 {
-			// Ticket-only policy: do not enqueue base_id-only remainder. Record pending and wait for tickets.
-			inst := strings.TrimSpace(getInstrumentFromRequest(request))
-			acct := strings.TrimSpace(getAccountFromRequest(request))
-			useBase := actualBaseID // No alignment; keep original base strictly
-			a.mt5TicketMux.Lock()
-			// Persist instrument/account metadata for better reconciliation later
-			if inst != "" {
-				a.baseIdToInstrument[useBase] = inst
-			}
-			if acct != "" {
-				a.baseIdToAccount[useBase] = acct
-			}
-			pcList := a.pendingCloses[useBase]
-			pcList = append(pcList, pendingClose{qty: remaining, instrument: inst, account: acct})
-			a.pendingCloses[useBase] = pcList
-			a.mt5TicketMux.Unlock()
-			log.Printf("gRPC: Ticket-only policy: recorded pending remainder CLOSE_HEDGE (qty=%d) for BaseID: %s; will dispatch by ticket when available.", remaining, useBase)
-			// Event-driven: kick reconciler to try dispatching from any available pools immediately
-			go a.reconcilePendingCloses()
-		}
-
-		log.Printf("gRPC: Successfully queued CLOSE_HEDGE for BaseID: %s (ticketed=%d, base_id_only=%d)", baseID, toAllocate, 0)
-		return nil
+		allocated = append(allocated, ticket)
 	}
 
-	// No tickets known yet; allow a brief grace period for MT5 callbacks to populate the direct mapping.
-	// Keep this tight; pendings + reconciler will drain quickly as tickets arrive.
-	// Wait up to 75ms, polling every ~25ms on the requested BaseID.
-	waitedTickets := a.waitForTickets(baseID, 75*time.Millisecond, 25*time.Millisecond)
-	if len(waitedTickets) > 0 {
-		reqQty := int(getQuantityFromRequest(request))
-		if reqQty <= 0 {
-			reqQty = len(waitedTickets)
-		}
-		toAllocate := reqQty
-		if toAllocate > len(waitedTickets) {
-			toAllocate = len(waitedTickets)
-		}
-		log.Printf("gRPC: Resolved %d MT5 tickets after brief wait; enqueueing CLOSE_HEDGE by ticket for BaseID: %s", toAllocate, baseID)
-
-		// TICKET_ALLOCATION_FIX: Remove tickets from available pool as we allocate them (same logic as above)
-		a.mt5TicketMux.Lock()
-		availableWaitedTickets := a.baseIdToTickets[baseID] // Use original baseID since waitForTickets uses it
-		for i := 0; i < toAllocate && len(availableWaitedTickets) > 0; i++ {
-			// Take the first available ticket and remove it from the pool
-			t := availableWaitedTickets[0]
-			availableWaitedTickets = availableWaitedTickets[1:] // Remove allocated ticket from pool
-			a.baseIdToTickets[baseID] = availableWaitedTickets  // Update the pool
-
-			ct := makeCloseTrade(1, t)
-			if err := a.AddToTradeQueue(ct); err != nil {
+	for idx, tk := range allocated {
+		if err := a.enqueueCloseTrade(baseID, tk, inst, acct, request); err != nil {
+			// restore current ticket and any remaining ones
+			a.pushTicket(baseID, tk)
+			a.mt5TicketMux.Lock()
+			a.mt5TicketToBaseId[tk] = baseID
+			a.mt5TicketMux.Unlock()
+			for j := idx + 1; j < len(allocated); j++ {
+				pending := allocated[j]
+				a.pushTicket(baseID, pending)
+				a.mt5TicketMux.Lock()
+				a.mt5TicketToBaseId[pending] = baseID
 				a.mt5TicketMux.Unlock()
-				log.Printf("gRPC: Failed to add CLOSE_HEDGE (ticket %d) to trade queue: %v", t, err)
-				return fmt.Errorf("failed to add CLOSE_HEDGE (ticket %d) to trade queue: %v", t, err)
 			}
-			// Track NT-initiated close for origin tagging
-			a.ntCloseMux.Lock()
-			a.ntInitiatedTickets[t] = time.Now()
-			a.ntCloseMux.Unlock()
-			log.Printf("gRPC: Allocated ticket %d for CLOSE_HEDGE after wait (%d remaining for BaseID: %s)", t, len(availableWaitedTickets), baseID)
+			return fmt.Errorf("failed to enqueue CLOSE_HEDGE for ticket %d: %w", tk, err)
 		}
 
-		// Clean up empty ticket pools
-		if len(availableWaitedTickets) == 0 {
-			delete(a.baseIdToTickets, baseID)
-		}
-		a.mt5TicketMux.Unlock()
-
-		remaining := reqQty - toAllocate
-		if remaining > 0 {
-			// Ticket-only policy: do not enqueue base_id-only remainder. Record pending and wait for tickets.
-			inst := strings.TrimSpace(getInstrumentFromRequest(request))
-			acct := strings.TrimSpace(getAccountFromRequest(request))
-			useBase := baseID // No alignment; keep original base strictly
-			a.mt5TicketMux.Lock()
-			// Persist instrument/account metadata for better reconciliation later
-			if inst != "" {
-				a.baseIdToInstrument[useBase] = inst
-			}
-			if acct != "" {
-				a.baseIdToAccount[useBase] = acct
-			}
-			pcList := a.pendingCloses[useBase]
-			pcList = append(pcList, pendingClose{qty: remaining, instrument: inst, account: acct})
-			a.pendingCloses[useBase] = pcList
-			a.mt5TicketMux.Unlock()
-			log.Printf("gRPC: Ticket-only policy: recorded pending remainder CLOSE_HEDGE (qty=%d) for BaseID: %s (post-wait); will dispatch by ticket when available.", remaining, useBase)
-			// Event-driven: kick reconciler to try dispatching from any available pools immediately
-			go a.reconcilePendingCloses()
-		}
-
-		log.Printf("gRPC: Successfully queued CLOSE_HEDGE (post-wait) for BaseID: %s (ticketed=%d, base_id_only=%d)", baseID, toAllocate, 0)
-		return nil
+		a.clientCloseMux.Lock()
+		a.clientInitiatedTickets[tk] = time.Now()
+		a.clientCloseMux.Unlock()
+		a.removeTicketFromPool(baseID, tk)
 	}
 
-	// Fallback to single ticket if available
-	var ticket uint64
-	reqQty := int(getQuantityFromRequest(request))
-	if reqQty <= 0 {
-		reqQty = 1
-	}
-	if hasLegacy {
-		// Legacy single ticket known – close that one specifically (qty=1)
-		ticket = legacyTicket
-		log.Printf("gRPC: Using legacy single MT5 ticket %d for BaseID %s", ticket, baseID)
-		ct := makeCloseTrade(1, ticket)
-		if !a.IsHedgebotActive() {
-			log.Printf("WARN: CLOSE_HEDGE for BaseID %s queued while MT5 stream inactive. Will deliver when stream reconnects.", baseID)
-		}
-		if err := a.AddToTradeQueue(ct); err != nil {
-			log.Printf("gRPC: Failed to add CLOSE_HEDGE to trade queue: %v", err)
-			return fmt.Errorf("failed to add CLOSE_HEDGE to trade queue: %v", err)
-		}
-		// Track NT-initiated close for origin tagging
-		a.ntCloseMux.Lock()
-		a.ntInitiatedTickets[ticket] = time.Now()
-		a.ntCloseMux.Unlock()
-		log.Printf("gRPC: Successfully queued CLOSE_HEDGE for BaseID: %s", baseID)
-		return nil
-	}
-
-	// No tickets known – alignment is disabled to avoid mis-routing closures; keep original base strictly
-
-	// intentionally no alignment here
-
-	// Ticket-only policy: do not enqueue base_id-only CLOSE_HEDGE at all. Record pending and return.
-	instFinal := strings.TrimSpace(getInstrumentFromRequest(request))
-	acctFinal := strings.TrimSpace(getAccountFromRequest(request))
-	a.mt5TicketMux.Lock()
-	if reqQty > 0 {
-		// Persist instrument/account metadata for better reconciliation later
-		if instFinal != "" {
-			a.baseIdToInstrument[baseID] = instFinal
-		}
-		if acctFinal != "" {
-			a.baseIdToAccount[baseID] = acctFinal
-		}
-		pcList := a.pendingCloses[baseID]
-		pcList = append(pcList, pendingClose{qty: reqQty, instrument: instFinal, account: acctFinal})
-		a.pendingCloses[baseID] = pcList
-		log.Printf("gRPC: Ticket-only policy: recorded pending CLOSE_HEDGE (qty=%d) for BaseID: %s; will dispatch by ticket when available.", reqQty, baseID)
-	}
-	a.mt5TicketMux.Unlock()
-	// Event-driven: kick reconciler after unlocking to avoid deadlock
-	go a.reconcilePendingCloses()
+	log.Printf("gRPC: Enqueued CLOSE_HEDGE for BaseID %s using %d ticket(s)", baseID, len(allocated))
 	return nil
 }
 
-// reconcilePendingCloses attempts to match and dispatch pending closes ONLY from the exact BaseID's own ticket pool.
-// Cross-reference and instrument/account correlation are disabled to prevent closing the wrong hedge.
-func (a *App) reconcilePendingCloses() {
-	a.mt5TicketMux.Lock()
-	defer a.mt5TicketMux.Unlock()
-
-	pendCount := 0
-	for _, plist := range a.pendingCloses {
-		pendCount += len(plist)
-	}
-	if pendCount == 0 || len(a.baseIdToTickets) == 0 {
-		return
-	}
-	pools := 0
-	for _, t := range a.baseIdToTickets {
-		if len(t) > 0 {
-			pools++
-		}
-	}
-	log.Printf("gRPC: Reconciler start: pendings=%d baseKeys=%d poolsWithTickets=%d", pendCount, len(a.pendingCloses), pools)
-
-	// Helper to try allocate up to `limit` tickets from a specific pool for this pending
-	tryAllocate := func(poolBase string, pc pendingClose, limit int) (allocated int) {
-		if limit <= 0 {
-			return 0
-		}
-		tickets := a.baseIdToTickets[poolBase]
-		for allocated < limit && len(tickets) > 0 {
-			tk := tickets[0]
-			tickets = tickets[1:]
-			// Update pool immediately to prevent double use
-			a.baseIdToTickets[poolBase] = tickets
-
-			// Build and enqueue outside of lock? We hold the lock here; keep critical section small.
-			trade := Trade{
-				ID:            fmt.Sprintf("close_%d", time.Now().UnixNano()),
-				BaseID:        poolBase,
-				Time:          time.Now(),
-				Action:        "CLOSE_HEDGE",
-				Quantity:      1,
-				TotalQuantity: 1,
-				OrderType:     "CLOSE",
-				Instrument:    pc.instrument,
-				AccountName:   pc.account,
-				MT5Ticket:     tk,
-			}
-			// Temporarily unlock to enqueue to avoid blocking other state
-			a.mt5TicketMux.Unlock()
-			err := a.AddToTradeQueue(trade)
-			a.mt5TicketMux.Lock()
-			if err != nil {
-				// Return ticket to pool if enqueue failed
-				a.baseIdToTickets[poolBase] = append([]uint64{tk}, a.baseIdToTickets[poolBase]...)
-				log.Printf("gRPC: Pending reconciler failed to enqueue CLOSE_HEDGE (ticket %d): %v", tk, err)
-				break
-			}
-			// Persist instrument/account metadata for the pool base
-			if inst := strings.TrimSpace(pc.instrument); inst != "" {
-				a.baseIdToInstrument[poolBase] = inst
-			}
-			if acct := strings.TrimSpace(pc.account); acct != "" {
-				a.baseIdToAccount[poolBase] = acct
-			}
-			// Track NT-initiated close for origin tagging
-			a.ntCloseMux.Lock()
-			a.ntInitiatedTickets[tk] = time.Now()
-			a.ntCloseMux.Unlock()
-			allocated++
-			remNow := limit - allocated
-			log.Printf("gRPC: Pending reconciler dispatched CLOSE_HEDGE using ticket %d for BaseID %s (remaining in this pending now=%d)", tk, poolBase, remNow)
-		}
-		return allocated
-	}
-
-	// Iterate over a snapshot of keys to allow deletion while iterating
-	for pBase, plist := range a.pendingCloses {
-		if len(plist) == 0 {
-			continue
-		}
-		var remainingList []pendingClose
-		for _, pc := range plist {
-			remainingQty := pc.qty
-			if remainingQty <= 0 {
-				continue
-			}
-
-			// Priority 1: direct pool for pBase
-			if pool, ok := a.baseIdToTickets[pBase]; ok && len(pool) > 0 {
-				alloc := tryAllocate(pBase, pc, remainingQty)
-				remainingQty -= alloc
-			}
-
-			if remainingQty > 0 {
-				// Keep the remainder
-				remainingList = append(remainingList, pendingClose{qty: remainingQty, instrument: pc.instrument, account: pc.account})
-			}
-		}
-		if len(remainingList) == 0 {
-			delete(a.pendingCloses, pBase)
-		} else {
-			a.pendingCloses[pBase] = remainingList
-		}
-	}
-	// Summary at end of reconcile
-	remainingPend := 0
-	for _, plist := range a.pendingCloses {
-		for _, pc := range plist {
-			remainingPend += pc.qty
-		}
-	}
-	poolsAfter := 0
-	for _, t := range a.baseIdToTickets {
-		if len(t) > 0 {
-			poolsAfter++
-		}
-	}
-	log.Printf("gRPC: Reconciler end: remainingPendQty=%d pendingBases=%d poolsWithTickets=%d", remainingPend, len(a.pendingCloses), poolsAfter)
-}
-
-// Helper functions to extract data from the hedge close request
 func getBaseIDFromRequest(request interface{}) string {
 	if req, ok := request.(map[string]interface{}); ok {
 		// Support common key variants
