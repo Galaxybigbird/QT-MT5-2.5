@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -191,7 +192,7 @@ namespace Quantower.Bridge.Client
             }
         }
 
-        public async Task<OperationResult> CloseHedgeAsync(string notificationJson)
+        public async Task<OperationResult> SubmitCloseHedgeAsync(string notificationJson)
         {
             try
             {
@@ -207,7 +208,7 @@ namespace Quantower.Bridge.Client
 
         private async Task<GenericResponse> CloseHedgeInternalAsync(HedgeCloseNotification request)
         {
-            var call = _client.NTCloseHedgeAsync(request, deadline: DateTime.UtcNow.AddSeconds(10));
+            var call = _client.SubmitCloseHedgeAsync(request, deadline: DateTime.UtcNow.AddSeconds(10));
             return await call.ResponseAsync.ConfigureAwait(false);
         }
 
@@ -482,13 +483,15 @@ namespace Quantower.Bridge.Client
             {
                 EventType = GetStringValue(root, "event_type"),
                 BaseId = GetStringValue(root, "base_id", "qt_position_id", "position_id"),
-                NtInstrumentSymbol = GetStringValue(root, "nt_instrument_symbol", "instrument", "symbol"),
+                NtInstrumentSymbol = GetStringValue(root, "nt_instrument_symbol", "instrument_symbol", "instrument", "symbol"),
                 NtAccountName = GetStringValue(root, "nt_account_name", "account_name", "account"),
                 ClosedHedgeQuantity = GetDoubleValue(root, "closed_hedge_quantity", "quantity"),
                 ClosedHedgeAction = GetStringValue(root, "closed_hedge_action", "action"),
                 Timestamp = GetStringValue(root, "timestamp"),
                 ClosureReason = GetStringValue(root, "closure_reason", "reason"),
-                Mt5Ticket = GetUInt64Value(root, "mt5_ticket")
+                Mt5Ticket = GetUInt64Value(root, "mt5_ticket"),
+                QtPositionId = GetStringValue(root, "qt_position_id", "position_id"),
+                QtTradeId = GetStringValue(root, "qt_trade_id", "trade_id")
             };
         }
 
@@ -527,7 +530,11 @@ namespace Quantower.Bridge.Client
                     return value.GetDouble();
                 }
 
-                if (value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(), out var parsed))
+                if (value.ValueKind == JsonValueKind.String && double.TryParse(
+                        value.GetString(),
+                        NumberStyles.Float | NumberStyles.AllowThousands,
+                        CultureInfo.InvariantCulture,
+                        out var parsed))
                 {
                     return parsed;
                 }

@@ -148,10 +148,10 @@ namespace Trading.Proto {
         __Marshaller_trading_HeartbeatResponse);
 
     [global::System.CodeDom.Compiler.GeneratedCode("grpc_csharp_plugin", null)]
-    static readonly grpc::Method<global::Trading.Proto.HedgeCloseNotification, global::Trading.Proto.GenericResponse> __Method_NTCloseHedge = new grpc::Method<global::Trading.Proto.HedgeCloseNotification, global::Trading.Proto.GenericResponse>(
+    static readonly grpc::Method<global::Trading.Proto.HedgeCloseNotification, global::Trading.Proto.GenericResponse> __Method_SubmitCloseHedge = new grpc::Method<global::Trading.Proto.HedgeCloseNotification, global::Trading.Proto.GenericResponse>(
         grpc::MethodType.Unary,
         __ServiceName,
-        "NTCloseHedge",
+        "SubmitCloseHedge",
         __Marshaller_trading_HedgeCloseNotification,
         __Marshaller_trading_GenericResponse);
 
@@ -166,7 +166,7 @@ namespace Trading.Proto {
     public abstract partial class TradingServiceBase
     {
       /// <summary>
-      /// Trade submission from NinjaTrader
+      /// Trade submission from client add-ons (Quantower, etc.)
       /// </summary>
       /// <param name="request">The request received from the client.</param>
       /// <param name="context">The context of the server-side call handler being invoked.</param>
@@ -275,13 +275,13 @@ namespace Trading.Proto {
       }
 
       /// <summary>
-      /// NT close hedge request
+      /// Client-initiated hedge close request
       /// </summary>
       /// <param name="request">The request received from the client.</param>
       /// <param name="context">The context of the server-side call handler being invoked.</param>
       /// <returns>The response to send back to the client (wrapped by a task).</returns>
       [global::System.CodeDom.Compiler.GeneratedCode("grpc_csharp_plugin", null)]
-      public virtual global::System.Threading.Tasks.Task<global::Trading.Proto.GenericResponse> NTCloseHedge(global::Trading.Proto.HedgeCloseNotification request, grpc::ServerCallContext context)
+      public virtual global::System.Threading.Tasks.Task<global::Trading.Proto.GenericResponse> SubmitCloseHedge(global::Trading.Proto.HedgeCloseNotification request, grpc::ServerCallContext context)
       {
         throw new grpc::RpcException(new grpc::Status(grpc::StatusCode.Unimplemented, ""));
       }
@@ -316,7 +316,7 @@ namespace Trading.Proto {
       }
 
       /// <summary>
-      /// Trade submission from NinjaTrader
+      /// Trade submission from client add-ons (Quantower, etc.)
       /// </summary>
       /// <param name="request">The request to send to the server.</param>
       /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
@@ -329,7 +329,7 @@ namespace Trading.Proto {
         return SubmitTrade(request, new grpc::CallOptions(headers, deadline, cancellationToken));
       }
       /// <summary>
-      /// Trade submission from NinjaTrader
+      /// Trade submission from client add-ons (Quantower, etc.)
       /// </summary>
       /// <param name="request">The request to send to the server.</param>
       /// <param name="options">The options for the call.</param>
@@ -340,7 +340,7 @@ namespace Trading.Proto {
         return CallInvoker.BlockingUnaryCall(__Method_SubmitTrade, null, options, request);
       }
       /// <summary>
-      /// Trade submission from NinjaTrader
+      /// Trade submission from client add-ons (Quantower, etc.)
       /// </summary>
       /// <param name="request">The request to send to the server.</param>
       /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
@@ -353,7 +353,7 @@ namespace Trading.Proto {
         return SubmitTradeAsync(request, new grpc::CallOptions(headers, deadline, cancellationToken));
       }
       /// <summary>
-      /// Trade submission from NinjaTrader
+      /// Trade submission from client add-ons (Quantower, etc.)
       /// </summary>
       /// <param name="request">The request to send to the server.</param>
       /// <param name="options">The options for the call.</param>
@@ -722,7 +722,7 @@ namespace Trading.Proto {
         return CallInvoker.AsyncUnaryCall(__Method_SystemHeartbeat, null, options, request);
       }
       /// <summary>
-      /// NT close hedge request
+      /// Client-initiated hedge close request
       /// </summary>
       /// <param name="request">The request to send to the server.</param>
       /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
@@ -730,23 +730,23 @@ namespace Trading.Proto {
       /// <param name="cancellationToken">An optional token for canceling the call.</param>
       /// <returns>The response received from the server.</returns>
       [global::System.CodeDom.Compiler.GeneratedCode("grpc_csharp_plugin", null)]
-      public virtual global::Trading.Proto.GenericResponse NTCloseHedge(global::Trading.Proto.HedgeCloseNotification request, grpc::Metadata headers = null, global::System.DateTime? deadline = null, global::System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+      public virtual global::Trading.Proto.GenericResponse SubmitCloseHedge(global::Trading.Proto.HedgeCloseNotification request, grpc::Metadata headers = null, global::System.DateTime? deadline = null, global::System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
       {
-        return NTCloseHedge(request, new grpc::CallOptions(headers, deadline, cancellationToken));
+        return SubmitCloseHedge(request, new grpc::CallOptions(headers, deadline, cancellationToken));
       }
       /// <summary>
-      /// NT close hedge request
+      /// Client-initiated hedge close request
       /// </summary>
       /// <param name="request">The request to send to the server.</param>
       /// <param name="options">The options for the call.</param>
       /// <returns>The response received from the server.</returns>
       [global::System.CodeDom.Compiler.GeneratedCode("grpc_csharp_plugin", null)]
-      public virtual global::Trading.Proto.GenericResponse NTCloseHedge(global::Trading.Proto.HedgeCloseNotification request, grpc::CallOptions options)
+      public virtual global::Trading.Proto.GenericResponse SubmitCloseHedge(global::Trading.Proto.HedgeCloseNotification request, grpc::CallOptions options)
       {
-        return CallInvoker.BlockingUnaryCall(__Method_NTCloseHedge, null, options, request);
+        return CallInvoker.BlockingUnaryCall(__Method_SubmitCloseHedge, null, options, request);
       }
       /// <summary>
-      /// NT close hedge request
+      /// Client-initiated hedge close request
       /// </summary>
       /// <param name="request">The request to send to the server.</param>
       /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
@@ -754,20 +754,20 @@ namespace Trading.Proto {
       /// <param name="cancellationToken">An optional token for canceling the call.</param>
       /// <returns>The call object.</returns>
       [global::System.CodeDom.Compiler.GeneratedCode("grpc_csharp_plugin", null)]
-      public virtual grpc::AsyncUnaryCall<global::Trading.Proto.GenericResponse> NTCloseHedgeAsync(global::Trading.Proto.HedgeCloseNotification request, grpc::Metadata headers = null, global::System.DateTime? deadline = null, global::System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+      public virtual grpc::AsyncUnaryCall<global::Trading.Proto.GenericResponse> SubmitCloseHedgeAsync(global::Trading.Proto.HedgeCloseNotification request, grpc::Metadata headers = null, global::System.DateTime? deadline = null, global::System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
       {
-        return NTCloseHedgeAsync(request, new grpc::CallOptions(headers, deadline, cancellationToken));
+        return SubmitCloseHedgeAsync(request, new grpc::CallOptions(headers, deadline, cancellationToken));
       }
       /// <summary>
-      /// NT close hedge request
+      /// Client-initiated hedge close request
       /// </summary>
       /// <param name="request">The request to send to the server.</param>
       /// <param name="options">The options for the call.</param>
       /// <returns>The call object.</returns>
       [global::System.CodeDom.Compiler.GeneratedCode("grpc_csharp_plugin", null)]
-      public virtual grpc::AsyncUnaryCall<global::Trading.Proto.GenericResponse> NTCloseHedgeAsync(global::Trading.Proto.HedgeCloseNotification request, grpc::CallOptions options)
+      public virtual grpc::AsyncUnaryCall<global::Trading.Proto.GenericResponse> SubmitCloseHedgeAsync(global::Trading.Proto.HedgeCloseNotification request, grpc::CallOptions options)
       {
-        return CallInvoker.AsyncUnaryCall(__Method_NTCloseHedge, null, options, request);
+        return CallInvoker.AsyncUnaryCall(__Method_SubmitCloseHedge, null, options, request);
       }
       /// <summary>Creates a new instance of client from given <c>ClientBaseConfiguration</c>.</summary>
       [global::System.CodeDom.Compiler.GeneratedCode("grpc_csharp_plugin", null)]
@@ -792,7 +792,7 @@ namespace Trading.Proto {
           .AddMethod(__Method_HealthCheck, serviceImpl.HealthCheck)
           .AddMethod(__Method_GetSettings, serviceImpl.GetSettings)
           .AddMethod(__Method_SystemHeartbeat, serviceImpl.SystemHeartbeat)
-          .AddMethod(__Method_NTCloseHedge, serviceImpl.NTCloseHedge).Build();
+          .AddMethod(__Method_SubmitCloseHedge, serviceImpl.SubmitCloseHedge).Build();
     }
 
     /// <summary>Register service method with a service binder with or without implementation. Useful when customizing the service binding logic.
@@ -811,7 +811,7 @@ namespace Trading.Proto {
       serviceBinder.AddMethod(__Method_HealthCheck, serviceImpl == null ? null : new grpc::UnaryServerMethod<global::Trading.Proto.HealthRequest, global::Trading.Proto.HealthResponse>(serviceImpl.HealthCheck));
       serviceBinder.AddMethod(__Method_GetSettings, serviceImpl == null ? null : new grpc::UnaryServerMethod<global::Trading.Proto.SettingsRequest, global::Trading.Proto.SettingsResponse>(serviceImpl.GetSettings));
       serviceBinder.AddMethod(__Method_SystemHeartbeat, serviceImpl == null ? null : new grpc::UnaryServerMethod<global::Trading.Proto.HeartbeatRequest, global::Trading.Proto.HeartbeatResponse>(serviceImpl.SystemHeartbeat));
-      serviceBinder.AddMethod(__Method_NTCloseHedge, serviceImpl == null ? null : new grpc::UnaryServerMethod<global::Trading.Proto.HedgeCloseNotification, global::Trading.Proto.GenericResponse>(serviceImpl.NTCloseHedge));
+      serviceBinder.AddMethod(__Method_SubmitCloseHedge, serviceImpl == null ? null : new grpc::UnaryServerMethod<global::Trading.Proto.HedgeCloseNotification, global::Trading.Proto.GenericResponse>(serviceImpl.SubmitCloseHedge));
     }
 
   }

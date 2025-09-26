@@ -75,7 +75,7 @@ type AppInterface interface {
 	HandleMT5TradeResult(result interface{}) error
 	HandleElasticUpdate(update interface{}) error
 	HandleTrailingStopUpdate(update interface{}) error
-	HandleNTCloseHedgeRequest(request interface{}) error
+	HandleCloseHedgeRequest(request interface{}) error
 }
 
 // NewGRPCServer creates a new gRPC server instance
@@ -187,7 +187,7 @@ func (s *Server) Stop() {
 	}
 }
 
-// SubmitTrade handles trade submission from Addon (NT/QT)
+// SubmitTrade handles trade submission from the desktop addon (Quantower / legacy clients)
 func (s *Server) SubmitTrade(ctx context.Context, req *trading.Trade) (*trading.GenericResponse, error) {
 	log.Printf("gRPC: Received trade submission - ID: %s, Action: %s, Quantity: %.2f",
 		req.Id, req.Action, req.Quantity)
@@ -227,7 +227,7 @@ func (s *Server) SubmitTrade(ctx context.Context, req *trading.Trade) (*trading.
 }
 
 // enqueueTradeWithSplit splits multi-quantity Buy/Sell entries into unit trades to create distinct MT5 tickets.
-// This aligns MT5 hedges 1:1 with NT contract count and improves ticket-based close reliability.
+// This keeps MT5 hedges aligned 1:1 with contract count and preserves ticket-specific close behaviour.
 func (s *Server) enqueueTradeWithSplit(req *trading.Trade) error {
 	// Convert to internal once as a base template
 	base := convertProtoToInternalTrade(req)
@@ -238,7 +238,7 @@ func (s *Server) enqueueTradeWithSplit(req *trading.Trade) error {
 	// Only split for entry actions (buy/sell). Leave CLOSE/MT5 notifications untouched.
 	if act == "buy" || act == "sell" {
 		// Split any aggregated multi-quantity entry to ensure 1:1 MT5 tickets per contract.
-		// This is robust to varying NT batching patterns (e.g., submissions of Qty=2 remaining of a 3 group).
+		// This remains robust to varying addon batching patterns (e.g., submissions of Qty=2 remaining of a 3 group).
 		if req.Quantity > 1 {
 			n := int(req.Quantity + 1e-9)
 			if n > 1 {
@@ -686,13 +686,16 @@ func (s *Server) HealthCheck(ctx context.Context, req *trading.HealthRequest) (*
 	}
 
 	// Update connection status based on source
-	switch req.Source {
-	case "hedgebot", "MT5_EA":
+	source := strings.TrimSpace(req.Source)
+	switch strings.ToLower(source) {
+	case "hedgebot", "mt5_ea":
 		s.app.SetHedgebotActive(true)
 		// noisy; omit per-request log
-	case "addon", "NT_ADDON", "nt_addon_init", "NT_ADDON_KEEPALIVE", "QT_ADDON", "QT":
-		s.app.SetAddonConnected(true)
-		// noisy; omit per-request log
+	default:
+		if isAddonSource(source) {
+			s.app.SetAddonConnected(true)
+			// noisy; omit per-request log
+		}
 	}
 
 	response := &trading.HealthResponse{
@@ -719,6 +722,17 @@ func (s *Server) shouldLogHealth(source string, interval time.Duration) bool {
 		return true
 	}
 	return false
+}
+
+func isAddonSource(source string) bool {
+	switch strings.ToUpper(strings.TrimSpace(source)) {
+	case "ADDON", "QT_ADDON", "QT", "QUANTOWER", "QT_PANEL", "QT_PLUGIN":
+		return true
+	case "NT_ADDON", "NT_ADDON_INIT", "NT_ADDON_KEEPALIVE", "NT", "NINJATRADER":
+		return true // legacy identifiers kept for backward compatibility during migration
+	default:
+		return false
+	}
 }
 
 // GetSettings handles settings requests
@@ -758,9 +772,8 @@ func (s *Server) GetSettings(ctx context.Context, req *trading.SettingsRequest) 
 func (s *Server) SystemHeartbeat(ctx context.Context, req *trading.HeartbeatRequest) (*trading.HeartbeatResponse, error) {
 	log.Printf("gRPC: Heartbeat from component: %s, Status: %s", req.Component, req.Status)
 
-	// Treat NT addon heartbeat as proof-of-life
-	switch strings.ToUpper(req.GetComponent()) {
-	case "ADDON", "NT_ADDON", "NT_ADDON_INIT", "NT_ADDON_KEEPALIVE", "NT", "NINJATRADER", "QT_ADDON", "QT":
+	// Treat addon heartbeat as proof-of-life (Quantower primary, legacy NT kept for backwards compatibility)
+	if isAddonSource(req.GetComponent()) {
 		s.app.SetAddonConnected(true)
 	}
 
@@ -770,14 +783,13 @@ func (s *Server) SystemHeartbeat(ctx context.Context, req *trading.HeartbeatRequ
 	}, nil
 }
 
-// Log handles unified logging events from clients (NT addon, MT5 EA, etc.)
+// Log handles unified logging events from clients (Quantower addon, MT5 EA, legacy bridges, etc.)
 func (s *Server) Log(ctx context.Context, req *trading.LogEvent) (*trading.LogAck, error) {
 	// Map protobuf LogEvent to internal logging.Event and ingest
 	log.Printf("gRPC: LoggingService received event from source=%s level=%s component=%s", req.GetSource(), req.GetLevel(), req.GetComponent())
 
-	// Treat NT addon log traffic as proof-of-life to mark addon connected
-	switch strings.ToUpper(req.GetSource()) {
-	case "ADDON", "NT_ADDON", "NT_ADDON_INIT", "NT_ADDON_KEEPALIVE", "NT", "NINJATRADER", "QT_ADDON", "QT":
+	// Treat addon log traffic as proof-of-life to mark the desktop client connected
+	if isAddonSource(req.GetSource()) {
 		s.app.SetAddonConnected(true)
 	}
 
@@ -985,15 +997,15 @@ func md5Hex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// NTCloseHedge handles hedge closure requests (legacy NT endpoint name; called by addon)
-func (s *Server) NTCloseHedge(ctx context.Context, req *trading.HedgeCloseNotification) (*trading.GenericResponse, error) {
-	log.Printf("gRPC: NT close hedge request - BaseID: %s", req.BaseId)
+// SubmitCloseHedge handles hedge closure requests from client add-ons.
+func (s *Server) SubmitCloseHedge(ctx context.Context, req *trading.HedgeCloseNotification) (*trading.GenericResponse, error) {
+	log.Printf("gRPC: Close hedge request - BaseID: %s", req.BaseId)
 
 	// Convert and handle request
 	request := convertProtoToInternalHedgeClose(req)
-	err := s.app.HandleNTCloseHedgeRequest(request)
+	err := s.app.HandleCloseHedgeRequest(request)
 	if err != nil {
-		log.Printf("gRPC: Failed to handle NT close hedge request: %v", err)
+		log.Printf("gRPC: Failed to handle close hedge request: %v", err)
 		return &trading.GenericResponse{
 			Status:  "error",
 			Message: "Failed to handle close hedge request: " + err.Error(),
@@ -1021,42 +1033,42 @@ func (s *Server) broadcastTradeToStreams(trade *trading.Trade) {
 	}
 }
 
-// BroadcastMT5CloseNotification sends an MT5 closure notification to NinjaTrader via streams
+// BroadcastMT5CloseNotification sends an MT5 closure notification to every connected stream
 func (s *Server) BroadcastMT5CloseNotification(notification interface{}) {
 	log.Printf("gRPC: Broadcasting MT5 close notification: %+v", notification)
 
 	// Convert the notification to a trading.Trade message
 	protoTrade := convertMT5CloseNotificationToProtoTrade(notification)
 
-	// Broadcast to all active streams (primarily NinjaTrader)
+	// Broadcast to all connected consumers (Quantower addon streams and MT5 listeners)
 	s.broadcastTradeToStreams(protoTrade)
 }
 
-// BroadcastMT5CloseToNTStreams sends MT5 closure notifications only to NT streams (not MT5 streams)
-// This prevents circular trades while still notifying NT to close original positions
-func (s *Server) BroadcastMT5CloseToNTStreams(notification interface{}) {
-	log.Printf("gRPC: Broadcasting MT5 close notification to NT streams only: %+v", notification)
+// BroadcastMT5CloseToAddonStreams sends MT5 closure notifications only to addon streams (not MT5 streams)
+// This prevents circular trades while still notifying external clients to close original positions
+func (s *Server) BroadcastMT5CloseToAddonStreams(notification interface{}) {
+	log.Printf("gRPC: Broadcasting MT5 close notification to addon streams only: %+v", notification)
 
 	// Convert the notification to a trading.Trade message
 	protoTrade := convertMT5CloseNotificationToProtoTrade(notification)
 
 	if protoTrade != nil && protoTrade.OrderType == "NT_CLOSE_ACK" {
-		log.Printf("gRPC: Tagging close as NT_CLOSE_ACK; NT should treat as acknowledgement only")
+		log.Printf("gRPC: Tagging close as NT_CLOSE_ACK (legacy label for addon acknowledgement)")
 	}
 
-	// Send only to NT bidirectional streams (not MT5 GetTrades streams)
+	// Send only to addon bidirectional streams (not MT5 GetTrades streams)
 	s.streamsMux.RLock()
 	defer s.streamsMux.RUnlock()
 
 	for streamID, streamChan := range s.tradeStreams {
-		// Only send to NT bidirectional streams (streamID starts with "bidir_stream_")
+		// Only send to addon bidirectional streams (streamID starts with "bidir_stream_")
 		// Do NOT send to MT5 streams (streamID starts with "stream_") to prevent circular trades
 		if strings.HasPrefix(streamID, "bidir_stream_") {
 			select {
 			case streamChan <- protoTrade:
-				log.Printf("gRPC: MT5 closure notification sent to NT stream %s", streamID)
+				log.Printf("gRPC: MT5 closure notification sent to addon stream %s", streamID)
 			default:
-				log.Printf("gRPC: NT stream %s buffer full, skipping MT5 closure notification", streamID)
+				log.Printf("gRPC: Addon stream %s buffer full, skipping MT5 closure notification", streamID)
 			}
 		} else {
 			log.Printf("gRPC: Skipping MT5 stream %s to prevent circular trades", streamID)
@@ -1100,7 +1112,7 @@ func (s *Server) TradingStream(stream trading.StreamingService_TradingStreamServ
 				return
 			}
 
-			// Any inbound message from NT proves life; refresh addon connection
+			// Any inbound message from the addon proves life; refresh connectivity flag
 			s.app.SetAddonConnected(true)
 
 			// Process incoming trade (similar to SubmitTrade)
@@ -1113,7 +1125,7 @@ func (s *Server) TradingStream(stream trading.StreamingService_TradingStreamServ
 			}
 			s.markProcessed(trade.Id)
 
-			// Enqueue with smart splitting to align MT5 tickets with NT contract count
+			// Enqueue with smart splitting so MT5 tickets remain 1:1 with contract count
 			if err := s.enqueueTradeWithSplit(trade); err != nil {
 				log.Printf("gRPC: Failed to add streamed trade(s) to queue: %v", err)
 			}

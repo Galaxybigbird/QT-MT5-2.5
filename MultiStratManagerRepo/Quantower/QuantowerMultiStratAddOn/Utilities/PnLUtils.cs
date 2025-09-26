@@ -16,8 +16,8 @@ namespace Quantower.MultiStrat.Utilities
 
             return valueObject switch
             {
-                double d when double.IsFinite(d) => d,
-                double _ => 0.0,
+                double d when !double.IsNaN(d) && !double.IsInfinity(d) => d,
+                double => 0.0,
                 decimal dec => (double)dec,
                 _ => 0.0
             };

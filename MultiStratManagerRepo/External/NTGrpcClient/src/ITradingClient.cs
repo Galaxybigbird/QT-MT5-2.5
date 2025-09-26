@@ -11,7 +11,7 @@ namespace NTGrpcClient
         Task<OperationResult> SubmitElasticUpdateAsync(string updateJson);
         Task<OperationResult> SubmitTrailingUpdateAsync(string updateJson);
         Task<OperationResult> NotifyHedgeCloseAsync(string notificationJson);
-        Task<OperationResult> NTCloseHedgeAsync(string notificationJson);
+        Task<OperationResult> SubmitCloseHedgeAsync(string notificationJson);
         void StartTradingStream(Action<string> onTradeReceived);
         void StopTradingStream();
     }

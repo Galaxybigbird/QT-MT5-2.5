@@ -105,6 +105,10 @@ namespace Quantower.Bridge.Client
             try
             {
                 var result = await client!.SubmitTradeAsync(tradeJson).ConfigureAwait(false);
+                if (!result.Success)
+                {
+                    LastError = string.IsNullOrEmpty(result.ErrorMessage) ? "SubmitTrade failed" : result.ErrorMessage;
+                }
                 return result.Success;
             }
             catch (Exception ex)
@@ -147,6 +151,10 @@ namespace Quantower.Bridge.Client
             try
             {
                 var result = await client!.SubmitElasticUpdateAsync(updateJson).ConfigureAwait(false);
+                if (!result.Success)
+                {
+                    LastError = string.IsNullOrEmpty(result.ErrorMessage) ? "SubmitElasticUpdate failed" : result.ErrorMessage;
+                }
                 return result.Success;
             }
             catch (Exception ex)
@@ -166,6 +174,10 @@ namespace Quantower.Bridge.Client
             try
             {
                 var result = await client!.SubmitTrailingUpdateAsync(updateJson).ConfigureAwait(false);
+                if (!result.Success)
+                {
+                    LastError = string.IsNullOrEmpty(result.ErrorMessage) ? "SubmitTrailingUpdate failed" : result.ErrorMessage;
+                }
                 return result.Success;
             }
             catch (Exception ex)
@@ -185,6 +197,10 @@ namespace Quantower.Bridge.Client
             try
             {
                 var result = await client!.NotifyHedgeCloseAsync(notificationJson).ConfigureAwait(false);
+                if (!result.Success)
+                {
+                    LastError = string.IsNullOrEmpty(result.ErrorMessage) ? "NotifyHedgeClose failed" : result.ErrorMessage;
+                }
                 return result.Success;
             }
             catch (Exception ex)
@@ -203,7 +219,11 @@ namespace Quantower.Bridge.Client
 
             try
             {
-                var result = await client!.CloseHedgeAsync(notificationJson).ConfigureAwait(false);
+                var result = await client!.SubmitCloseHedgeAsync(notificationJson).ConfigureAwait(false);
+                if (!result.Success)
+                {
+                    LastError = string.IsNullOrEmpty(result.ErrorMessage) ? "CloseHedge failed" : result.ErrorMessage;
+                }
                 return result.Success;
             }
             catch (Exception ex)
@@ -330,6 +350,7 @@ namespace Quantower.Bridge.Client
             }
 
             var host = uri.Host.ToLowerInvariant();
+            var normalizedHost = host.Contains(':') ? $"[{host}]" : host;
             int port = uri.IsDefaultPort ? -1 : uri.Port;
 
             // Normalize default ports
@@ -338,7 +359,7 @@ namespace Quantower.Bridge.Client
                 port = -1;
             }
 
-            return port > 0 ? $"{scheme}://{host}:{port}" : $"{scheme}://{host}";
+            return port > 0 ? $"{scheme}://{normalizedHost}:{port}" : $"{scheme}://{normalizedHost}";
         }
     }
 

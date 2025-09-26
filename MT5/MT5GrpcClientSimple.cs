@@ -20,7 +20,8 @@ namespace MT5GrpcClient
         private static StreamingService.StreamingServiceClient _streamingClient;
         private static ConcurrentQueue<string> _tradeQueue = new ConcurrentQueue<string>();
         private static volatile CancellationTokenSource _cancellationTokenSource;
-        private static readonly object _ctsSync = new object();        private static Task _streamingTask;
+        private static readonly object _ctsSync = new object();
+        private static Task _streamingTask;
         private static volatile bool _isInitialized;
         private static volatile bool _isStreamingActive;
         private static string _serverAddress = "";
@@ -38,36 +39,65 @@ namespace MT5GrpcClient
         private const int ERROR_SERIALIZATION = -7;
         private const int ERROR_CLEANUP_FAILED = -8;
 
-        private static bool TryGetCancellationToken(out CancellationToken token)
+        private static async Task StopStreamingAsync()
         {
+            CancellationTokenSource cts = null;
+            Task streamingTask = null;
+
             lock (_ctsSync)
             {
-                if (_cancellationTokenSource == null)
-                {
-                    token = CancellationToken.None;
-                    return false;
-                }
-
-                token = _cancellationTokenSource.Token;
-                return true;
-            }
-        }
-
-        private static void SetCancellationTokenSource(CancellationTokenSource source)
-        {
-            lock (_ctsSync)
-            {
-                _cancellationTokenSource = source;
-            }
-        }
-
-        private static CancellationTokenSource ClearCancellationTokenSource()
-        {
-            lock (_ctsSync)
-            {
-                var existing = _cancellationTokenSource;
+                cts = _cancellationTokenSource;
                 _cancellationTokenSource = null;
-                return existing;
+                streamingTask = _streamingTask;
+                _streamingTask = null;
+                _isStreamingActive = false;
+            }
+
+            if (cts != null)
+            {
+                try { cts.Cancel(); } catch { }
+                cts.Dispose();
+            }
+
+            if (streamingTask != null)
+            {
+                try { await streamingTask.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+                catch { }
+            }
+        }
+
+        private static CancellationToken SetCancellationTokenSource(CancellationTokenSource cts)
+        {
+            CancellationTokenSource previous = null;
+            lock (_ctsSync)
+            {
+                previous = _cancellationTokenSource;
+                _cancellationTokenSource = cts;
+            }
+
+            if (previous != null)
+            {
+                try { previous.Cancel(); } catch { }
+                previous.Dispose();
+            }
+
+            return cts.Token;
+        }
+
+        private static void ClearCancellationTokenSource()
+        {
+            CancellationTokenSource existing = null;
+            lock (_ctsSync)
+            {
+                existing = _cancellationTokenSource;
+                _cancellationTokenSource = null;
+            }
+
+            if (existing != null)
+            {
+                try { existing.Cancel(); } catch { }
+                existing.Dispose();
             }
         }
 
@@ -144,22 +174,19 @@ namespace MT5GrpcClient
                 if (_isStreamingActive)
                     return ERROR_SUCCESS; // Already streaming
 
-                _streamingTask = Task.Run(async () =>
+                StopStreamingAsync().GetAwaiter().GetResult();
+
+                var token = SetCancellationTokenSource(new CancellationTokenSource());
+                lock (_ctsSync)
+                {
+                    _isStreamingActive = true;
+                }
+                var task = Task.Run(async () =>
                 {
                     try
                     {
-                        while (true)
+                        while (_isStreamingActive && !token.IsCancellationRequested)
                         {
-                            if (!TryGetCancellationToken(out var token))
-                            {
-                                await Task.Delay(100, CancellationToken.None).ConfigureAwait(false);
-                                continue;
-                            }
-                            if (token.IsCancellationRequested)
-                            {
-                                break;
-                            }
-
                             try
                             {
                                 using var call = _client.GetTrades(
@@ -169,7 +196,7 @@ namespace MT5GrpcClient
                                 {
                                     try
                                     {
-                                        while (!token.IsCancellationRequested)
+                                        while (_isStreamingActive && !token.IsCancellationRequested)
                                         {
                                             await call.RequestStream.WriteAsync(new GetTradesRequest
                                             {
@@ -194,7 +221,8 @@ namespace MT5GrpcClient
                                     }
                                 }, token);
 
-                                while (await call.ResponseStream.MoveNext(token).ConfigureAwait(false))
+                                while (_isStreamingActive && !token.IsCancellationRequested &&
+                                       await call.ResponseStream.MoveNext(token).ConfigureAwait(false))
                                 {
                                     var trade = call.ResponseStream.Current;
                                     var tradeJson = JsonSerializer.Serialize(new
@@ -230,6 +258,11 @@ namespace MT5GrpcClient
                             }
                             catch
                             {
+                                if (!_isStreamingActive || token.IsCancellationRequested)
+                                {
+                                    break;
+                                }
+
                                 await Task.Delay(5000, token).ConfigureAwait(false);
                             }
                         }
@@ -240,11 +273,16 @@ namespace MT5GrpcClient
                     }
                 });
 
-                _isStreamingActive = true;
+                lock (_ctsSync)
+                {
+                    _streamingTask = task;
+                }
+
                 return ERROR_SUCCESS;
             }
             catch (Exception)
             {
+                StopStreamingAsync().GetAwaiter().GetResult();
                 return ERROR_STREAM_FAILED;
             }
         }
@@ -421,7 +459,7 @@ namespace MT5GrpcClient
         {
             try
             {
-                _isStreamingActive = false;
+                StopStreamingAsync().GetAwaiter().GetResult();
                 return ERROR_SUCCESS;
             }
             catch (Exception)
@@ -544,12 +582,7 @@ namespace MT5GrpcClient
             {
                 _isStreamingActive = false;
 
-                var cts = ClearCancellationTokenSource();
-                if (cts != null)
-                {
-                    cts.Cancel();
-                    cts.Dispose();
-                }
+                ClearCancellationTokenSource();
 
                 if (_streamingTask != null)
                 {

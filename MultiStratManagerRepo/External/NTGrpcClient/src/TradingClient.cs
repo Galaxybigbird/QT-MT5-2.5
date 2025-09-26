@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -297,12 +298,12 @@ namespace NTGrpcClient
             }
         }
         
-        public async Task<OperationResult> NTCloseHedgeAsync(string notificationJson)
+        public async Task<OperationResult> SubmitCloseHedgeAsync(string notificationJson)
         {
             try
             {
                 var notification = JsonToProtoHedgeClose(notificationJson);
-                var response = await _client.NTCloseHedgeAsync(notification);
+                var response = await _client.SubmitCloseHedgeAsync(notification);
                 
                 return new OperationResult
                 {
@@ -551,7 +552,11 @@ namespace NTGrpcClient
 
                 if (value.ValueKind == JsonValueKind.Number)
                     return value.GetDouble();
-                if (value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(), out var result))
+                if (value.ValueKind == JsonValueKind.String && double.TryParse(
+                        value.GetString(),
+                        NumberStyles.Float | NumberStyles.AllowThousands,
+                        CultureInfo.InvariantCulture,
+                        out var result))
                     return result;
             }
             return 0.0;

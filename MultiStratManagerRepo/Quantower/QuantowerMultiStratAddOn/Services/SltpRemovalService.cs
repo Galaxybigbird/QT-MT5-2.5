@@ -64,7 +64,11 @@ namespace Quantower.MultiStrat.Services
                 }
                 finally
                 {
-                    _pendingRemovals.TryRemove(key, out _);
+                    if (_pendingRemovals.TryGetValue(key, out var current) && ReferenceEquals(current, cts))
+                    {
+                        _pendingRemovals.TryRemove(new KeyValuePair<string, CancellationTokenSource>(key, cts));
+                    }
+
                     cts.Dispose();
                 }
             }, cts.Token);
@@ -127,6 +131,14 @@ namespace Quantower.MultiStrat.Services
             var positionId = trade.PositionId;
             var accountKey = triggeringOrder?.Account?.Id ?? triggeringOrder?.Account?.Name ?? position?.Account?.Id ?? position?.Account?.Name;
             var symbolKey = triggeringOrder?.Symbol?.Id ?? triggeringOrder?.Symbol?.Name ?? position?.Symbol?.Id ?? position?.Symbol?.Name;
+
+            if (string.IsNullOrEmpty(positionId) &&
+                string.IsNullOrWhiteSpace(accountKey) &&
+                string.IsNullOrWhiteSpace(symbolKey))
+            {
+                Console.Error.WriteLine("[QT][SLTP] Skipping protective-order removal; unable to determine account/symbol context.");
+                return;
+            }
 
             var protectiveOrders = new List<Order>();
 

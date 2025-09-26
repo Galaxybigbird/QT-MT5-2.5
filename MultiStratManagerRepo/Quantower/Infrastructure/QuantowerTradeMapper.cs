@@ -167,13 +167,18 @@ namespace Quantower.MultiStrat.Infrastructure
                     ["closure_reason"] = "qt_position_removed"
                 };
 
-                positionId = SafeString(position.Id) ?? SafeString(position.UniqueId);
+                var resolvedPositionId = SafeString(position.Id) ?? SafeString(position.UniqueId);
+                var closureEnvelopeId = resolvedPositionId ?? Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
 
-                if (!string.IsNullOrWhiteSpace(positionId))
+                payload["id"] = closureEnvelopeId;
+                payload["base_id"] = resolvedPositionId ?? closureEnvelopeId;
+
+                if (!string.IsNullOrWhiteSpace(resolvedPositionId))
                 {
-                    payload["base_id"] = positionId;
-                    payload["qt_position_id"] = positionId;
+                    payload["qt_position_id"] = resolvedPositionId;
                 }
+
+                positionId = resolvedPositionId;
 
                 AddStrategyTag(payload, position.Comment, position.AdditionalInfo);
                 AddClosureInstrumentAndAccount(payload, position.Symbol, position.Account);
@@ -319,7 +324,13 @@ namespace Quantower.MultiStrat.Infrastructure
                 switch (value)
                 {
                     case DateTime dt:
-                        return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+                        return dt.Kind switch
+                        {
+                            DateTimeKind.Utc         => dt,
+                            DateTimeKind.Local       => dt.ToUniversalTime(),
+                            DateTimeKind.Unspecified => DateTime.SpecifyKind(dt, DateTimeKind.Utc),
+                            _                        => dt
+                        };
                     case DateTimeOffset dto:
                         return dto.UtcDateTime;
                     case long unix:
@@ -344,6 +355,8 @@ namespace Quantower.MultiStrat.Infrastructure
                             var utc = hasOffset ? parsed.ToUniversalTime() : parsed;
                             return DateTime.SpecifyKind(utc, DateTimeKind.Utc);
                         }
+                        break;
+                }
                         break;
                 }
             }

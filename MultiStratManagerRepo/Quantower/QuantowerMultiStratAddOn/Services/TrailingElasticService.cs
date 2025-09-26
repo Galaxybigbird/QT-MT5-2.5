@@ -51,6 +51,7 @@ namespace Quantower.MultiStrat.Services
 
         public bool EnableElasticHedging { get; set; } = true;
         public bool EnableTrailing { get; set; } = true;
+        public bool UseDemaAtrTrailing { get; set; } = true;
         public ProfitUnitType ElasticTriggerUnits { get; set; } = ProfitUnitType.Dollars;
         public double ProfitUpdateThreshold { get; set; } = 100.0;
         public ProfitUnitType ElasticIncrementUnits { get; set; } = ProfitUnitType.Dollars;
@@ -444,19 +445,22 @@ namespace Quantower.MultiStrat.Services
 
         private double ComputeTrailingOffset(Position position, ElasticTracker tracker, double currentPrice)
         {
-            var atr = GetAtr(position.Symbol, AtrPeriod);
-            if (atr.HasValue && atr.Value > 0)
+            if (UseDemaAtrTrailing)
             {
-                return atr.Value * Math.Max(0.1, DemaAtrMultiplier);
-            }
-
-            var dema = GetDema(position.Symbol, DemaPeriod);
-            if (dema.HasValue && dema.Value > 0)
-            {
-                var delta = Math.Abs(currentPrice - dema.Value);
-                if (delta > 0)
+                var atr = GetAtr(position.Symbol, AtrPeriod);
+                if (atr.HasValue && atr.Value > 0)
                 {
-                    return delta * Math.Max(1.0, DemaAtrMultiplier);
+                    return atr.Value * Math.Max(0.1, DemaAtrMultiplier);
+                }
+
+                var dema = GetDema(position.Symbol, DemaPeriod);
+                if (dema.HasValue && dema.Value > 0)
+                {
+                    var delta = Math.Abs(currentPrice - dema.Value);
+                    if (delta > 0)
+                    {
+                        return delta * Math.Max(1.0, DemaAtrMultiplier);
+                    }
                 }
             }
 
@@ -491,17 +495,26 @@ namespace Quantower.MultiStrat.Services
             return candidate > previous + 1e-6;
         }
 
-        private double ConvertUnits(ProfitUnitType units, Position position, ElasticTracker tracker, double currentPrice, double profitDollars)
+    private double ConvertUnits(ProfitUnitType units, Position position, ElasticTracker tracker, double currentPrice, double profitDollars)
+    {
+        var priceDelta = currentPrice - tracker.EntryPrice;
+        var signedDelta = tracker.Side == Side.Sell ? -priceDelta : priceDelta;
+        var effectiveDelta = Math.Max(0.0, signedDelta);
+
+        return units switch
         {
-            return units switch
-            {
-                ProfitUnitType.Dollars => profitDollars,
-                ProfitUnitType.Percent => tracker.EntryPrice == 0 ? 0.0 : Math.Abs((currentPrice - tracker.EntryPrice) / tracker.EntryPrice) * 100.0,
-                ProfitUnitType.Pips => Math.Abs(currentPrice - tracker.EntryPrice) / Math.Max(1e-6, GetPipSize(position.Symbol)),
-                ProfitUnitType.Ticks => Math.Abs(currentPrice - tracker.EntryPrice) / Math.Max(1e-6, GetTickSize(position.Symbol)),
-                _ => profitDollars
-            };
-        }
+            ProfitUnitType.Dollars => profitDollars,
+            ProfitUnitType.Percent => tracker.EntryPrice == 0
+                ? 0.0
+                : (effectiveDelta / tracker.EntryPrice) * 100.0,
+            ProfitUnitType.Pips => ConvertDistance(effectiveDelta, GetPipSize(position.Symbol)),
+            ProfitUnitType.Ticks => ConvertDistance(effectiveDelta, GetTickSize(position.Symbol)),
+            _ => profitDollars
+        };
+
+        static double ConvertDistance(double delta, double stepSize) =>
+            stepSize > 0 ? delta / stepSize : 0.0;
+    }
 
         public double? GetAtr(Symbol? symbol, int period)
         {
@@ -588,8 +601,13 @@ namespace Quantower.MultiStrat.Services
             return position.OpenPrice;
         }
 
-        private static string DetermineTrailingType(double? atr, double? dema)
+        private string DetermineTrailingType(double? atr, double? dema)
         {
+            if (!UseDemaAtrTrailing)
+            {
+                return "static";
+            }
+
             if (atr.HasValue && dema.HasValue)
             {
                 return "atr_dema";
@@ -683,7 +701,7 @@ namespace Quantower.MultiStrat.Services
             return 0.0;
         }
 
-        private static double GetPipSize(Symbol? symbol)
+        private double GetPipSize(Symbol? symbol)
         {
             if (symbol == null)
             {

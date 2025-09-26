@@ -101,7 +101,7 @@ void CleanupATRTrailing()
     }
     
     // Clean all buttons
-    for(int i = 0; i < ObjectsTotal(0); i++)
+    for(int i = ObjectsTotal(0) - 1; i >= 0; i--)
     {
         string objName = ObjectName(0, i);
         if(ObjectGetInteger(0, objName, OBJPROP_TYPE) == OBJ_BUTTON)
@@ -412,9 +412,9 @@ bool ShouldActivateTrailing(ulong ticket, double entryPrice, double currentPrice
 //+------------------------------------------------------------------+
 //| Calculate trailing stop level based on DEMA-ATR                  |
 //+------------------------------------------------------------------+
-double CalculateTrailingStop(string orderType, double currentPrice, double originalStop = 0.0)
+double CalculateTrailingStop(string orderType, double currentPrice, double originalStop = 0.0, double demaAtrOverride = -1.0)
 {
-    double demaAtr = CalculateDEMAATR();
+    double demaAtr = (demaAtrOverride >= 0.0) ? demaAtrOverride : CalculateDEMAATR();
     double trailingDistance = MathMax(demaAtr * CurrentATRMultiplier, MinimumStopDistance * Point());
     
     // Calculate theoretical trailing stop level based on order type
@@ -601,7 +601,7 @@ bool UpdateTrailingStop(ulong ticket, double entryPrice, string orderType)
                 IntegerToString(ticket), DoubleToString(demaAtr, _Digits), DoubleToString(CurrentATRMultiplier, 2),
                 DoubleToString(MinimumStopDistance, 0), DoubleToString(trailingDistance, _Digits), DoubleToString(theoreticalStop, _Digits));
     
-    double newSL = CalculateTrailingStop(orderType, currentPrice, currentSL);
+    double newSL = CalculateTrailingStop(orderType, currentPrice, currentSL, demaAtr);
     
     PrintFormat("TrailingStop::UpdateTrailingStop (Ticket: %s) - ATR Value: %s, Calculated New SL: %s (after all checks)",
                 IntegerToString(ticket), DoubleToString(demaAtr, _Digits), DoubleToString(newSL, _Digits));

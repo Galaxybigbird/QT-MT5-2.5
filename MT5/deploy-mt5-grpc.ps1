@@ -41,11 +41,9 @@ function Select-TargetPathForSource {
 	$ext = $Src.Extension.ToLowerInvariant()
 	# Preferred mapping by relative structure
 	if ($rel -like 'Include*') {
-		$candidate = Join-Path $Mt5Root $rel
-		if (Test-Path (Split-Path $candidate -Parent)) { return $candidate }
+		return Join-Path $Mt5Root $rel
 	} elseif ($rel -like 'Experts*') {
-		$candidate = Join-Path $Mt5Root $rel
-		if (Test-Path (Split-Path $candidate -Parent)) { return $candidate }
+		return Join-Path $Mt5Root $rel
 	} else {
 		# Fallback by extension-based well-known folders
 		if ($ext -eq '.mqh') {
@@ -56,7 +54,6 @@ function Select-TargetPathForSource {
 			if (Test-Path (Split-Path $candidate -Parent)) { return $candidate }
 		}
 	}
-
 	# Search entire MQL5 tree for an existing file with the same name if structured path missing
 	$matches = Get-ChildItem -Path $Mt5Root -Recurse -File -Filter $Src.Name -ErrorAction SilentlyContinue
 	if ($matches.Count -eq 1) { return $matches[0].FullName }

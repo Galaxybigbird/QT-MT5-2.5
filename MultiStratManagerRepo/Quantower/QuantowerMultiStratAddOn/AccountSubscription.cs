@@ -25,7 +25,7 @@ namespace Quantower.MultiStrat
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        public string AccountId { get; }
+        public string AccountId { get; private set; }
 
         public string DisplayName { get; private set; }
 
@@ -72,14 +72,43 @@ namespace Quantower.MultiStrat
 
         public void Update(Account account)
         {
+            if (account == null)
+            {
+                throw new ArgumentNullException(nameof(account));
+            }
+
+            var accountIdChanged = false;
+            var accountChanged = false;
             string newDisplayName;
+
             lock (_accountSync)
             {
+                var previousAccount = _account;
                 _account = account;
+                accountChanged = !ReferenceEquals(previousAccount, account);
+
+                var newAccountId = SafeAccountIdentifier(account);
+                if (!string.Equals(AccountId, newAccountId, StringComparison.Ordinal))
+                {
+                    AccountId = newAccountId;
+                    accountIdChanged = true;
+                }
+
                 newDisplayName = ResolveDisplayName(account);
                 DisplayName = newDisplayName;
             }
+
+            if (accountIdChanged)
+            {
+                OnPropertyChanged(nameof(AccountId));
+            }
+
             OnPropertyChanged(nameof(DisplayName));
+
+            if (accountChanged)
+            {
+                OnPropertyChanged(nameof(Account));
+            }
         }
 
         private static string SafeAccountIdentifier(Account account)

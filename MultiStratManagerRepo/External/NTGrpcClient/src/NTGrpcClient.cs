@@ -225,13 +225,13 @@ namespace NTGrpcClient
         /// </summary>
         /// <param name="notificationJson">JSON representation of close hedge request</param>
         /// <returns>Success status</returns>
-        public static async Task<bool> NTCloseHedgeAsync(string notificationJson)
+        public static async Task<bool> SubmitCloseHedgeAsync(string notificationJson)
         {
             if (!_initialized) return false;
             
             try
             {
-                var result = await _client.NTCloseHedgeAsync(notificationJson);
+                var result = await _client.SubmitCloseHedgeAsync(notificationJson);
                 return result.Success;
             }
             catch (Exception ex)
@@ -318,9 +318,9 @@ namespace NTGrpcClient
         /// <summary>
         /// Submit NT close hedge request (synchronous wrapper)
         /// </summary>
-        public static bool NTCloseHedge(string notificationJson)
+        public static bool SubmitCloseHedge(string notificationJson)
         {
-            return NTCloseHedgeAsync(notificationJson).GetAwaiter().GetResult();
+            return SubmitCloseHedgeAsync(notificationJson).GetAwaiter().GetResult();
         }
         
         /// <summary>

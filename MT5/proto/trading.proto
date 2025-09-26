@@ -156,7 +156,7 @@ message HeartbeatResponse {
 
 // Trading service for main communication
 service TradingService {
-  // Trade submission from NinjaTrader
+  // Trade submission from client add-ons (Quantower, etc.)
   rpc SubmitTrade(Trade) returns (GenericResponse);
   
   // Trade polling for MT5 (streaming)
@@ -183,8 +183,8 @@ service TradingService {
   // System heartbeat
   rpc SystemHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   
-  // NT close hedge request
-  rpc NTCloseHedge(HedgeCloseNotification) returns (GenericResponse);
+  // Client-initiated hedge close request
+  rpc SubmitCloseHedge(HedgeCloseNotification) returns (GenericResponse);
 }
 
 // Real-time streaming service

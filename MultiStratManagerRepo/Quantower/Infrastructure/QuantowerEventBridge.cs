@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Quantower.Bridge.Client;
 using TradingPlatform.BusinessLayer;
 
@@ -68,7 +69,12 @@ namespace Quantower.MultiStrat.Infrastructure
             ThrowIfDisposed();
 
             var positions = _core.Positions;
-            return positions ?? Array.Empty<Position>();
+            if (positions == null)
+            {
+                return Array.Empty<Position>();
+            }
+
+            return positions.ToArray();
         }
 
         public void Dispose()

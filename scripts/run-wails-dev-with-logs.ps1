@@ -22,17 +22,31 @@ if (Test-Path $logPattern) {
 Write-Host "BRIDGE_LOG_DIR=$env:BRIDGE_LOG_DIR"
 Write-Host "Starting Wails dev (GUI)..."
 
-# --- Sentry (Observability) Placeholders ---
-# Uncomment and fill these to enable Sentry while running `wails dev`.
-# 1. Quick test: set DSN + MIN level (WARN recommended) + ENV (dev/staging/prod)
-# 2. Durable setup: after validating, keep these lines uncommented or move to a dedicated startup script.
-#
-$env:SENTRY_DSN = 'https://42ce93c5b392d92bd8478eeb72e85905@o4509828075552768.ingest.us.sentry.io/4509839352659968'              # Required to enable Sentry
-$env:SENTRY_ENV = 'dev'                                # dev | staging | prod
-$env:SENTRY_MIN_EVENT_LEVEL = 'INFO'                   # INFO | WARN | ERROR (INFO now default: capture all logs)
-$env:SENTRY_RELEASE = 'bridge@2.0.0'                   # Optional: version tagging
-$env:SENTRY_DEBUG = 'false'                            # Optional verbose SDK logging
-Write-Host "Sentry configured: env=$env:SENTRY_ENV level>=$env:SENTRY_MIN_EVENT_LEVEL"
+# --- Sentry (Observability) Opt-in ---
+# Default to disabled unless explicitly opted in by caller.
+if ([string]::IsNullOrWhiteSpace($env:SENTRY_ENABLED)) {
+    $env:SENTRY_ENABLED = 'false'
+}
+# To send local logs to Sentry set $env:SENTRY_ENABLED='true' (and optionally preset SENTRY_DSN etc.)
+# By default no telemetry is forwarded.
+if ($env:SENTRY_ENABLED -and $env:SENTRY_ENABLED.Equals('true', 'InvariantCultureIgnoreCase')) {
+    if (-not $env:SENTRY_DSN) {
+        Write-Host 'SENTRY_ENABLED=true but SENTRY_DSN is not set. Skipping Sentry setup.' -ForegroundColor Yellow
+    }
+    else {
+        # Respect existing overrides but provide sensible defaults.
+        if (-not $env:SENTRY_ENV) { $env:SENTRY_ENV = 'dev' }
+        if (-not $env:SENTRY_MIN_EVENT_LEVEL) { $env:SENTRY_MIN_EVENT_LEVEL = 'WARN' }
+        if (-not $env:SENTRY_RELEASE) { $env:SENTRY_RELEASE = 'bridge@dev-local' }
+        if (-not $env:SENTRY_DEBUG) { $env:SENTRY_DEBUG = 'false' }
+        Write-Host "Sentry enabled: env=$env:SENTRY_ENV level>=$env:SENTRY_MIN_EVENT_LEVEL"
+    }
+} else {
+    foreach ($key in 'SENTRY_DSN','SENTRY_ENV','SENTRY_MIN_EVENT_LEVEL','SENTRY_RELEASE','SENTRY_DEBUG') {
+        Remove-Item "env:$key" -ErrorAction SilentlyContinue
+    }
+    Write-Host 'Sentry disabled (set SENTRY_ENABLED=true and provide SENTRY_DSN to opt in).'
+}
 
 
 # Start Wails dev in current terminal so you can see output

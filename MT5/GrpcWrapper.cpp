@@ -19,6 +19,10 @@
 #include <fstream>
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <string>
+#include <limits>
+#include <cmath>
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -31,6 +35,7 @@ using trading::StreamingService;
 using trading::LoggingService;
 using trading::Trade;
 using trading::HealthRequest;
+using trading::GetTradesRequest;
 using trading::HealthResponse;
 using trading::GenericResponse;
 using trading::MT5TradeResult;
@@ -179,6 +184,85 @@ void UTF8ToWideString(const std::string& utf8_str, wchar_t* buffer, int buffer_s
     }
 }
 
+static std::string JsonGetString(const json& object, const char* key) {
+    auto it = object.find(key);
+    if (it == object.end() || it->is_null()) {
+        return "";
+    }
+    if (it->is_string()) {
+        return it->get<std::string>();
+    }
+    if (it->is_number_unsigned()) {
+        return std::to_string(it->get<uint64_t>());
+    }
+    if (it->is_number_integer()) {
+        return std::to_string(it->get<int64_t>());
+    }
+    if (it->is_number_float()) {
+        return std::to_string(it->get<double>());
+    }
+    if (it->is_boolean()) {
+        return it->get<bool>() ? "true" : "false";
+    }
+    return "";
+}
+
+static uint64_t JsonGetUInt64(const json& object, const char* key) {
+    auto it = object.find(key);
+    if (it == object.end() || it->is_null()) {
+        return 0ULL;
+    }
+    if (it->is_number_unsigned()) {
+        return it->get<uint64_t>();
+    }
+    if (it->is_number_integer()) {
+        auto value = it->get<int64_t>();
+        return value < 0 ? 0ULL : static_cast<uint64_t>(value);
+    }
+    if (it->is_number_float()) {
+        double value = it->get<double>();
+        if (!std::isfinite(value) || value <= 0.0) {
+            return 0ULL;
+        }
+        if (value >= static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+            return std::numeric_limits<uint64_t>::max();
+        }
+        return static_cast<uint64_t>(std::floor(value));
+    }
+    if (it->is_string()) {
+        try {
+            return std::stoull(it->get<std::string>());
+        } catch (...) {
+            return 0ULL;
+        }
+    }
+    return 0ULL;
+}
+
+static int32_t JsonGetInt32(const json& object, const char* key, int32_t default_value = 0) {
+    auto it = object.find(key);
+    if (it == object.end() || it->is_null()) {
+        return default_value;
+    }
+    if (it->is_number_integer()) {
+        return static_cast<int32_t>(it->get<int64_t>());
+    }
+    if (it->is_number_unsigned()) {
+        return static_cast<int32_t>(it->get<uint64_t>());
+    }
+    if (it->is_number_float()) {
+        return static_cast<int32_t>(it->get<double>());
+    }
+    if (it->is_string()) {
+        try {
+            return static_cast<int32_t>(std::stol(it->get<std::string>()));
+        } catch (...) {
+            return default_value;
+        }
+    }
+    return default_value;
+}
+
 // Streaming thread function
 void StreamingThreadFunction() {
     while (!g_client_state.stop_streaming_ && g_client_state.is_initialized_) {
@@ -198,11 +282,11 @@ void StreamingThreadFunction() {
             
             auto stream = g_client_state.trading_stub_->GetTrades(&context);
             
-            // Send periodic health requests
+            // Send periodic heartbeats
             std::thread heartbeat_thread([&stream]() {
                 try {
                     while (!g_client_state.stop_streaming_) {
-                        HealthRequest request;
+                        GetTradesRequest request;
                         request.set_source("MT5_EA");
                         request.set_open_positions(0);
                         
@@ -216,6 +300,14 @@ void StreamingThreadFunction() {
                     // Heartbeat thread error
                 }
             });
+            struct HeartbeatJoiner {
+                std::thread& t;
+                ~HeartbeatJoiner() {
+                    if (t.joinable()) {
+                        t.join();
+                    }
+                }
+            } heartbeat_joiner{heartbeat_thread};
             
             // Read trades from stream
             Trade trade;
@@ -262,11 +354,6 @@ void StreamingThreadFunction() {
                 }
 
                 g_client_state.EnqueueTrade(trade_json.dump());
-            }
-            
-            // Clean up heartbeat thread
-            if (heartbeat_thread.joinable()) {
-                heartbeat_thread.join();
             }
             
             Status status = stream->Finish();
@@ -577,16 +664,64 @@ MT5_GRPC_API int __stdcall GrpcNotifyHedgeClose(const wchar_t* notification_json
         context.set_deadline(deadline);
         
         HedgeCloseNotification notification;
-        notification.set_account_id(data.value("account_id", std::string("")));
-        notification.set_position_id(data.value("position_id", std::string("")));
-        notification.set_ticket(data.value("mt5_ticket", 0ULL));
-        notification.set_trade_id(data.value("trade_id", std::string("")));
-        notification.set_base_id(data.value("base_id", std::string("")));
-        notification.set_reason(data.value("reason", std::string("manual")));
-        notification.set_quantity(data.value("quantity", 0.0));
-        notification.set_price(data.value("price", 0.0));
-        notification.set_timestamp(data.value("timestamp", 0LL));
-        
+        notification.set_event_type(JsonGetString(data, "event_type"));
+        notification.set_base_id(JsonGetString(data, "base_id"));
+
+        std::string instrument = JsonGetString(data, "nt_instrument_symbol");
+        if (instrument.empty()) {
+            instrument = JsonGetString(data, "instrument_symbol");
+        }
+        if (instrument.empty()) {
+            instrument = JsonGetString(data, "instrument");
+        }
+        notification.set_nt_instrument_symbol(instrument);
+
+        std::string account_name = JsonGetString(data, "nt_account_name");
+        if (account_name.empty()) {
+            account_name = JsonGetString(data, "account_name");
+        }
+        if (account_name.empty()) {
+            account_name = JsonGetString(data, "account");
+        }
+        notification.set_nt_account_name(account_name);
+
+        double closed_qty = data.value("closed_hedge_quantity", data.value("quantity", 0.0));
+        notification.set_closed_hedge_quantity(closed_qty);
+
+        std::string closed_action = JsonGetString(data, "closed_hedge_action");
+        if (closed_action.empty()) {
+            closed_action = JsonGetString(data, "action");
+        }
+        notification.set_closed_hedge_action(closed_action);
+
+        notification.set_timestamp(JsonGetString(data, "timestamp"));
+
+        std::string closure_reason = JsonGetString(data, "closure_reason");
+        if (closure_reason.empty()) {
+            closure_reason = JsonGetString(data, "reason");
+        }
+        notification.set_closure_reason(closure_reason);
+
+        uint64_t close_ticket = JsonGetUInt64(data, "mt5_ticket");
+        if (close_ticket == 0ULL) {
+            close_ticket = JsonGetUInt64(data, "ticket");
+        }
+        if (close_ticket != 0ULL) {
+            notification.set_mt5_ticket(close_ticket);
+        }
+
+        std::string qt_position = JsonGetString(data, "qt_position_id");
+        if (qt_position.empty()) {
+            qt_position = JsonGetString(data, "position_id");
+        }
+        notification.set_qt_position_id(qt_position);
+
+        std::string qt_trade = JsonGetString(data, "qt_trade_id");
+        if (qt_trade.empty()) {
+            qt_trade = JsonGetString(data, "trade_id");
+        }
+        notification.set_qt_trade_id(qt_trade);
+
         GenericResponse response;
         Status status = g_client_state.trading_stub_->NotifyHedgeClose(&context, notification, &response);
         
@@ -618,15 +753,20 @@ MT5_GRPC_API int __stdcall GrpcSubmitElasticUpdate(const wchar_t* update_json) {
         context.set_deadline(deadline);
         
         ElasticHedgeUpdate update;
-        update.set_base_id(data.value("base_id", std::string("")));
-        update.set_account_id(data.value("account_id", std::string("")));
-        update.set_symbol(data.value("instrument", std::string("")));
+        update.set_event_type(JsonGetString(data, "event_type"));
+        update.set_action(JsonGetString(data, "action"));
+        update.set_base_id(JsonGetString(data, "base_id"));
         update.set_current_profit(data.value("current_profit", 0.0));
-        update.set_profit_level(data.value("profit_level", 0.0));
-        update.set_trigger_level(data.value("trigger_level", 0.0));
-        update.set_increment_units(data.value("increment_units", 0.0));
-        update.set_increment_value(data.value("increment_value", 0.0));
-        update.set_timestamp(data.value("timestamp", 0LL));
+        int32_t profit_level = JsonGetInt32(data, "profit_level", JsonGetInt32(data, "elastic_profit_level", 0));
+        update.set_profit_level(profit_level);
+        update.set_timestamp(JsonGetString(data, "timestamp"));
+        uint64_t update_ticket = JsonGetUInt64(data, "mt5_ticket");
+        if (update_ticket == 0ULL) {
+            update_ticket = JsonGetUInt64(data, "ticket");
+        }
+        if (update_ticket != 0ULL) {
+            update.set_mt5_ticket(update_ticket);
+        }
         
         GenericResponse response;
         Status status = g_client_state.trading_stub_->SubmitElasticUpdate(&context, update, &response);
@@ -659,13 +799,41 @@ MT5_GRPC_API int __stdcall GrpcSubmitTrailingUpdate(const wchar_t* update_json) 
         context.set_deadline(deadline);
         
         TrailingStopUpdate update;
-        update.set_base_id(data.value("base_id", std::string("")));
-        update.set_account_id(data.value("account_id", std::string("")));
-        update.set_symbol(data.value("instrument", std::string("")));
-        update.set_trailing_stop(data.value("trailing_stop", 0.0));
-        update.set_activation_level(data.value("activation_level", 0.0));
-        update.set_timestamp(data.value("timestamp", 0LL));
-        
+        update.set_event_type(JsonGetString(data, "event_type"));
+        update.set_base_id(JsonGetString(data, "base_id"));
+
+        double new_stop_price = 0.0;
+        if (data.contains("new_stop_price")) {
+            new_stop_price = data.value("new_stop_price", 0.0);
+        } else {
+            new_stop_price = data.value("trailing_stop", 0.0);
+        }
+        update.set_new_stop_price(new_stop_price);
+
+        std::string trailing_type = JsonGetString(data, "trailing_type");
+        if (trailing_type.empty()) {
+            trailing_type = JsonGetString(data, "trailing_stop_type");
+        }
+        update.set_trailing_type(trailing_type);
+
+        double current_price = 0.0;
+        if (data.contains("current_price")) {
+            current_price = data.value("current_price", 0.0);
+        } else if (data.contains("price")) {
+            current_price = data.value("price", 0.0);
+        }
+        update.set_current_price(current_price);
+
+        update.set_timestamp(JsonGetString(data, "timestamp"));
+
+        uint64_t trailing_ticket = JsonGetUInt64(data, "mt5_ticket");
+        if (trailing_ticket == 0ULL) {
+            trailing_ticket = JsonGetUInt64(data, "ticket");
+        }
+        if (trailing_ticket != 0ULL) {
+            update.set_mt5_ticket(trailing_ticket);
+        }
+
         GenericResponse response;
         Status status = g_client_state.trading_stub_->SubmitTrailingUpdate(&context, update, &response);
         

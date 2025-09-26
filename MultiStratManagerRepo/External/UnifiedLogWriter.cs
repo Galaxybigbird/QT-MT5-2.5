@@ -159,7 +159,7 @@ namespace Trading.Proto
 
                     try
                     {
-                        _ = _logging.LogAsync(ev);
+                        _logging.Log(ev);
                         _consecutiveFailures = 0;
                         _firstFailureAt = DateTime.MinValue;
                     }

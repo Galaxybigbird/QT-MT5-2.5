@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -37,6 +38,7 @@ namespace Quantower.MultiStrat.Utilities
 
             return JsonSerializer.Deserialize<T>(json, Options);
         }
+
         private static JsonSerializerOptions WithoutInferredTypesConverter(JsonSerializerOptions options)
         {
             var clone = new JsonSerializerOptions(options);
@@ -47,9 +49,9 @@ namespace Quantower.MultiStrat.Utilities
                     clone.Converters.RemoveAt(i);
                 }
             }
+
             return clone;
         }
-
 
         private sealed class ObjectToInferredTypesConverter : JsonConverter<object?>
         {
@@ -83,17 +85,15 @@ namespace Quantower.MultiStrat.Utilities
 
                         return reader.GetString();
                     case JsonTokenType.StartArray:
-                        {
-                            using var doc = JsonDocument.ParseValue(ref reader);
-                            var clean = WithoutInferredTypesConverter(options);
-                            return JsonSerializer.Deserialize<object?[]>(doc.RootElement.GetRawText(), clean);
-                        }
+                    {
+                        using var doc = JsonDocument.ParseValue(ref reader);
+                        return ConvertElement(doc.RootElement);
+                    }
                     case JsonTokenType.StartObject:
-                        {
-                            using var doc = JsonDocument.ParseValue(ref reader);
-                            var clean = WithoutInferredTypesConverter(options);
-                            return JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, object?>>(doc.RootElement.GetRawText(), clean);
-                        }
+                    {
+                        using var doc = JsonDocument.ParseValue(ref reader);
+                        return ConvertElement(doc.RootElement);
+                    }
                     default:
                         throw new JsonException($"Unsupported token type {reader.TokenType}");
                 }
@@ -130,7 +130,6 @@ namespace Quantower.MultiStrat.Utilities
                     case sbyte sb8:
                         writer.WriteNumberValue(sb8);
                         break;
-
                     case DateTime dt:
                         writer.WriteStringValue(dt);
                         break;
@@ -162,6 +161,65 @@ namespace Quantower.MultiStrat.Utilities
                         var clean = WithoutInferredTypesConverter(options);
                         JsonSerializer.Serialize(writer, value, value.GetType(), clean);
                         break;
+                }
+            }
+
+            private static object? ConvertElement(JsonElement element)
+            {
+                switch (element.ValueKind)
+                {
+                    case JsonValueKind.Null:
+                        return null;
+                    case JsonValueKind.True:
+                        return true;
+                    case JsonValueKind.False:
+                        return false;
+                    case JsonValueKind.Number:
+                        if (element.TryGetInt64(out var intValue))
+                        {
+                            return intValue;
+                        }
+
+                        if (element.TryGetDouble(out var doubleValue))
+                        {
+                            return doubleValue;
+                        }
+
+                        return null;
+                    case JsonValueKind.String:
+                        if (element.TryGetDateTime(out var dateTime))
+                        {
+                            return dateTime;
+                        }
+
+                        if (element.TryGetDateTimeOffset(out var dto))
+                        {
+                            return dto;
+                        }
+
+                        return element.GetString();
+                    case JsonValueKind.Array:
+                    {
+                        var list = new List<object?>(element.GetArrayLength());
+                        foreach (var item in element.EnumerateArray())
+                        {
+                            list.Add(ConvertElement(item));
+                        }
+
+                        return list;
+                    }
+                    case JsonValueKind.Object:
+                    {
+                        var dict = new Dictionary<string, object?>(StringComparer.Ordinal);
+                        foreach (var property in element.EnumerateObject())
+                        {
+                            dict[property.Name] = ConvertElement(property.Value);
+                        }
+
+                        return dict;
+                    }
+                    default:
+                        return null;
                 }
             }
         }

@@ -19,7 +19,7 @@
   - `SubmitElasticUpdate(string updateJson)`
   - `SubmitTrailingUpdate(string updateJson)`
   - `NotifyHedgeClose(string notificationJson)`
-  - `NTCloseHedge(string notificationJson)`
+  - `SubmitCloseHedge(string notificationJson)`
   - `StartTradingStream(Action<string> callback)`
   - `StopTradingStream()`
 
@@ -77,7 +77,7 @@
 ### 6. Hedge Closure with Fallback
 - **Method**: `SendClosureToBridge()` enhanced with gRPC support
 - **Fallback**: Same pattern as trade submission
-- **gRPC Method**: `TradingGrpcClient.NTCloseHedge()`
+- **gRPC Method**: `TradingGrpcClient.SubmitCloseHedge()`
 
 ## 🔧 Build Status
 

@@ -213,7 +213,7 @@ void _ULogJsonAppendString(string &json, const string key, const string value, b
       json += ",";
    json += "\"";
    json += _ULogJsonEscape(key);
-   json += "\":"";
+   json += "\":\"";
    json += _ULogJsonEscape(value);
    json += "\"";
    first = false;

@@ -3985,28 +3985,37 @@ void SendTrailingUpdateNotification(string baseId, double newStopPrice, string r
 string ExtractBaseIdFromComment(string comment_str)
 {
     string base_id = "";
-    if (comment_str == NULL || StringLen(comment_str) == 0) return "";
+    if (comment_str == NULL || StringLen(comment_str) == 0) 
+        return "";
 
-    string bid_marker = "BID:";
-    int bid_marker_len = StringLen(bid_marker);
-    int start_pos = StringFind(comment_str, bid_marker, 0);
+    // First, handle the new NT_Hedge_{BUY|SELL}_<base_id> format
+    string buyPrefix  = CommentPrefix + "BUY_";
+    string sellPrefix = CommentPrefix + "SELL_";
+    if (StringFind(comment_str, buyPrefix) == 0)
+        return StringSubstr(comment_str, StringLen(buyPrefix));
+    if (StringFind(comment_str, sellPrefix) == 0)
+        return StringSubstr(comment_str, StringLen(sellPrefix));
 
-    if(start_pos != -1)
+    // Legacy parsing: look for “BID:<base_id>”
+    string bid_marker    = "BID:";
+    int    bid_marker_len = StringLen(bid_marker);
+    int    start_pos      = StringFind(comment_str, bid_marker, 0);
+
+    if (start_pos != -1)
     {
         int value_start_pos = start_pos + bid_marker_len;
-        // Ensure value_start_pos is within bounds of the comment string
+        // Ensure value_start_pos is within bounds
         if (value_start_pos < StringLen(comment_str))
         {
             int end_pos = StringFind(comment_str, ";", value_start_pos);
-            if(end_pos != -1)
+            if (end_pos != -1)
             {
                 // Found a semicolon after BID:value
                 base_id = StringSubstr(comment_str, value_start_pos, end_pos - value_start_pos);
             }
             else
             {
-                // No semicolon after BID:value, take the rest of the string
-                // This handles cases where the comment might be truncated after the base_id
+                // No semicolon, take the rest of the string
                 base_id = StringSubstr(comment_str, value_start_pos);
             }
         }
@@ -4015,12 +4024,19 @@ string ExtractBaseIdFromComment(string comment_str)
     int id_len = StringLen(base_id);
     // Updated length check for shortened base_ids (16 chars) due to MT5 comment field limitations
     // Log warnings only for comments that appear to be AC_HEDGE related to reduce noise.
-    if (StringFind(comment_str, "AC_HEDGE", 0) != -1) { // Check if it's likely one of our comments
-        if (id_len > 0 && (id_len < 16 || id_len > 36) && base_id != "TEST_BASE_ID_RECOVERY") { // Allow 16-36 chars for compatibility
-             Print("ACHM_PARSE_INFO: ExtractBaseIdFromComment - Extracted base_id '", base_id, "' from '", comment_str, "' has length: ", id_len, " (expected 16 for new format, 32 for legacy)");
-        } else if (id_len == 0 && StringFind(comment_str, "BID:", 0) != -1) {
-            // If it's an AC_HEDGE comment and contains BID: but we got no base_id, that's a specific failure.
-            Print("ACHM_PARSE_FAIL: ExtractBaseIdFromComment - Failed to extract base_id from AC_HEDGE comment containing BID: '", comment_str, "'");
+    if (StringFind(comment_str, "AC_HEDGE", 0) != -1)
+    {
+        if (id_len > 0 && (id_len < 16 || id_len > 36) && base_id != "TEST_BASE_ID_RECOVERY")
+        {
+            Print("ACHM_PARSE_INFO: ExtractBaseIdFromComment - Extracted base_id '", base_id,
+                  "' from '", comment_str, "' has length: ", id_len,
+                  " (expected 16 for new format, 32 for legacy)");
+        }
+        else if (id_len == 0 && StringFind(comment_str, "BID:", 0) != -1)
+        {
+            // AC_HEDGE comment contained BID: but we got no base_id
+            Print("ACHM_PARSE_FAIL: ExtractBaseIdFromComment - Failed to extract base_id from AC_HEDGE comment containing BID: '",
+                  comment_str, "'");
         }
     }
 

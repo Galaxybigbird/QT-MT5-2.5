@@ -20,6 +20,7 @@ namespace Quantower.MultiStrat
     {
         private readonly QuantowerBridgeService _bridgeService;
         private readonly ObservableCollection<AccountSubscription> _accounts = new();
+        private readonly object _accountsLock = new();
         private readonly ReadOnlyObservableCollection<AccountSubscription> _accountsView;
         private readonly SettingsRepository _settingsRepository = new();
         private readonly RiskConfiguration _riskSettings = new();
@@ -30,8 +31,10 @@ namespace Quantower.MultiStrat
         private readonly object _trackingLock = new();
         private readonly TimeSpan _trackingInterval = TimeSpan.FromSeconds(2);
         private readonly object _riskLock = new();
+        private readonly object _settingsSaveLock = new();
         private int _disposed; // 0 = active, 1 = disposed
         private Timer? _riskTimer;
+        private bool _coreEventsAttached;
         public TimeSpan RiskTimerInterval { get; set; } = TimeSpan.FromSeconds(5);
 
         public MultiStratManagerService()
@@ -48,9 +51,11 @@ namespace Quantower.MultiStrat
             _accountsView = new ReadOnlyObservableCollection<AccountSubscription>(_accounts);
             LoadSettings();
             StartRiskTimer();
+            SubscribeToCoreEvents();
         }
 
         public event Action<QuantowerBridgeService.BridgeLogEntry>? Log;
+        public event EventHandler? AccountsChanged;
         public event PropertyChangedEventHandler? PropertyChanged;
 
         public ReadOnlyObservableCollection<AccountSubscription> Accounts => _accountsView;
@@ -120,13 +125,16 @@ namespace Quantower.MultiStrat
                 _riskSettings.DailyLossLimit = Math.Max(0, update.DailyLossLimit);
                 _riskSettings.AutoFlatten = update.AutoFlatten;
                 _riskSettings.DisableOnLimit = update.DisableOnLimit;
-                SaveSettings();
             }
+
+            SaveSettings();
         }
 
         public void ResetDailyRisk(string? accountId)
         {
             ThrowIfDisposed();
+
+            var accountLookup = BuildAccountLookup(SnapshotAccounts());
 
             lock (_riskLock)
             {
@@ -134,8 +142,7 @@ namespace Quantower.MultiStrat
                 {
                     foreach (var kvp in _riskSettings.Accounts)
                     {
-                        var account = FindAccountById(kvp.Key);
-                        if (account != null)
+                        if (accountLookup.TryGetValue(kvp.Key, out var account) && account != null)
                         {
                             kvp.Value.BalanceBaseline = account.Balance;
                         }
@@ -149,23 +156,27 @@ namespace Quantower.MultiStrat
                 }
                 else
                 {
-                    var account = FindAccountById(accountId);
+                    accountLookup.TryGetValue(accountId, out var account);
                     var state = GetOrCreateRiskState(accountId, account);
                     state.BalanceBaseline = account?.Balance ?? state.BalanceBaseline;
                     state.LimitTriggered = false;
                     state.LastKnownPnL = 0;
                     state.LastTriggerUtc = DateTime.MinValue;
                 }
-
-                SaveSettings();
             }
+
+            SaveSettings();
         }
 
         public Task<bool> FlattenAccountAsync(string accountId, bool disableAfter, string reason = "manual")
         {
             ThrowIfDisposed();
 
-            var subscription = _accounts.FirstOrDefault(s => string.Equals(s.AccountId, accountId, StringComparison.OrdinalIgnoreCase));
+            AccountSubscription? subscription;
+            lock (_accountsLock)
+            {
+                subscription = _accounts.FirstOrDefault(s => string.Equals(s.AccountId, accountId, StringComparison.OrdinalIgnoreCase));
+            }
             if (subscription == null)
             {
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Flatten request ignored – unknown account {accountId}");
@@ -180,7 +191,13 @@ namespace Quantower.MultiStrat
             ThrowIfDisposed();
 
             var tasks = new List<Task<bool>>();
-            foreach (var subscription in _accounts)
+            List<AccountSubscription> snapshot;
+            lock (_accountsLock)
+            {
+                snapshot = _accounts.ToList();
+            }
+
+            foreach (var subscription in snapshot)
             {
                 if (subscription.Account != null)
                 {
@@ -202,6 +219,7 @@ namespace Quantower.MultiStrat
                 _trailingService.ElasticIncrementUnits,
                 _trailingService.ElasticIncrementValue,
                 _trailingService.EnableTrailing,
+                _trailingService.UseDemaAtrTrailing,
                 _trailingService.TrailingActivationUnits,
                 _trailingService.TrailingActivationValue,
                 _trailingService.TrailingStopUnits,
@@ -221,6 +239,7 @@ namespace Quantower.MultiStrat
             _trailingService.ElasticIncrementUnits = update.ElasticIncrementUnits;
             _trailingService.ElasticIncrementValue = update.ElasticIncrementValue;
             _trailingService.EnableTrailing = update.EnableTrailing;
+            _trailingService.UseDemaAtrTrailing = update.EnableTrailing && update.UseDemaAtrTrailing;
             _trailingService.TrailingActivationUnits = update.TrailingActivationUnits;
             _trailingService.TrailingActivationValue = update.TrailingActivationValue;
             _trailingService.TrailingStopUnits = update.TrailingStopUnits;
@@ -245,66 +264,185 @@ namespace Quantower.MultiStrat
 
                 var accounts = core.Accounts;
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var refreshPositions = new List<string>();
+                var removedAccounts = new List<AccountSubscription>();
+                var stopTrackingIds = new List<string>();
+                var changed = false;
+                var subscriptionsToAttach = new List<AccountSubscription>();
 
-                foreach (var account in accounts)
+                lock (_accountsLock)
                 {
-                    if (account == null)
+                    foreach (var account in accounts)
                     {
-                        continue;
-                    }
-
-                    var identifier = account.Id ?? account.Name ?? string.Empty;
-                    if (string.IsNullOrWhiteSpace(identifier))
-                    {
-                        continue;
-                    }
-
-                    seen.Add(identifier);
-
-                    var existing = _accounts.FirstOrDefault(a => a.Matches(account));
-                    if (existing == null)
-                    {
-                        var enable = _savedAccountIds.Count == 0 || _savedAccountIds.Contains(identifier);
-                        var subscription = new AccountSubscription(account, enable);
-                        AttachSubscription(subscription);
-                        _accounts.Add(subscription);
-
-                        if (enable)
+                        if (account == null)
                         {
-                            RefreshAccountPositions(subscription.AccountId);
+                            continue;
+                        }
+
+                        var identifier = account.Id ?? account.Name ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(identifier))
+                        {
+                            continue;
+                        }
+
+                        seen.Add(identifier);
+
+                        AccountSubscription? existing = null;
+                        foreach (var subscription in _accounts)
+                        {
+                            if (subscription.Matches(account))
+                            {
+                                existing = subscription;
+                                break;
+                            }
+                        }
+
+                        if (existing == null)
+                        {
+                            var enable = _savedAccountIds.Count == 0 || _savedAccountIds.Contains(identifier);
+                            var subscription = new AccountSubscription(account, enable);
+                            _accounts.Add(subscription);
+                            changed = true;
+                            subscriptionsToAttach.Add(subscription);
+
+                            if (enable && !string.IsNullOrWhiteSpace(subscription.AccountId))
+                            {
+                                refreshPositions.Add(subscription.AccountId);
+                            }
+                        }
+                        else
+                        {
+                            var beforeName = existing.DisplayName;
+                            existing.Update(account);
+                            subscriptionsToAttach.Add(existing);
+                            if (!string.Equals(beforeName, existing.DisplayName, StringComparison.Ordinal))
+                            {
+                                changed = true;
+                            }
                         }
                     }
-                    else
+
+                    for (var i = _accounts.Count - 1; i >= 0; i--)
                     {
-                        existing.Update(account);
-                        AttachSubscription(existing);
+                        var subscription = _accounts[i];
+                        var currentAccount = subscription.Account;
+                        var candidate = currentAccount?.Id ?? currentAccount?.Name ?? subscription.AccountId;
+
+                        var shouldRemove = currentAccount == null || !seen.Contains(candidate ?? string.Empty);
+                        if (!shouldRemove)
+                        {
+                            continue;
+                        }
+
+                        _accounts.RemoveAt(i);
+                        removedAccounts.Add(subscription);
+                        if (!string.IsNullOrWhiteSpace(subscription.AccountId))
+                        {
+                            stopTrackingIds.Add(subscription.AccountId);
+                        }
+                        changed = true;
                     }
                 }
 
-                for (var i = _accounts.Count - 1; i >= 0; i--)
+                foreach (var subscription in subscriptionsToAttach)
                 {
-                    var account = _accounts[i];
-                    if (account.Account == null)
-                    {
-                        DetachSubscription(account);
-                        StopTrackingByAccount(account.AccountId);
-                        _accounts.RemoveAt(i);
-                        continue;
-                    }
+                    AttachSubscription(subscription);
+                }
 
-                    var candidate = account.Account.Id ?? account.Account.Name ?? string.Empty;
-                    if (!seen.Contains(candidate))
-                    {
-                        DetachSubscription(account);
-                        StopTrackingByAccount(account.AccountId);
-                        _accounts.RemoveAt(i);
-                    }
+                foreach (var subscription in removedAccounts)
+                {
+                    DetachSubscription(subscription);
+                }
+
+                foreach (var accountId in stopTrackingIds)
+                {
+                    StopTrackingByAccount(accountId);
+                }
+
+                foreach (var accountId in refreshPositions)
+                {
+                    RefreshAccountPositions(accountId);
+                }
+
+                if (changed)
+                {
+                    RaiseAccountsChanged();
                 }
             }
             catch (Exception ex)
             {
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to refresh Quantower accounts: {ex.Message}");
             }
+        }
+
+        private void SubscribeToCoreEvents()
+        {
+            if (_coreEventsAttached)
+            {
+                return;
+            }
+
+            try
+            {
+                var core = Core.Instance;
+                if (core == null)
+                {
+                    return;
+                }
+
+                core.AccountAdded += OnCoreAccountAdded;
+                var connections = core.Connections;
+                if (connections != null)
+                {
+                    connections.ConnectionStateChanged += OnCoreConnectionStateChanged;
+                }
+                _coreEventsAttached = true;
+                RefreshAccounts();
+            }
+            catch (Exception ex)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to subscribe to Quantower Core events: {ex.Message}");
+            }
+        }
+
+        private void UnsubscribeFromCoreEvents()
+        {
+            if (!_coreEventsAttached)
+            {
+                return;
+            }
+
+            try
+            {
+                var core = Core.Instance;
+                if (core != null)
+                {
+                    core.AccountAdded -= OnCoreAccountAdded;
+                    var connections = core.Connections;
+                    if (connections != null)
+                    {
+                        connections.ConnectionStateChanged -= OnCoreConnectionStateChanged;
+                    }
+                }
+            }
+            catch
+            {
+                // ignore during shutdown
+            }
+            finally
+            {
+                _coreEventsAttached = false;
+            }
+        }
+
+        private void OnCoreAccountAdded(Account account)
+        {
+            RefreshAccounts();
+        }
+
+        private void OnCoreConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs e)
+        {
+            RefreshAccounts();
         }
 
         public void Dispose()
@@ -314,11 +452,18 @@ namespace Quantower.MultiStrat
                 return;
             }
 
-            SaveSettings();
+            SaveSettings(immediate: true);
+            UnsubscribeFromCoreEvents();
             try
             {
                 StopAllTracking();
-                foreach (var subscription in _accounts)
+                List<AccountSubscription> snapshot;
+                lock (_accountsLock)
+                {
+                    snapshot = _accounts.ToList();
+                }
+
+                foreach (var subscription in snapshot)
                 {
                     DetachSubscription(subscription);
                 }
@@ -342,6 +487,11 @@ namespace Quantower.MultiStrat
             Log?.Invoke(new QuantowerBridgeService.BridgeLogEntry(DateTime.UtcNow, level, message, null, null, null));
         }
 
+        private void RaiseAccountsChanged()
+        {
+            AccountsChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         private void OnPropertyChanged(string propertyName)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -354,12 +504,15 @@ namespace Quantower.MultiStrat
                 var data = _settingsRepository.Load();
                 if (data.TryGetValue("enabled_accounts", out var stored) && stored is IEnumerable<object?> ids)
                 {
-                    _savedAccountIds.Clear();
-                    foreach (var id in ids)
+                    lock (_accountsLock)
                     {
-                        if (id is string key && !string.IsNullOrWhiteSpace(key))
+                        _savedAccountIds.Clear();
+                        foreach (var id in ids)
                         {
-                            _savedAccountIds.Add(key);
+                            if (id is string key && !string.IsNullOrWhiteSpace(key))
+                            {
+                                _savedAccountIds.Add(key);
+                            }
                         }
                     }
                 }
@@ -499,6 +652,11 @@ namespace Quantower.MultiStrat
                         _trailingService.EnableTrailing = enableTrailing.GetBoolean();
                     }
 
+                    if (json.TryGetProperty("enable_dema_atr_trailing", out var enableDema) && enableDema.ValueKind != JsonValueKind.Undefined)
+                    {
+                        _trailingService.UseDemaAtrTrailing = enableDema.GetBoolean();
+                    }
+
                     if (json.TryGetProperty("trailing_activation_units", out var activationUnits) && activationUnits.ValueKind == JsonValueKind.String && Enum.TryParse(activationUnits.GetString(), true, out Services.TrailingElasticService.ProfitUnitType activationType))
                     {
                         _trailingService.TrailingActivationUnits = activationType;
@@ -541,82 +699,126 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private void SaveSettings()
+        private void SaveSettings(bool immediate = false)
         {
+            Dictionary<string, object?> snapshot;
             try
             {
-                var enabled = new List<string>();
-                foreach (var account in _accounts)
-                {
-                    if (account.IsEnabled && !string.IsNullOrEmpty(account.AccountId))
-                    {
-                        enabled.Add(account.AccountId);
-                    }
-                }
+                snapshot = BuildSettingsPayload();
+            }
+            catch (Exception ex)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to prepare manager settings for save: {ex.Message}");
+                return;
+            }
 
+            if (immediate)
+            {
+                PersistSettings(snapshot);
+            }
+            else
+            {
+                _ = Task.Run(() => PersistSettings(snapshot));
+            }
+        }
+
+        private Dictionary<string, object?> BuildSettingsPayload()
+        {
+            List<AccountSubscription> accountsSnapshot;
+            lock (_accountsLock)
+            {
+                accountsSnapshot = _accounts.ToList();
+            }
+
+            var enabled = new List<string>();
+            foreach (var account in accountsSnapshot)
+            {
+                if (account.IsEnabled && !string.IsNullOrWhiteSpace(account.AccountId))
+                {
+                    enabled.Add(account.AccountId);
+                }
+            }
+
+            lock (_accountsLock)
+            {
                 _savedAccountIds.Clear();
                 foreach (var id in enabled)
                 {
                     _savedAccountIds.Add(id);
                 }
+            }
 
-                var payload = new Dictionary<string, object?>
+            var payload = new Dictionary<string, object?>
+            {
+                ["enabled_accounts"] = enabled.ToArray()
+            };
+
+            Dictionary<string, object?> riskPayload;
+            lock (_riskLock)
+            {
+                var baselines = new Dictionary<string, object?>();
+                var triggers = new Dictionary<string, object?>();
+                var lastPnl = new Dictionary<string, object?>();
+
+                foreach (var kvp in _riskSettings.Accounts)
                 {
-                    ["enabled_accounts"] = enabled.ToArray()
-                };
-
-                lock (_riskLock)
-                {
-                    var baselines = new Dictionary<string, object?>();
-                    var triggers = new Dictionary<string, object?>();
-                    var lastPnl = new Dictionary<string, object?>();
-
-                    foreach (var kvp in _riskSettings.Accounts)
+                    baselines[kvp.Key] = kvp.Value.BalanceBaseline;
+                    if (kvp.Value.LimitTriggered)
                     {
-                        baselines[kvp.Key] = kvp.Value.BalanceBaseline;
-                        if (kvp.Value.LimitTriggered)
-                        {
-                            triggers[kvp.Key] = true;
-                        }
-
-                        if (Math.Abs(kvp.Value.LastKnownPnL) > double.Epsilon)
-                        {
-                            lastPnl[kvp.Key] = kvp.Value.LastKnownPnL;
-                        }
+                        triggers[kvp.Key] = true;
                     }
 
-                    payload["risk"] = new Dictionary<string, object?>
+                    if (Math.Abs(kvp.Value.LastKnownPnL) > double.Epsilon)
                     {
-                        ["daily_take_profit"] = _riskSettings.DailyTakeProfit,
-                        ["daily_loss_limit"] = _riskSettings.DailyLossLimit,
-                        ["auto_flatten"] = _riskSettings.AutoFlatten,
-                        ["disable_on_limit"] = _riskSettings.DisableOnLimit,
-                        ["last_reset_date"] = _riskSettings.LastResetDateUtc.ToString("o", CultureInfo.InvariantCulture),
-                        ["baselines"] = baselines,
-                        ["limits"] = triggers,
-                        ["last_known_pnl"] = lastPnl,
-                        ["last_trigger"] = _riskSettings.Accounts.ToDictionary(k => k.Key, v => (object)v.Value.LastTriggerUtc.ToString("o", CultureInfo.InvariantCulture))
-                    };
+                        lastPnl[kvp.Key] = kvp.Value.LastKnownPnL;
+                    }
                 }
 
-                payload["trailing"] = new Dictionary<string, object?>
+                riskPayload = new Dictionary<string, object?>
                 {
-                    ["enable_elastic"] = _trailingService.EnableElasticHedging,
-                    ["elastic_trigger_units"] = _trailingService.ElasticTriggerUnits.ToString(),
-                    ["profit_update_threshold"] = _trailingService.ProfitUpdateThreshold,
-                    ["elastic_increment_units"] = _trailingService.ElasticIncrementUnits.ToString(),
-                    ["elastic_increment_value"] = _trailingService.ElasticIncrementValue,
-                    ["enable_trailing"] = _trailingService.EnableTrailing,
-                    ["trailing_activation_units"] = _trailingService.TrailingActivationUnits.ToString(),
-                    ["trailing_activation_value"] = _trailingService.TrailingActivationValue,
-                    ["trailing_stop_units"] = _trailingService.TrailingStopUnits.ToString(),
-                    ["trailing_stop_value"] = _trailingService.TrailingStopValue,
-                    ["dema_atr_multiplier"] = _trailingService.DemaAtrMultiplier,
-                    ["atr_period"] = _trailingService.AtrPeriod,
-                    ["dema_period"] = _trailingService.DemaPeriod
+                    ["daily_take_profit"] = _riskSettings.DailyTakeProfit,
+                    ["daily_loss_limit"] = _riskSettings.DailyLossLimit,
+                    ["auto_flatten"] = _riskSettings.AutoFlatten,
+                    ["disable_on_limit"] = _riskSettings.DisableOnLimit,
+                    ["last_reset_date"] = _riskSettings.LastResetDateUtc.ToString("o", CultureInfo.InvariantCulture),
+                    ["baselines"] = baselines,
+                    ["limits"] = triggers,
+                    ["last_known_pnl"] = lastPnl,
+                    ["last_trigger"] = _riskSettings.Accounts.ToDictionary(k => k.Key, v => (object)v.Value.LastTriggerUtc.ToString("o", CultureInfo.InvariantCulture))
                 };
+            }
 
-                _settingsRepository.Save(payload);
+            payload["risk"] = riskPayload;
+
+            payload["trailing"] = new Dictionary<string, object?>
+            {
+                ["enable_elastic"] = _trailingService.EnableElasticHedging,
+                ["elastic_trigger_units"] = _trailingService.ElasticTriggerUnits.ToString(),
+                ["profit_update_threshold"] = _trailingService.ProfitUpdateThreshold,
+                ["elastic_increment_units"] = _trailingService.ElasticIncrementUnits.ToString(),
+                ["elastic_increment_value"] = _trailingService.ElasticIncrementValue,
+                ["enable_trailing"] = _trailingService.EnableTrailing,
+                ["enable_dema_atr_trailing"] = _trailingService.UseDemaAtrTrailing,
+                ["trailing_activation_units"] = _trailingService.TrailingActivationUnits.ToString(),
+                ["trailing_activation_value"] = _trailingService.TrailingActivationValue,
+                ["trailing_stop_units"] = _trailingService.TrailingStopUnits.ToString(),
+                ["trailing_stop_value"] = _trailingService.TrailingStopValue,
+                ["dema_atr_multiplier"] = _trailingService.DemaAtrMultiplier,
+                ["atr_period"] = _trailingService.AtrPeriod,
+                ["dema_period"] = _trailingService.DemaPeriod
+            };
+
+            return payload;
+        }
+
+        private void PersistSettings(Dictionary<string, object?> payload)
+        {
+            try
+            {
+                lock (_settingsSaveLock)
+                {
+                    _settingsRepository.Save(payload);
+                }
             }
             catch (Exception ex)
             {
@@ -680,6 +882,7 @@ namespace Quantower.MultiStrat
             Services.TrailingElasticService.ProfitUnitType ElasticIncrementUnits,
             double ElasticIncrementValue,
             bool EnableTrailing,
+            bool UseDemaAtrTrailing,
             Services.TrailingElasticService.ProfitUnitType TrailingActivationUnits,
             double TrailingActivationValue,
             Services.TrailingElasticService.ProfitUnitType TrailingStopUnits,
@@ -695,6 +898,7 @@ namespace Quantower.MultiStrat
             Services.TrailingElasticService.ProfitUnitType ElasticIncrementUnits,
             double ElasticIncrementValue,
             bool EnableTrailing,
+            bool UseDemaAtrTrailing,
             Services.TrailingElasticService.ProfitUnitType TrailingActivationUnits,
             double TrailingActivationValue,
             Services.TrailingElasticService.ProfitUnitType TrailingStopUnits,
@@ -922,9 +1126,12 @@ namespace Quantower.MultiStrat
 
             try
             {
-                EvaluateDailyReset();
+                var accountsSnapshot = SnapshotAccounts();
+                var accountLookup = BuildAccountLookup(accountsSnapshot);
 
-                foreach (var subscription in _accounts)
+                EvaluateDailyReset(accountLookup);
+
+                foreach (var subscription in accountsSnapshot)
                 {
                     if (subscription.IsEnabled)
                     {
@@ -938,11 +1145,13 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private void EvaluateDailyReset()
+        private void EvaluateDailyReset(IReadOnlyDictionary<string, Account?> accountLookup)
         {
+            var today = DateTime.UtcNow.Date;
+            var resetPerformed = false;
+
             lock (_riskLock)
             {
-                var today = DateTime.UtcNow.Date;
                 if (today <= _riskSettings.LastResetDateUtc.Date)
                 {
                     return;
@@ -950,8 +1159,7 @@ namespace Quantower.MultiStrat
 
                 foreach (var kvp in _riskSettings.Accounts)
                 {
-                    var account = FindAccountById(kvp.Key);
-                    if (account != null)
+                    if (accountLookup.TryGetValue(kvp.Key, out var account) && account != null)
                     {
                         kvp.Value.BalanceBaseline = account.Balance;
                     }
@@ -962,6 +1170,11 @@ namespace Quantower.MultiStrat
                 }
 
                 _riskSettings.LastResetDateUtc = today;
+                resetPerformed = true;
+            }
+
+            if (resetPerformed)
+            {
                 SaveSettings();
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, "Daily risk baselines reset");
             }
@@ -1032,6 +1245,7 @@ namespace Quantower.MultiStrat
             }
 
             SaveSettings();
+            RaiseAccountsChanged();
         }
 
         private double CalculateAccountPnl(Account account, string accountId, AccountRiskState state)
@@ -1215,17 +1429,29 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private Account? FindAccountById(string accountId)
+        private List<AccountSubscription> SnapshotAccounts()
         {
-            foreach (var subscription in _accounts)
+            lock (_accountsLock)
             {
-                if (string.Equals(subscription.AccountId, accountId, StringComparison.OrdinalIgnoreCase))
+                return _accounts.ToList();
+            }
+        }
+
+        private static Dictionary<string, Account?> BuildAccountLookup(IEnumerable<AccountSubscription> subscriptions)
+        {
+            var map = new Dictionary<string, Account?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var subscription in subscriptions)
+            {
+                var key = subscription.AccountId;
+                if (string.IsNullOrWhiteSpace(key))
                 {
-                    return subscription.Account;
+                    key = string.Empty;
                 }
+
+                map[key] = subscription.Account;
             }
 
-            return null;
+            return map;
         }
 
         private bool IsAccountEnabled(Position position)
@@ -1241,11 +1467,14 @@ namespace Quantower.MultiStrat
                 return true;
             }
 
-            foreach (var subscription in _accounts)
+            lock (_accountsLock)
             {
-                if (string.Equals(subscription.AccountId, accountId, StringComparison.OrdinalIgnoreCase))
+                foreach (var subscription in _accounts)
                 {
-                    return subscription.IsEnabled;
+                    if (string.Equals(subscription.AccountId, accountId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return subscription.IsEnabled;
+                    }
                 }
             }
 

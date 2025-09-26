@@ -28,8 +28,8 @@ namespace Quantower.MultiStrat.Persistence
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[QT][SettingsRepository] Failed to load settings: {ex.Message}");
-                return new Dictionary<string, object?>();
+                Console.WriteLine($"[QT][SettingsRepository] Failed to load settings: {ex}");
+                throw;
             }
         }
 
@@ -52,7 +52,8 @@ namespace Quantower.MultiStrat.Persistence
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[QT][SettingsRepository] Failed to save settings: {ex.Message}");
+                Console.WriteLine($"[QT][SettingsRepository] Failed to save settings: {ex}");
+                throw;
             }
         }
 

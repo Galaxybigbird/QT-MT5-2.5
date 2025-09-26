@@ -49,7 +49,6 @@ type App struct {
 	// Metadata to aid resolution when BaseID mismatches occur
 	baseIdToInstrument map[string]string // BaseID -> instrument symbol
 	baseIdToAccount    map[string]string // BaseID -> account name
-
 	// Track client-initiated close requests by MT5 ticket to tag subsequent MT5 close results as acks
 	clientCloseMux         sync.Mutex
 	clientInitiatedTickets map[uint64]time.Time // ticket -> time marked

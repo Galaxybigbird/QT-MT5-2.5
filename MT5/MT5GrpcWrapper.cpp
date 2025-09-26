@@ -159,16 +159,32 @@ T CallManagedMethod(const std::string& assemblyPath, const std::string& typeName
     }
 
     DWORD returnValue = 0;
-    std::wstring wAssemblyPath(assemblyPath.begin(), assemblyPath.end());
-    std::wstring wTypeName(typeName.begin(), typeName.end());
-    std::wstring wMethodName(methodName.begin(), methodName.end());
-    std::wstring wArgs(args.begin(), args.end());
+    auto toWide = [](const std::string& value) -> std::wstring {
+        if (value.empty()) {
+            return std::wstring();
+        }
+
+        int len = MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, nullptr, 0);
+        if (len > 0) {
+            std::wstring wide(len, L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, wide.data(), len);
+            wide.resize(len - 1);
+            return wide;
+        }
+
+        // Fallback: treat bytes as ANSI/extended ASCII to preserve legacy behavior
+        return std::wstring(value.begin(), value.end());
+    };
+
+    std::wstring wAssemblyPath = toWide(assemblyPath);
+    std::wstring wTypeName     = toWide(typeName);
+    std::wstring wMethodName   = toWide(methodName);
+    std::wstring wArgs         = toWide(args);
 
     HRESULT hr = g_pRuntimeHost->ExecuteInDefaultAppDomain(
         wAssemblyPath.c_str(),
         wTypeName.c_str(),
-        wMethodName.c_str(),
-        wArgs.c_str(),
+        wMethodName.c_str(),        wArgs.c_str(),
         &returnValue
     );
 

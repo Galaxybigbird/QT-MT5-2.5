@@ -77,7 +77,7 @@ namespace Trading.Proto {
             "Z192YWx1ZRgCIAEoCRIPCgdzdWNjZXNzGAMgASgIIlkKEEhlYXJ0YmVhdFJl",
             "cXVlc3QSEQoJY29tcG9uZW50GAEgASgJEg4KBnN0YXR1cxgCIAEoCRIPCgd2",
             "ZXJzaW9uGAMgASgJEhEKCXRpbWVzdGFtcBgEIAEoAyI0ChFIZWFydGJlYXRS",
-            "ZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHbWVzc2FnZRgCIAEoCTLSBQoO",
+            "ZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHbWVzc2FnZRgCIAEoCTLWBQoO",
             "VHJhZGluZ1NlcnZpY2USNwoLU3VibWl0VHJhZGUSDi50cmFkaW5nLlRyYWRl",
             "GhgudHJhZGluZy5HZW5lcmljUmVzcG9uc2USOgoJR2V0VHJhZGVzEhkudHJh",
             "ZGluZy5HZXRUcmFkZXNSZXF1ZXN0Gg4udHJhZGluZy5UcmFkZSgBMAESRgoR",
@@ -92,18 +92,18 @@ namespace Trading.Proto {
             "UmVzcG9uc2USQgoLR2V0U2V0dGluZ3MSGC50cmFkaW5nLlNldHRpbmdzUmVx",
             "dWVzdBoZLnRyYWRpbmcuU2V0dGluZ3NSZXNwb25zZRJICg9TeXN0ZW1IZWFy",
             "dGJlYXQSGS50cmFkaW5nLkhlYXJ0YmVhdFJlcXVlc3QaGi50cmFkaW5nLkhl",
-            "YXJ0YmVhdFJlc3BvbnNlEkkKDE5UQ2xvc2VIZWRnZRIfLnRyYWRpbmcuSGVk",
-            "Z2VDbG9zZU5vdGlmaWNhdGlvbhoYLnRyYWRpbmcuR2VuZXJpY1Jlc3BvbnNl",
-            "MrMCChBTdHJlYW1pbmdTZXJ2aWNlEjMKDVRyYWRpbmdTdHJlYW0SDi50cmFk",
-            "aW5nLlRyYWRlGg4udHJhZGluZy5UcmFkZSgBMAESQwoMU3RhdHVzU3RyZWFt",
-            "EhYudHJhZGluZy5IZWFsdGhSZXF1ZXN0GhcudHJhZGluZy5IZWFsdGhSZXNw",
-            "b25zZSgBMAESUQoURWxhc3RpY1VwZGF0ZXNTdHJlYW0SGy50cmFkaW5nLkVs",
-            "YXN0aWNIZWRnZVVwZGF0ZRoYLnRyYWRpbmcuR2VuZXJpY1Jlc3BvbnNlKAEw",
-            "ARJSChVUcmFpbGluZ1VwZGF0ZXNTdHJlYW0SGy50cmFkaW5nLlRyYWlsaW5n",
-            "U3RvcFVwZGF0ZRoYLnRyYWRpbmcuR2VuZXJpY1Jlc3BvbnNlKAEwATI7Cg5M",
-            "b2dnaW5nU2VydmljZRIpCgNMb2cSES50cmFkaW5nLkxvZ0V2ZW50Gg8udHJh",
-            "ZGluZy5Mb2dBY2tCN1olQnJpZGdlQXBwL2ludGVybmFsL2dycGMvcHJvdG87",
-            "dHJhZGluZ6oCDVRyYWRpbmcuUHJvdG9iBnByb3RvMw=="));
+            "YXJ0YmVhdFJlc3BvbnNlEk0KEFN1Ym1pdENsb3NlSGVkZ2USHy50cmFkaW5n",
+            "LkhlZGdlQ2xvc2VOb3RpZmljYXRpb24aGC50cmFkaW5nLkdlbmVyaWNSZXNw",
+            "b25zZTKzAgoQU3RyZWFtaW5nU2VydmljZRIzCg1UcmFkaW5nU3RyZWFtEg4u",
+            "dHJhZGluZy5UcmFkZRoOLnRyYWRpbmcuVHJhZGUoATABEkMKDFN0YXR1c1N0",
+            "cmVhbRIWLnRyYWRpbmcuSGVhbHRoUmVxdWVzdBoXLnRyYWRpbmcuSGVhbHRo",
+            "UmVzcG9uc2UoATABElEKFEVsYXN0aWNVcGRhdGVzU3RyZWFtEhsudHJhZGlu",
+            "Zy5FbGFzdGljSGVkZ2VVcGRhdGUaGC50cmFkaW5nLkdlbmVyaWNSZXNwb25z",
+            "ZSgBMAESUgoVVHJhaWxpbmdVcGRhdGVzU3RyZWFtEhsudHJhZGluZy5UcmFp",
+            "bGluZ1N0b3BVcGRhdGUaGC50cmFkaW5nLkdlbmVyaWNSZXNwb25zZSgBMAEy",
+            "OwoOTG9nZ2luZ1NlcnZpY2USKQoDTG9nEhEudHJhZGluZy5Mb2dFdmVudBoP",
+            "LnRyYWRpbmcuTG9nQWNrQjdaJUJyaWRnZUFwcC9pbnRlcm5hbC9ncnBjL3By",
+            "b3RvO3RyYWRpbmeqAg1UcmFkaW5nLlByb3RvYgZwcm90bzM="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
@@ -131,6 +131,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Unified logging
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class LogEvent : pb::IMessage<LogEvent>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -736,7 +737,7 @@ namespace Trading.Proto {
       if (other.Stack.Length != 0) {
         Stack = other.Stack;
       }
-      tags_.Add(other.tags_);
+      tags_.MergeFrom(other.tags_);
       if (other.SchemaVersion.Length != 0) {
         SchemaVersion = other.SchemaVersion;
       }
@@ -754,7 +755,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -837,7 +842,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -916,6 +925,7 @@ namespace Trading.Proto {
 
   }
 
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class LogAck : pb::IMessage<LogAck>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -1100,7 +1110,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -1123,7 +1137,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -1145,6 +1163,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Core trade message
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class Trade : pb::IMessage<Trade>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -2064,7 +2083,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -2183,7 +2206,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -2301,6 +2328,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Hedge closure notification
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HedgeCloseNotification : pb::IMessage<HedgeCloseNotification>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -2755,7 +2783,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -2814,7 +2846,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -2872,6 +2908,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Elastic hedge update
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class ElasticHedgeUpdate : pb::IMessage<ElasticHedgeUpdate>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -3204,7 +3241,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -3247,7 +3288,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -3289,6 +3334,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Trailing stop update
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class TrailingStopUpdate : pb::IMessage<TrailingStopUpdate>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -3621,7 +3667,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -3664,7 +3714,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -3706,6 +3760,7 @@ namespace Trading.Proto {
   /// <summary>
   /// MT5 trade result
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class MT5TradeResult : pb::IMessage<MT5TradeResult>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -3977,7 +4032,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -4012,7 +4071,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -4046,6 +4109,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Health check request/response
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HealthRequest : pb::IMessage<HealthRequest>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -4236,7 +4300,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -4259,7 +4327,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -4281,6 +4353,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Streaming request for GetTrades; carries heartbeat metadata from MT5
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class GetTradesRequest : pb::IMessage<GetTradesRequest>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -4465,7 +4538,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -4488,7 +4565,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -4507,6 +4588,7 @@ namespace Trading.Proto {
 
   }
 
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HealthResponse : pb::IMessage<HealthResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -4749,7 +4831,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -4780,7 +4866,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -4810,6 +4900,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Generic response
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class GenericResponse : pb::IMessage<GenericResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -5000,7 +5091,7 @@ namespace Trading.Proto {
       if (other.Message.Length != 0) {
         Message = other.Message;
       }
-      metadata_.Add(other.metadata_);
+      metadata_.MergeFrom(other.metadata_);
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
 
@@ -5012,7 +5103,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -5039,7 +5134,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -5065,6 +5164,7 @@ namespace Trading.Proto {
   /// <summary>
   /// Settings request/response for addon
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class SettingsRequest : pb::IMessage<SettingsRequest>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -5220,7 +5320,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -5239,7 +5343,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -5254,6 +5362,7 @@ namespace Trading.Proto {
 
   }
 
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class SettingsResponse : pb::IMessage<SettingsResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -5467,7 +5576,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -5494,7 +5607,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -5520,6 +5637,7 @@ namespace Trading.Proto {
   /// <summary>
   /// System heartbeat
   /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HeartbeatRequest : pb::IMessage<HeartbeatRequest>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -5762,7 +5880,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -5793,7 +5915,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -5820,6 +5946,7 @@ namespace Trading.Proto {
 
   }
 
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class HeartbeatResponse : pb::IMessage<HeartbeatResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -6004,7 +6131,11 @@ namespace Trading.Proto {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -6027,7 +6158,11 @@ namespace Trading.Proto {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;

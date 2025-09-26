@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
@@ -12,7 +12,7 @@
 
   <PropertyGroup>
     <QuantowerVersion Condition="'$(QuantowerVersion)' == '' and '$(QUANTOWER_VERSION)' != ''">$(QUANTOWER_VERSION)</QuantowerVersion>
-    <QuantowerVersion Condition="'$(QuantowerVersion)' == ''">v1.144.9</QuantowerVersion>
+    <QuantowerVersion Condition="'$(QuantowerVersion)' == ''">v1.144.12</QuantowerVersion>
     <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == '' and '$(QUANTOWER_SDK_DIR)' != ''">$(QUANTOWER_SDK_DIR)</QuantowerSdkDir>
     <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == '' and '$(OS)' == 'Windows_NT'">C:\Quantower\TradingPlatform\$(QuantowerVersion)\bin\</QuantowerSdkDir>
     <QuantowerSdkDir Condition="'$(QuantowerSdkDir)' == ''">/mnt/c/Quantower/TradingPlatform/$(QuantowerVersion)/bin/</QuantowerSdkDir>
@@ -23,11 +23,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="HTML\layout.html">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Include="..\Infrastructure\QuantowerEventBridge.cs" />
     <Compile Include="..\Infrastructure\QuantowerTradeMapper.cs" />
     <Compile Include="MultiStratManagerService.cs" />
     <Compile Include="AccountSubscription.cs" />
     <Compile Include="MultiStratPlugin.cs" />
+    <Compile Include="MinimalBrowserPlugin.cs" />
     <Compile Include="QuantowerBridgeService.cs" />
     <Compile Include="Utilities\SimpleJson.cs" />
     <Compile Include="Utilities\PnLUtils.cs" />

@@ -1,4 +1,6 @@
 using System;
+#nullable disable
+
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -11,11 +13,44 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using TradingPlatform.PresentationLayer.Plugins;
+using Quantower.MultiStrat.Utilities;
+using WpfApplication = System.Windows.Application;
 
 namespace Quantower.MultiStrat
 {
     public class MultiStratPlugin : Plugin
     {
+        // Required by Quantower to make the panel discoverable and creatable from UI
+        public static PluginInfo GetInfo()
+        {
+            SafeFileDebug("GetInfo() called");
+
+            var win = new NativeWindowParameters(NativeWindowParameters.Panel)
+            {
+                HeaderVisible = true,
+                BindingBehaviour = BindingBehaviour.Bindable,
+                // Use built-in browser host so panel reliably opens without WPF hosting
+                BrowserUsageType = BrowserUsageType.Default
+            };
+
+            return new PluginInfo
+            {
+                Name = "MultiStratQuantower_WPF",
+                Title = "Multi-Strat Bridge (WPF Fallback)",
+                Group = PluginGroup.Misc,
+                ShortName = "MSB-WPF",
+                // Load on-disk template shipped with the plugin
+                TemplateName = "layout.html",
+                WindowParameters = win,
+                CustomProperties = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { PluginInfo.Const.ALLOW_MANUAL_CREATION, true }
+                }
+            };
+        }
+
+        public override System.Drawing.Size DefaultSize => new System.Drawing.Size(720, 540);
+
         private readonly ObservableCollection<string> _logBuffer = new();
         private readonly MultiStratManagerService _managerService = new();
 
@@ -37,6 +72,7 @@ namespace Quantower.MultiStrat
         private ComboBox? _elasticIncrementCombo;
         private TextBox? _elasticIncrementValueInput;
         private CheckBox? _enableTrailingCheckbox;
+        private CheckBox? _enableDemaCheckbox;
         private ComboBox? _trailingActivationCombo;
         private TextBox? _trailingActivationValueInput;
         private ComboBox? _trailingStopCombo;
@@ -45,18 +81,419 @@ namespace Quantower.MultiStrat
         private TextBox? _atrPeriodInput;
         private TextBox? _demaPeriodInput;
 
+        private object? _browser = null;
+        private bool _browserBridgeAttached;
+
+        private void PushStatusToBrowser()
+        {
+            try
+            {
+                if (_browser == null) return;
+                var payload = new System.Collections.Generic.Dictionary<string, object?>
+                {
+                    ["connected"] = _managerService.IsConnected,
+                    ["address"] = _managerService.CurrentAddress ?? string.Empty,
+                };
+                var json = SimpleJson.SerializeObject(payload);
+                TryBrowserInvokeJs($"window.MSB && MSB.setStatus({json})");
+            }
+            catch { /* ignore */ }
+        }
+
+        private void TryBrowserInvokeJs(string script)
+        {
+            try
+            {
+                if (_browser == null || string.IsNullOrWhiteSpace(script)) return;
+                var mi = _browser.GetType().GetMethod("UpdateHtml", new[] { typeof(string), typeof(HtmlAction), typeof(string) });
+                if (mi != null)
+                {
+                    mi.Invoke(_browser, new object[] { string.Empty, HtmlAction.InvokeJs, script });
+                }
+            }
+            catch { /* ignore to avoid blocking UI */ }
+        }
+
+        private static string JsEscape(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return string.Empty;
+            return text.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\r", string.Empty).Replace("\n", "\\n");
+        }
+
+        static MultiStratPlugin()
+        {
+            SafeFileDebug("MultiStratPlugin static ctor loaded.");
+        }
+
+        private void AttachBrowserCommandBridge()
+        {
+            try
+            {
+                var b = _browser;
+                if (b == null) return;
+                if (_browserBridgeAttached) return;
+                var t = b.GetType();
+                foreach (var ev in t.GetEvents())
+                {
+                    var n = ev.Name ?? string.Empty;
+                    bool looksLikeNav = n.IndexOf("Navig", StringComparison.OrdinalIgnoreCase) >= 0
+                                      || n.IndexOf("NewWindow", StringComparison.OrdinalIgnoreCase) >= 0
+                                      || n.IndexOf("Address", StringComparison.OrdinalIgnoreCase) >= 0
+                                      || n.IndexOf("Url", StringComparison.OrdinalIgnoreCase) >= 0
+                                      || n.IndexOf("Location", StringComparison.OrdinalIgnoreCase) >= 0
+                                      || n.IndexOf("Start", StringComparison.OrdinalIgnoreCase) >= 0
+                                      || n.IndexOf("Load", StringComparison.OrdinalIgnoreCase) >= 0;
+                    if (!looksLikeNav) continue;
+
+                    var handlerType = ev.EventHandlerType;
+                    if (handlerType == typeof(EventHandler))
+                    {
+                        var mi = GetType().GetMethod(nameof(OnBrowserNavEvent), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        if (mi != null)
+                        {
+                            var del = Delegate.CreateDelegate(handlerType, this, mi);
+                            ev.AddEventHandler(b, del);
+                            AddLogEntry("INFO", $"Attached browser handler: {ev.Name}");
+                            continue;
+                        }
+                    }
+                    else if (handlerType != null && handlerType.IsGenericType && handlerType.GetGenericTypeDefinition() == typeof(EventHandler<>))
+                    {
+                        var argType = handlerType.GetGenericArguments()[0];
+                        var miGeneric = GetType().GetMethod(nameof(OnBrowserNavGeneric), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        if (miGeneric != null)
+                        {
+                            var mi = miGeneric.MakeGenericMethod(argType);
+                            var del = Delegate.CreateDelegate(handlerType, this, mi);
+                            ev.AddEventHandler(b, del);
+                            AddLogEntry("INFO", $"Attached browser handler: {ev.Name}<{argType.Name}>");
+                            continue;
+                        }
+                    }
+                }
+
+                _browserBridgeAttached = true;
+            }
+            catch (Exception ex)
+            {
+                AddLogEntry("WARN", $"Failed to attach Browser command bridge: {ex.Message}");
+            }
+        }
+
+        private void OnBrowserNavEvent(object? sender, EventArgs e) => HandleBrowserNavArgs(e);
+        private void OnBrowserNavGeneric<T>(object? sender, T e) => HandleBrowserNavArgs(e as object);
+
+        private void HandleBrowserNavArgs(object? e)
+        {
+            try
+            {
+                if (e == null) return;
+
+                var url = TryGetUrlFromArgs(e);
+                if (string.IsNullOrWhiteSpace(url)) return;
+
+                if (url.StartsWith("msb://", StringComparison.OrdinalIgnoreCase))
+                {
+
+                        // Hook Browser command bridge (msb:// scheme)
+                        AttachBrowserCommandBridge();
+
+                    TryCancelNavigation(e);
+                    HandleMsbCommand(url);
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLogEntry("WARN", $"Bridge nav handler error: {ex.Message}");
+            }
+        }
+
+        private static string? TryGetUrlFromArgs(object e)
+        {
+            var t = e.GetType();
+            string? Read(string name)
+            {
+                var p = t.GetProperty(name);
+                if (p != null)
+                {
+                    var v = p.GetValue(e);
+                    return v?.ToString();
+                }
+                return null;
+            }
+            return Read("Url") ?? Read("URI") ?? Read("Uri") ?? Read("Address") ?? Read("TargetUrl") ?? Read("Link") ?? Read("Location");
+        }
+
+        private static void TryCancelNavigation(object e)
+        {
+            var t = e.GetType();
+            var pCancel = t.GetProperty("Cancel");
+            if (pCancel != null && pCancel.PropertyType == typeof(bool))
+            {
+                pCancel.SetValue(e, true);
+                return;
+            }
+            var pHandled = t.GetProperty("Handled");
+            if (pHandled != null && pHandled.PropertyType == typeof(bool))
+            {
+                pHandled.SetValue(e, true);
+                return;
+            }
+            var mCancel = t.GetMethod("Cancel");
+            if (mCancel != null && mCancel.GetParameters().Length == 0)
+            {
+                mCancel.Invoke(e, null);
+            }
+        }
+
+        private void HandleMsbCommand(string url)
+        {
+            try
+            {
+                var uri = new Uri(url);
+                var cmd = uri.Host?.Trim().ToLowerInvariant() ?? string.Empty;
+                // Minimal query parse (avoid System.Web dependency)
+                string? data = null;
+                var q = uri.Query;
+                if (!string.IsNullOrEmpty(q))
+                {
+                    if (q.StartsWith("?")) q = q.Substring(1);
+                    foreach (var part in q.Split('&'))
+                    {
+                        var kv = part.Split('=');
+                        if (kv.Length >= 2 && kv[0] == "d") { data = Uri.UnescapeDataString(kv[1]); break; }
+                    }
+                }
+                var payload = new Dictionary<string, object?>();
+                if (!string.IsNullOrEmpty(data))
+                {
+                    try
+                    {
+                        var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(Uri.UnescapeDataString(data)));
+                        payload = SimpleJson.DeserializeObject<Dictionary<string, object?>>(json) ?? new Dictionary<string, object?>();
+                    }
+                    catch { /* ignore malformed */ }
+                }
+
+                switch (cmd)
+                {
+                    case "connect":
+                        if (payload.TryGetValue("address", out var addrObj) && addrObj is string addr && !string.IsNullOrWhiteSpace(addr))
+                        {
+                            _ = _managerService.ConnectAsync(addr).ContinueWith(t =>
+                            {
+                                void Work()
+                                {
+                                    PushStatusToBrowser();
+                                    if (t.IsFaulted)
+                                    {
+                                        AddLogEntry("ERROR", $"Connect command failed: {t.Exception?.GetBaseException().Message}");
+                                    }
+                                }
+
+                                var dispatcher = _dispatcher;
+                                if (dispatcher != null && !dispatcher.CheckAccess())
+                                {
+                                    dispatcher.BeginInvoke((Action)Work, DispatcherPriority.Background);
+                                }
+                                else
+                                {
+                                    Work();
+                                }
+                            }, TaskScheduler.Default);
+                        }
+                        break;
+                    case "flatten_all":
+                        {
+                            var disable = payload.TryGetValue("disableAfter", out var disObj) && disObj is bool b && b;
+                            _ = _managerService.FlattenAllAsync(disable, "Quantower UI flatten");
+                        }
+                        break;
+                    case "update_trailing":
+                        {
+                            Services.TrailingElasticService.ProfitUnitType ParseUnit(object? o)
+                            {
+                                if (o is string s && Enum.TryParse<Services.TrailingElasticService.ProfitUnitType>(s, true, out var u))
+                                    return u;
+                                return Services.TrailingElasticService.ProfitUnitType.Dollars;
+                            }
+                            double D(object? o){ return (o is IConvertible c) ? Convert.ToDouble(c, CultureInfo.InvariantCulture) : 0d; }
+                            int I(object? o){ return (o is IConvertible c) ? Convert.ToInt32(c, CultureInfo.InvariantCulture) : 0; }
+
+                            var update = new MultiStratManagerService.TrailingSettingsUpdate(
+                                EnableElastic: payload.TryGetValue("enable_elastic", out var ee) && ee is bool be && be,
+                                ElasticTriggerUnits: ParseUnit(payload.GetValueOrDefault("elastic_trigger_units")),
+                                ProfitUpdateThreshold: D(payload.GetValueOrDefault("profit_update_threshold")),
+                                ElasticIncrementUnits: ParseUnit(payload.GetValueOrDefault("elastic_increment_units")),
+                                ElasticIncrementValue: D(payload.GetValueOrDefault("elastic_increment_value")),
+                                EnableTrailing: payload.TryGetValue("enable_trailing", out var et) && et is bool bt && bt,
+                                UseDemaAtrTrailing: payload.TryGetValue("enable_dema_atr_trailing", out var da) && da is bool bda && bda,
+                                TrailingActivationUnits: ParseUnit(payload.GetValueOrDefault("trailing_activation_units")),
+                                TrailingActivationValue: D(payload.GetValueOrDefault("trailing_activation_value")),
+                                TrailingStopUnits: ParseUnit(payload.GetValueOrDefault("trailing_stop_units")),
+                                TrailingStopValue: D(payload.GetValueOrDefault("trailing_stop_value")),
+                                DemaAtrMultiplier: D(payload.GetValueOrDefault("dema_atr_multiplier")),
+                                AtrPeriod: Math.Max(1, I(payload.GetValueOrDefault("atr_period"))),
+                                DemaPeriod: Math.Max(1, I(payload.GetValueOrDefault("dema_period")))
+                            );
+                            _managerService.UpdateTrailingSettings(update);
+                        }
+                        break;
+                    case "window":
+                        if (payload.TryGetValue("action", out var act) && act is string a)
+                        {
+                            SetWindowAction(a);
+                        }
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLogEntry("WARN", $"Failed to handle msb command: {ex.Message}");
+            }
+        }
+
+        private void SetWindowAction(string action)
+        {
+            try
+            {
+                var w = this.Window;
+                if (w == null) return;
+                action = action.ToLowerInvariant();
+
+                if (action == "close")
+                {
+                    var m = w.GetType().GetMethod("Close");
+                    m?.Invoke(w, null);
+                    return;
+                }
+                // try common property patterns
+                var stateProp = w.GetType().GetProperty("WindowState") ?? w.GetType().GetProperty("State");
+                if (stateProp != null && stateProp.PropertyType.IsEnum)
+                {
+                    var names = Enum.GetNames(stateProp.PropertyType);
+                    object? val = null;
+                    if (action == "minimize") val = Enum.Parse(stateProp.PropertyType, names.FirstOrDefault(n=>n.Equals("Minimized", StringComparison.OrdinalIgnoreCase)) ?? names.First());
+                    if (action == "maximize") val = Enum.Parse(stateProp.PropertyType, names.FirstOrDefault(n=>n.Equals("Maximized", StringComparison.OrdinalIgnoreCase)) ?? names.First());
+                    if (val != null) stateProp.SetValue(w, val);
+                    return;
+                }
+                // fallback methods
+                var min = w.GetType().GetMethod("Minimize");
+                var max = w.GetType().GetMethod("Maximize");
+                if (action == "minimize") min?.Invoke(w, null);
+                if (action == "maximize") max?.Invoke(w, null);
+            }
+            catch { /* ignore */ }
+        }
+
         public MultiStratPlugin()
         {
             Title = "Multi-Strat Bridge";
+            SafeFileDebug("MultiStratPlugin instance ctor.");
         }
 
         public override void Initialize()
         {
             base.Initialize();
 
-            if (Application.Current != null)
+            SafeFileDebug($"Initialize entered. Thread={Thread.CurrentThread.ManagedThreadId}");
+
+            // If Quantower Browser host is available (TemplateName provided), use it to ensure the
+            // panel opens reliably. We will wire interactive elements in follow-ups.
+            try
             {
-                _dispatcher = Application.Current.Dispatcher;
+                var wndType = this.Window?.GetType().FullName ?? "<null>";
+                SafeFileDebug($"Window type: {wndType}");
+
+                var browser = this.Window?.Browser;
+                SafeFileDebug($"Browser host present: { (browser != null) }");
+                if (browser != null)
+                {
+                    _browser = browser; // keep reference for pushing status/logs
+                    _browserBridgeAttached = false;
+
+                    // Minimal ping to verify browser is alive (no-op if element id not found)
+                    TryBrowserInvokeJs("console.log('Multi-Strat Bridge loaded')");
+
+                    // Prime UI with trailing/risk snapshot
+                    try
+                    {
+                        var trailing = _managerService.GetTrailingSettings();
+                        var risk = _managerService.GetRiskSnapshot();
+                        var trailingJson = SimpleJson.SerializeObject(new System.Collections.Generic.Dictionary<string, object?>
+                        {
+                            ["enable_elastic"] = trailing.EnableElastic,
+                            ["elastic_trigger_units"] = trailing.ElasticTriggerUnits.ToString(),
+                            ["profit_update_threshold"] = trailing.ProfitUpdateThreshold,
+                            ["elastic_increment_units"] = trailing.ElasticIncrementUnits.ToString(),
+                            ["elastic_increment_value"] = trailing.ElasticIncrementValue,
+                            ["enable_trailing"] = trailing.EnableTrailing,
+                            ["enable_dema_atr_trailing"] = trailing.UseDemaAtrTrailing,
+                            ["trailing_activation_units"] = trailing.TrailingActivationUnits.ToString(),
+                            ["trailing_activation_value"] = trailing.TrailingActivationValue,
+                            ["trailing_stop_units"] = trailing.TrailingStopUnits.ToString(),
+                            ["trailing_stop_value"] = trailing.TrailingStopValue,
+                            ["dema_atr_multiplier"] = trailing.DemaAtrMultiplier,
+                            ["atr_period"] = trailing.AtrPeriod,
+                            ["dema_period"] = trailing.DemaPeriod,
+                        });
+                        var riskJson = SimpleJson.SerializeObject(new System.Collections.Generic.Dictionary<string, object?>
+                        {
+                            ["disable_on_limit"] = risk.DisableOnLimit,
+                        });
+                        TryBrowserInvokeJs($"window.MSB && MSB.prime({trailingJson}, {riskJson})");
+                    }
+                    catch { /* snapshot optional */ }
+
+
+                        // Attach Browser command bridge early so msb:// links are intercepted
+                        AttachBrowserCommandBridge();
+
+                    // Push initial connection status
+                    PushStatusToBrowser();
+
+                    // Log wiring
+                    _managerService.Log += OnBridgeLog;
+
+                    // Auto-connect if not already
+                    if (!_managerService.IsConnected)
+                    {
+                        var addr = _managerService.CurrentAddress ?? "127.0.0.1:50051";
+                        _ = _managerService.ConnectAsync(addr).ContinueWith(t =>
+                        {
+                            void Work()
+                            {
+                                PushStatusToBrowser();
+                                if (t.IsFaulted)
+                                    AddLogEntry("ERROR", $"Auto-connect failed: {t.Exception?.GetBaseException().Message}");
+                            }
+
+                            var dispatcher = _dispatcher;
+                            if (dispatcher != null && !dispatcher.CheckAccess())
+                            {
+                                dispatcher.BeginInvoke((Action)Work, DispatcherPriority.Background);
+                            }
+                            else
+                            {
+                                Work();
+                            }
+                        }, System.Threading.CancellationToken.None, System.Threading.Tasks.TaskContinuationOptions.None, System.Threading.Tasks.TaskScheduler.Default);
+                    }
+
+                    SafeFileDebug("Using Browser host path. Returning to let template render.");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                SafeFileDebug($"Browser host not available: {ex.Message}");
+                AddLogEntry("WARN", $"Browser host not available: {ex.Message}. Falling back to WPF layout.");
+            }
+
+            if (WpfApplication.Current != null)
+            {
+                _dispatcher = WpfApplication.Current.Dispatcher;
             }
             else
             {
@@ -64,13 +501,17 @@ namespace Quantower.MultiStrat
             }
             if (_dispatcher == null)
             {
+                SafeFileDebug("No dispatcher detected. Initialize should run on UI thread. Returning.");
                 AddLogEntry("ERROR", "MultiStratPlugin.Initialize must run on the UI thread.");
-                throw new InvalidOperationException("Initialize must run on the UI thread.");
+                // Do NOT throw to avoid blocking panel creation; just return with empty content
+                return;
             }
 
             _managerService.Log += OnBridgeLog;
+            _managerService.AccountsChanged += OnAccountsChanged;
 
             var layout = BuildLayout();
+            SafeFileDebug("Built WPF layout. Attaching to window content...");
             AttachContent(layout);
 
             UpdateStatus("Disconnected", Brushes.Gray);
@@ -80,17 +521,20 @@ namespace Quantower.MultiStrat
             }
             catch (Exception ex)
             {
+                SafeFileDebug($"RefreshAccounts failed: {ex.Message}");
                 AddLogEntry("ERROR", $"Unable to load accounts: {ex}");
-                throw;
+                // Continue with empty accounts so the panel can still open
             }
             RenderAccounts();
             PopulateRiskUi();
             PopulateTrailingUi();
+            SafeFileDebug("Initialize completed normally.");
         }
 
         public override void Dispose()
         {
             _managerService.Log -= OnBridgeLog;
+            _managerService.AccountsChanged -= OnAccountsChanged;
 
             try
             {
@@ -440,6 +884,10 @@ namespace Quantower.MultiStrat
             if (enableTrailingCheckbox == null) { AddLogEntry("ERROR", "Failed to create Enable Trailing Updates checkbox"); throw new InvalidOperationException("Trailing checkbox not created"); }
             _enableTrailingCheckbox = enableTrailingCheckbox;
 
+            var enableDemaCheckbox = AddRow("Enable DEMA/ATR Trailing", new CheckBox()) as CheckBox;
+            if (enableDemaCheckbox == null) { AddLogEntry("ERROR", "Failed to create Enable DEMA/ATR checkbox"); throw new InvalidOperationException("DEMA checkbox not created"); }
+            _enableDemaCheckbox = enableDemaCheckbox;
+
             var trailingActivationCombo = AddRow("Trailing Activation Units", new ComboBox { ItemsSource = Enum.GetValues(typeof(Services.TrailingElasticService.ProfitUnitType)) }) as ComboBox;
             if (trailingActivationCombo == null) { AddLogEntry("ERROR", "Failed to create Trailing Activation Units combo"); throw new InvalidOperationException("Trailing activation combo not created"); }
             _trailingActivationCombo = trailingActivationCombo;
@@ -624,6 +1072,7 @@ namespace Quantower.MultiStrat
                 var elasticIncrementUnits = _elasticIncrementCombo?.SelectedItem is Services.TrailingElasticService.ProfitUnitType eiu ? eiu : snapshot.ElasticIncrementUnits;
                 var elasticIncrementValue = ParseDouble(_elasticIncrementValueInput?.Text, culture, snapshot.ElasticIncrementValue);
                 var enableTrailing = _enableTrailingCheckbox?.IsChecked ?? snapshot.EnableTrailing;
+                var useDemaAtr = _enableDemaCheckbox?.IsChecked ?? snapshot.UseDemaAtrTrailing;
                 var trailingActivationUnits = _trailingActivationCombo?.SelectedItem is Services.TrailingElasticService.ProfitUnitType tau ? tau : snapshot.TrailingActivationUnits;
                 var trailingActivationValue = ParseDouble(_trailingActivationValueInput?.Text, culture, snapshot.TrailingActivationValue);
                 var trailingStopUnits = _trailingStopCombo?.SelectedItem is Services.TrailingElasticService.ProfitUnitType tsu ? tsu : snapshot.TrailingStopUnits;
@@ -639,6 +1088,7 @@ namespace Quantower.MultiStrat
                     elasticIncrementUnits,
                     elasticIncrementValue,
                     enableTrailing,
+                    useDemaAtr,
                     trailingActivationUnits,
                     trailingActivationValue,
                     trailingStopUnits,
@@ -741,6 +1191,11 @@ namespace Quantower.MultiStrat
                 if (_enableTrailingCheckbox != null)
                 {
                     _enableTrailingCheckbox.IsChecked = snapshot.EnableTrailing;
+                }
+
+                if (_enableDemaCheckbox != null)
+                {
+                    _enableDemaCheckbox.IsChecked = snapshot.UseDemaAtrTrailing;
                 }
 
                 if (_trailingActivationCombo != null)
@@ -870,6 +1325,9 @@ namespace Quantower.MultiStrat
                     _logBuffer.RemoveAt(0);
                 }
 
+                // Push to Browser UI if present
+                TryBrowserInvokeJs($"window.MSB && MSB.appendLog('{JsEscape(formatted)}')");
+
                 if (_logList != null && _logList.Items.Count > 0)
                 {
                     _logList.ScrollIntoView(_logList.Items[_logList.Items.Count - 1]);
@@ -910,6 +1368,26 @@ namespace Quantower.MultiStrat
             catch (Exception ex)
             {
                 AddLogEntry("WARN", $"Failed to refresh accounts: {ex.Message}");
+            }
+        }
+
+        private void OnAccountsChanged(object? sender, EventArgs e)
+        {
+            void UpdateUi()
+            {
+                RenderAccounts();
+                PopulateRiskUi();
+                PushStatusToBrowser();
+            }
+
+            var dispatcher = _dispatcher;
+            if (dispatcher != null)
+            {
+                _ = dispatcher.BeginInvoke((Action)UpdateUi, DispatcherPriority.Background);
+            }
+            else
+            {
+                UpdateUi();
             }
         }
 
@@ -1111,11 +1589,29 @@ namespace Quantower.MultiStrat
 
         private void AttachContent(UIElement element)
         {
-            // Quantower's Plugin base type does not expose the hosting window publicly. We rely on
-            // reflection to wire up our WPF layout. Guard each step so failures are visible.
+            // Prefer the official API first
+            try
+            {
+                var wnd = this.Window;
+                var contentProp = wnd?.GetType().GetProperty("Content");
+                if (wnd != null && contentProp != null)
+                {
+                    contentProp.SetValue(wnd, element);
+                    SafeFileDebug("Attached content via Window.Content");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                SafeFileDebug($"AttachContent via Window failed: {ex.Message}");
+                AddLogEntry("ERROR", $"AttachContent via Window failed: {ex.Message}");
+            }
+
+            // Fallback: reflection against base type
             var windowProperty = GetType().BaseType?.GetProperty("Window") ?? GetType().GetProperty("Window");
             if (windowProperty == null)
             {
+                SafeFileDebug("Unable to locate 'Window' property via reflection");
                 AddLogEntry("ERROR", "Unable to locate plugin window property; UI may not render correctly.");
                 return;
             }
@@ -1123,6 +1619,7 @@ namespace Quantower.MultiStrat
             var windowInstance = windowProperty.GetValue(this);
             if (windowInstance == null)
             {
+                SafeFileDebug("Window instance is null");
                 AddLogEntry("ERROR", "Plugin window instance was null; UI cannot mount.");
                 return;
             }
@@ -1130,6 +1627,7 @@ namespace Quantower.MultiStrat
             var contentProperty = windowInstance.GetType().GetProperty("Content");
             if (contentProperty == null)
             {
+                SafeFileDebug("Window does not expose a Content property");
                 AddLogEntry("ERROR", "Plugin window does not expose a Content property; UI cannot mount.");
                 return;
             }
@@ -1137,11 +1635,40 @@ namespace Quantower.MultiStrat
             try
             {
                 contentProperty.SetValue(windowInstance, element);
+                SafeFileDebug("Attached content via reflection fallback");
             }
             catch (Exception ex)
             {
-                AddLogEntry("ERROR", $"Failed to attach plugin content: {ex.Message}");
+                SafeFileDebug($"Failed to attach content (fallback): {ex.Message}");
+                AddLogEntry("ERROR", $"Failed to attach plugin content (fallback): {ex.Message}");
             }
+        }
+
+        private static void SafeFileDebug(string message)
+        {
+            try
+            {
+                var line = $"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}";
+
+                // 1) Write next to plugin assembly (portable install / or Documents path)
+                try
+                {
+                    var asmDir = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
+                    var path1 = System.IO.Path.Combine(asmDir, "msb-plugin.log");
+                    System.IO.File.AppendAllText(path1, line);
+                }
+                catch { }
+
+                // 2) Also write to user TEMP so it’s easy to find regardless of install
+                try
+                {
+                    var temp = System.IO.Path.GetTempPath();
+                    var path2 = System.IO.Path.Combine(temp, "msb-plugin.log");
+                    System.IO.File.AppendAllText(path2, line);
+                }
+                catch { }
+            }
+            catch { /* never throw from diagnostics */ }
         }
     }
 }

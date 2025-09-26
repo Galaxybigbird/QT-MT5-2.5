@@ -28,7 +28,7 @@ export function HandleHedgeCloseNotification(arg1:any):Promise<void>;
 
 export function HandleMT5TradeResult(arg1:any):Promise<void>;
 
-export function HandleNTCloseHedgeRequest(arg1:any):Promise<void>;
+export function HandleCloseHedgeRequest(arg1:any):Promise<void>;
 
 export function HandleTrailingStopUpdate(arg1:any):Promise<void>;
 

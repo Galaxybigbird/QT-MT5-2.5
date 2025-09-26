@@ -3,13 +3,13 @@
 _Last reviewed: 2025-09-22_
 
 ## Supported Platform & Runtime
-- **Quantower Versions:** Stable `1.144.9` (23 Aug 2025), Beta `1.144.12` (17 Sep 2025). Monitor release notes for API changes.
+- **Quantower Versions:** Stable `1.144.12` (17 Sep 2025), Beta `1.144.12` (17 Sep 2025). Monitor release notes for API changes.
 - **OS:** Windows 10/11 (64-bit). Quantower is Windows-only.
 - **.NET Runtime:** `net8.0-windows` (Quantower Algo ships with .NET 8 assemblies). Install .NET 8 SDK + desktop runtime.
 - **IDE:** Visual Studio 2022 v17.8+ (Community acceptable) with ".NET desktop development" workload. Quantower Algo VS extension scaffolds projects automatically.
 
 ## Project Setup
-- **Assemblies:** Reference `TradingPlatform.BusinessLayer.dll`, `TradingPlatform.Common.dll`, and any UI/plugin DLLs from the Quantower installation (e.g. `<Quantower>\TradingPlatform\v1.144.9\bin`).
+- **Assemblies:** Reference `TradingPlatform.BusinessLayer.dll`, `TradingPlatform.Common.dll`, and any UI/plugin DLLs from the Quantower installation (e.g. `<Quantower>\TradingPlatform\v1.144.12\bin`).
 - **Project Targets:** Build for `net8.0-windows`, prefer `x64`. Add post-build step to copy DLLs into Quantower settings.
 - **Deployment Paths:**
   - Strategies/indicators: `%UserProfile%\Documents\Quantower\Settings\Scripts\Strategies` (or `...\Scripts\Indicators`).

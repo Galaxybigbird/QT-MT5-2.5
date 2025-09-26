@@ -64,7 +64,7 @@ func (m *MockApp) HandleHedgeCloseNotification(notification interface{}) error {
 func (m *MockApp) HandleMT5TradeResult(result interface{}) error               { return nil }
 func (m *MockApp) HandleElasticUpdate(update interface{}) error                { return nil }
 func (m *MockApp) HandleTrailingStopUpdate(update interface{}) error           { return nil }
-func (m *MockApp) HandleNTCloseHedgeRequest(request interface{}) error         { return nil }
+func (m *MockApp) HandleCloseHedgeRequest(request interface{}) error          { return nil }
 
 const bufSize = 1024 * 1024
 

@@ -66,31 +66,42 @@ bool TestTcpConnection(const std::string& address, int port) {
         return false;
     }
 
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sock == INVALID_SOCKET) {
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+
+    addrinfo* resultList = nullptr;
+    std::string portString = std::to_string(port);
+    int status = getaddrinfo(address.c_str(), portString.c_str(), &hints, &resultList);
+    if (status != 0 || resultList == nullptr) {
+        if (resultList) {
+            freeaddrinfo(resultList);
+        }
         return false;
     }
 
-    // Set timeout
-    DWORD timeout = 5000; // 5 seconds
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+    bool connected = false;
+    for (addrinfo* ptr = resultList; ptr != nullptr; ptr = ptr->ai_next) {
+        SOCKET sock = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
+        if (sock == INVALID_SOCKET) {
+            continue;
+        }
 
-    sockaddr_in serverAddr;
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(port);
-    
-    // Convert address
-    if (inet_pton(AF_INET, address.c_str(), &serverAddr.sin_addr) <= 0) {
+        DWORD timeout = 5000; // 5 seconds
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<char*>(&timeout), sizeof(timeout));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<char*>(&timeout), sizeof(timeout));
+
+        if (connect(sock, ptr->ai_addr, static_cast<int>(ptr->ai_addrlen)) == 0) {
+            connected = true;
+            closesocket(sock);
+            break;
+        }
+
         closesocket(sock);
-        return false;
     }
 
-    // Attempt connection
-    int result = connect(sock, (sockaddr*)&serverAddr, sizeof(serverAddr));
-    bool connected = (result == 0);
-    
-    closesocket(sock);
+    freeaddrinfo(resultList);
     return connected;
 }
 
@@ -99,9 +110,15 @@ std::string WCharToString(const wchar_t* wstr) {
     if (!wstr) return "";
     int size = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
     if (size <= 0) return "";
-    
-    std::string result(size - 1, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, &result[0], size - 1, nullptr, nullptr);
+    if (size == 1) return ""; // empty string (only null terminator)
+
+    std::string result(size, '\0');
+    int written = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, result.data(), size, nullptr, nullptr);
+    if (written <= 0) {
+        return "";
+    }
+    // written includes the terminating null
+    result.resize(static_cast<size_t>(written - 1));
     return result;
 }
 

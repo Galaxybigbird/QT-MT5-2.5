@@ -262,12 +262,6 @@ namespace Quantower.MultiStrat
                 await DispatchWithLoggingAsync(() => BridgeGrpcClient.SubmitTradeAsync(tradePayload), "SubmitTradeSnapshot", positionTradeId ?? "n/a").ConfigureAwait(false);
             }
 
-            if (QuantowerTradeMapper.TryBuildPositionClosure(position, out var closurePayload, out var closureId))
-            {
-                EmitLog(BridgeLogLevel.Info, $"Broadcasting position state ({closureId ?? "n/a"}) to bridge for reconciliation", closureId, closureId);
-                await DispatchWithLoggingAsync(() => BridgeGrpcClient.CloseHedgeAsync(closurePayload), "CloseHedgeSnapshot", closureId ?? "n/a").ConfigureAwait(false);
-            }
-
             RaisePositionAdded(position);
         }
 
@@ -298,12 +292,6 @@ namespace Quantower.MultiStrat
             {
                 EmitLog(BridgeLogLevel.Info, $"Quantower position added ({positionTradeId ?? "n/a"}) -> notifying bridge", positionTradeId, positionTradeId);
                 ObserveAsyncOperation(BridgeGrpcClient.SubmitTradeAsync(tradePayload), "SubmitTradeSnapshot", positionTradeId ?? "n/a");
-            }
-
-            if (QuantowerTradeMapper.TryBuildPositionClosure(position, out var closurePayload, out var closureId))
-            {
-                EmitLog(BridgeLogLevel.Info, $"Quantower position state broadcast ({closureId ?? "n/a"}) after addition", closureId, closureId);
-                ObserveAsyncOperation(BridgeGrpcClient.CloseHedgeAsync(closurePayload), "CloseHedgeSnapshot", closureId ?? "n/a");
             }
 
             try

@@ -54,8 +54,8 @@ export function HandleMT5TradeResult(arg1) {
   return window['go']['main']['App']['HandleMT5TradeResult'](arg1);
 }
 
-export function HandleNTCloseHedgeRequest(arg1) {
-  return window['go']['main']['App']['HandleNTCloseHedgeRequest'](arg1);
+export function HandleCloseHedgeRequest(arg1) {
+  return window['go']['main']['App']['HandleCloseHedgeRequest'](arg1);
 }
 
 export function HandleTrailingStopUpdate(arg1) {
