@@ -42,9 +42,10 @@ type App struct {
 	eaLastPing  time.Time  // Timestamp of the last successful ping from Hedgebot
 
 	// MT5 ticket to BaseID mapping
-	mt5TicketMux      sync.RWMutex
-	mt5TicketToBaseId map[uint64]string   // MT5 ticket -> BaseID
-	baseIdToTickets   map[string][]uint64 // BaseID -> all MT5 tickets for this base
+	mt5TicketMux       sync.RWMutex
+	mt5TicketToBaseId  map[uint64]string          // MT5 ticket -> BaseID
+	baseIdToTickets    map[string][]uint64        // BaseID -> all MT5 tickets for this base
+	pendingCloseByBase map[string][]pendingTicket // BaseID -> tickets actively being closed
 
 	// Metadata to aid resolution when BaseID mismatches occur
 	baseIdToInstrument map[string]string // BaseID -> instrument symbol
@@ -78,6 +79,11 @@ type elasticMark struct {
 	when   time.Time
 	ticket uint64
 	qty    float64
+}
+
+type pendingTicket struct {
+	ticket uint64
+	marked time.Time
 }
 
 // markElasticClose records an elastic close marker for correlation windows
@@ -248,23 +254,210 @@ func (a *App) pushTicket(baseID string, ticket uint64) {
 }
 
 func (a *App) removeTicketFromPool(baseID string, ticket uint64) {
+	if ticket == 0 {
+		return
+	}
 	a.mt5TicketMux.Lock()
 	defer a.mt5TicketMux.Unlock()
 
-	if list, ok := a.baseIdToTickets[baseID]; ok {
-		filtered := list[:0]
-		for _, v := range list {
-			if v != ticket {
-				filtered = append(filtered, v)
+	trimmedBase := strings.TrimSpace(baseID)
+	if trimmedBase == "" {
+		if mapped, ok := a.mt5TicketToBaseId[ticket]; ok {
+			trimmedBase = mapped
+		}
+	}
+	if trimmedBase != "" {
+		if list, ok := a.baseIdToTickets[trimmedBase]; ok {
+			filtered := make([]uint64, 0, len(list))
+			for _, v := range list {
+				if v != ticket {
+					filtered = append(filtered, v)
+				}
+			}
+			if len(filtered) == 0 {
+				delete(a.baseIdToTickets, trimmedBase)
+			} else {
+				a.baseIdToTickets[trimmedBase] = filtered
 			}
 		}
-		if len(filtered) == 0 {
-			delete(a.baseIdToTickets, baseID)
-		} else {
-			a.baseIdToTickets[baseID] = filtered
+		if entries, ok := a.pendingCloseByBase[trimmedBase]; ok {
+			filtered := make([]pendingTicket, 0, len(entries))
+			for _, entry := range entries {
+				if entry.ticket != ticket {
+					filtered = append(filtered, entry)
+				}
+			}
+			if len(filtered) == 0 {
+				delete(a.pendingCloseByBase, trimmedBase)
+			} else {
+				a.pendingCloseByBase[trimmedBase] = filtered
+			}
 		}
 	}
 	delete(a.mt5TicketToBaseId, ticket)
+}
+
+const pendingCloseTTL = 15 * time.Second
+
+func (a *App) evictTicketFromQueue(baseID string, ticket uint64) bool {
+	if strings.TrimSpace(baseID) == "" || ticket == 0 {
+		return false
+	}
+	a.mt5TicketMux.Lock()
+	defer a.mt5TicketMux.Unlock()
+
+	list := a.baseIdToTickets[baseID]
+	if len(list) == 0 {
+		return false
+	}
+	filtered := make([]uint64, 0, len(list))
+	removed := false
+	for _, v := range list {
+		if !removed && v == ticket {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, v)
+	}
+	if !removed {
+		return false
+	}
+	if len(filtered) == 0 {
+		delete(a.baseIdToTickets, baseID)
+	} else {
+		a.baseIdToTickets[baseID] = filtered
+	}
+	return true
+}
+
+func (a *App) trackPendingTicket(baseID string, ticket uint64) {
+	if strings.TrimSpace(baseID) == "" || ticket == 0 {
+		return
+	}
+	a.mt5TicketMux.Lock()
+	defer a.mt5TicketMux.Unlock()
+
+	if a.pendingCloseByBase == nil {
+		a.pendingCloseByBase = make(map[string][]pendingTicket)
+	}
+	entries := a.pendingCloseByBase[baseID]
+	now := time.Now()
+	updated := false
+	for i := range entries {
+		if entries[i].ticket == ticket {
+			entries[i].marked = now
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		entries = append(entries, pendingTicket{ticket: ticket, marked: now})
+	}
+	a.pendingCloseByBase[baseID] = entries
+	if _, exists := a.mt5TicketToBaseId[ticket]; !exists {
+		a.mt5TicketToBaseId[ticket] = baseID
+	}
+}
+
+func (a *App) hasRecentPendingClose(baseID string, within time.Duration) bool {
+	if strings.TrimSpace(baseID) == "" {
+		return false
+	}
+	a.mt5TicketMux.Lock()
+	defer a.mt5TicketMux.Unlock()
+
+	entries, ok := a.pendingCloseByBase[baseID]
+	if !ok || len(entries) == 0 {
+		return false
+	}
+	now := time.Now()
+	filtered := make([]pendingTicket, 0, len(entries))
+	found := false
+	for _, entry := range entries {
+		if entry.ticket == 0 {
+			continue
+		}
+		age := now.Sub(entry.marked)
+		if age <= pendingCloseTTL {
+			filtered = append(filtered, entry)
+			if within > 0 && age <= within {
+				found = true
+			}
+		}
+	}
+	if len(filtered) == 0 {
+		delete(a.pendingCloseByBase, baseID)
+	} else {
+		a.pendingCloseByBase[baseID] = filtered
+	}
+	return found
+}
+
+func (a *App) openTicketCount(baseID string) int {
+	if strings.TrimSpace(baseID) == "" {
+		return 0
+	}
+	a.mt5TicketMux.RLock()
+	defer a.mt5TicketMux.RUnlock()
+
+	count := len(a.baseIdToTickets[baseID])
+	if entries, ok := a.pendingCloseByBase[baseID]; ok {
+		now := time.Now()
+		for _, entry := range entries {
+			if entry.ticket != 0 && now.Sub(entry.marked) <= pendingCloseTTL {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func (a *App) rehydrateTickets(baseID string) []uint64 {
+	if strings.TrimSpace(baseID) == "" {
+		return nil
+	}
+	a.mt5TicketMux.Lock()
+	defer a.mt5TicketMux.Unlock()
+
+	var restored []uint64
+	for ticket, mappedBase := range a.mt5TicketToBaseId {
+		if ticket == 0 || mappedBase != baseID {
+			continue
+		}
+		if containsUint64(a.baseIdToTickets[baseID], ticket) {
+			continue
+		}
+		if entries, ok := a.pendingCloseByBase[baseID]; ok {
+			alreadyPending := false
+			for _, entry := range entries {
+				if entry.ticket == ticket {
+					alreadyPending = true
+					break
+				}
+			}
+			if alreadyPending {
+				continue
+			}
+		}
+		restored = append(restored, ticket)
+	}
+	if len(restored) > 0 {
+		existing := a.baseIdToTickets[baseID]
+		merged := make([]uint64, 0, len(restored)+len(existing))
+		merged = append(merged, restored...)
+		merged = append(merged, existing...)
+		a.baseIdToTickets[baseID] = merged
+	}
+	return restored
+}
+
+func containsUint64(list []uint64, target uint64) bool {
+	for _, v := range list {
+		if v == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) recordInstrumentAccount(baseID, instrument, account string) {
@@ -340,6 +533,7 @@ func NewApp() *App {
 		// Initialize MT5 ticket mappings
 		mt5TicketToBaseId:      make(map[uint64]string),
 		baseIdToTickets:        make(map[string][]uint64),
+		pendingCloseByBase:     make(map[string][]pendingTicket),
 		baseIdToInstrument:     make(map[string]string),
 		baseIdToAccount:        make(map[string]string),
 		clientInitiatedTickets: make(map[uint64]time.Time),
@@ -463,7 +657,9 @@ func (a *App) GetStatus() map[string]interface{} {
 	return map[string]interface{}{
 		"bridgeActive":         a.bridgeActive,
 		"platformConnected":    platformConnected,
+		"addonConnected":       platformConnected,
 		"eaActive":             eaActive,
+		"hedgebotActive":       eaActive,
 		"tradeLogSenderActive": a.tradeLogSenderActive,
 		"netPosition":          a.netPosition,
 		"hedgeSize":            a.hedgeLot,
@@ -1045,13 +1241,11 @@ func (a *App) HandleCloseHedgeRequest(request interface{}) error {
 
 	providedTicket := getMT5TicketFromRequest(request)
 	if providedTicket != 0 {
+		a.evictTicketFromQueue(baseID, providedTicket)
 		if err := a.enqueueCloseTrade(baseID, providedTicket, inst, acct, request); err != nil {
 			return fmt.Errorf("failed to enqueue targeted CLOSE_HEDGE for ticket %d: %w", providedTicket, err)
 		}
-		a.clientCloseMux.Lock()
-		a.clientInitiatedTickets[providedTicket] = time.Now()
-		a.clientCloseMux.Unlock()
-		a.removeTicketFromPool(baseID, providedTicket)
+		a.trackPendingTicket(baseID, providedTicket)
 		log.Printf("gRPC: Enqueued targeted CLOSE_HEDGE for BaseID %s (ticket=%d)", baseID, providedTicket)
 		return nil
 	}
@@ -1065,12 +1259,24 @@ func (a *App) HandleCloseHedgeRequest(request interface{}) error {
 	for i := 0; i < qty; i++ {
 		ticket, ok := a.popTicketWithWait(baseID, maxTicketWait, pollInterval)
 		if !ok {
-			// restore any tickets already popped before returning
+			if restored := a.rehydrateTickets(baseID); len(restored) > 0 {
+				ticket, ok = a.popTicket(baseID)
+			}
+		}
+		if !ok {
 			for _, tk := range allocated {
 				a.pushTicket(baseID, tk)
 				a.mt5TicketMux.Lock()
 				a.mt5TicketToBaseId[tk] = baseID
 				a.mt5TicketMux.Unlock()
+			}
+			if a.hasRecentPendingClose(baseID, maxTicketWait) {
+				log.Printf("gRPC: Duplicate CLOSE_HEDGE detected for BaseID %s; pending MT5 closure still in flight", baseID)
+				return nil
+			}
+			if a.openTicketCount(baseID) == 0 {
+				log.Printf("gRPC: No tracked MT5 tickets remain for BaseID %s; treating close request as idempotent", baseID)
+				return nil
 			}
 			return fmt.Errorf("no MT5 tickets available for base_id %s", baseID)
 		}
@@ -1094,10 +1300,7 @@ func (a *App) HandleCloseHedgeRequest(request interface{}) error {
 			return fmt.Errorf("failed to enqueue CLOSE_HEDGE for ticket %d: %w", tk, err)
 		}
 
-		a.clientCloseMux.Lock()
-		a.clientInitiatedTickets[tk] = time.Now()
-		a.clientCloseMux.Unlock()
-		a.removeTicketFromPool(baseID, tk)
+		a.trackPendingTicket(baseID, tk)
 	}
 
 	log.Printf("gRPC: Enqueued CLOSE_HEDGE for BaseID %s using %d ticket(s)", baseID, len(allocated))

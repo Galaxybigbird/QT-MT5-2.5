@@ -20,7 +20,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 )
 
@@ -100,16 +99,9 @@ func (s *Server) StartGRPCServer(port string) error {
 		return fmt.Errorf("failed to listen on port %s: %v", port, err)
 	}
 
-	// Configure server options with keepalive and insecure settings for .NET Framework compatibility
+	// Configure server options. Keep defaults for keepalive so the bridge does not
+	// proactively terminate desktop clients that ignore HTTP/2 ping frames.
 	opts := []grpc.ServerOption{
-		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time:    30 * time.Second,
-			Timeout: 5 * time.Second,
-		}),
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             5 * time.Second,
-			PermitWithoutStream: true,
-		}),
 		grpc.MaxRecvMsgSize(1024 * 1024), // 1MB
 		grpc.MaxSendMsgSize(1024 * 1024), // 1MB
 	}
@@ -1108,6 +1100,11 @@ func (s *Server) TradingStream(stream trading.StreamingService_TradingStreamServ
 		for {
 			trade, err := stream.Recv()
 			if err != nil {
+				if err == io.EOF {
+					log.Printf("gRPC: Trading stream %s recv closed (EOF)", streamID)
+				} else {
+					log.Printf("gRPC: Trading stream %s recv error: %v", streamID, err)
+				}
 				errChan <- err
 				return
 			}
@@ -1137,10 +1134,12 @@ func (s *Server) TradingStream(stream trading.StreamingService_TradingStreamServ
 		for {
 			select {
 			case <-stream.Context().Done():
+				log.Printf("gRPC: Trading stream %s context done: %v", streamID, stream.Context().Err())
 				errChan <- stream.Context().Err()
 				return
 			case trade := <-streamChan:
 				if err := stream.Send(trade); err != nil {
+					log.Printf("gRPC: Trading stream %s send error: %v", streamID, err)
 					errChan <- err
 					return
 				}
@@ -1149,7 +1148,11 @@ func (s *Server) TradingStream(stream trading.StreamingService_TradingStreamServ
 	}()
 
 	// Wait for error or context cancellation
-	return <-errChan
+	err := <-errChan
+	if err != nil {
+		log.Printf("gRPC: Trading stream %s closed with error: %v", streamID, err)
+	}
+	return err
 }
 
 // wasRecentlyProcessed checks and expires recentTradeIDs using ttl.

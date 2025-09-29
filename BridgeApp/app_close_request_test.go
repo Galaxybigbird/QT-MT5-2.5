@@ -41,9 +41,13 @@ func TestHandleCloseHedgeRequestWithExplicitTicket(t *testing.T) {
 	}
 
 	a.mt5TicketMux.RLock()
-	if _, exists := a.mt5TicketToBaseId[ticket]; exists {
+	if mapped, exists := a.mt5TicketToBaseId[ticket]; !exists || mapped != baseID {
 		a.mt5TicketMux.RUnlock()
-		t.Fatalf("expected ticket %d to be removed from reverse mapping", ticket)
+		t.Fatalf("expected ticket %d to remain mapped to %s", ticket, baseID)
+	}
+	if entries := a.pendingCloseByBase[baseID]; len(entries) != 1 || entries[0].ticket != ticket {
+		a.mt5TicketMux.RUnlock()
+		t.Fatalf("expected pending close entry for ticket %d, got %+v", ticket, entries)
 	}
 	a.mt5TicketMux.RUnlock()
 
@@ -101,10 +105,15 @@ func TestHandleCloseHedgeRequestAllocatesFromPool(t *testing.T) {
 		a.mt5TicketMux.RUnlock()
 		t.Fatalf("expected no tickets remaining in pool for %s", baseID)
 	}
+	entries := a.pendingCloseByBase[baseID]
+	if len(entries) != len(tickets) {
+		a.mt5TicketMux.RUnlock()
+		t.Fatalf("expected %d pending entries, got %d", len(tickets), len(entries))
+	}
 	for _, tk := range tickets {
-		if _, exists := a.mt5TicketToBaseId[tk]; exists {
+		if mapped, exists := a.mt5TicketToBaseId[tk]; !exists || mapped != baseID {
 			a.mt5TicketMux.RUnlock()
-			t.Fatalf("expected ticket %d to be removed from reverse mapping", tk)
+			t.Fatalf("expected ticket %d to remain mapped to %s", tk, baseID)
 		}
 	}
 	a.mt5TicketMux.RUnlock()
@@ -133,11 +142,11 @@ func TestHandleCloseHedgeRequestErrorsWhenPoolEmpty(t *testing.T) {
 		"NTAccountName":       "Sim101",
 	}
 
-	if err := a.HandleCloseHedgeRequest(req); err == nil {
-		t.Fatalf("expected error when no tickets are available")
+	if err := a.HandleCloseHedgeRequest(req); err != nil {
+		t.Fatalf("expected no error for idempotent close when no tickets are tracked, got %v", err)
 	}
 
 	if _, ok := drainTrade(a); ok {
-		t.Fatalf("expected no trades enqueued when request fails")
+		t.Fatalf("expected no trades enqueued when request is treated as noop")
 	}
 }

@@ -31,30 +31,37 @@ function App() {
     try {
       const currentStatusFromServer = await GetStatus();
 
+      const bridgeIsActive = currentStatusFromServer?.bridgeActive ?? false;
+      const addonIsConnected =
+        typeof currentStatusFromServer?.addonConnected === 'boolean'
+          ? currentStatusFromServer.addonConnected
+          : (currentStatusFromServer?.platformConnected ?? false);
+      const hedgebotIsActive =
+        typeof currentStatusFromServer?.hedgebotActive === 'boolean'
+          ? currentStatusFromServer.hedgebotActive
+          : (currentStatusFromServer?.eaActive ?? false);
+
       // Update general bridge status
       setBridgeStatus(prevStatus => {
-        const isAddonNewlyConnected =
-          (currentStatusFromServer?.addonConnected ?? false) && !prevStatus.addonConnected;
-        
-        // Log if Addon/Transmitter is newly connected
+        const isAddonNewlyConnected = addonIsConnected && !prevStatus.addonConnected;
+
         if (isAddonNewlyConnected) {
           console.log("Addon/Transmitter connected.");
         }
 
         return {
-          ...prevStatus, // Keep existing state like netPosition etc.
-          bridgeActive: currentStatusFromServer?.bridgeActive ?? false,
-          addonConnected: currentStatusFromServer?.addonConnected ?? false, // Update addon status
+          ...prevStatus,
+          bridgeActive: bridgeIsActive,
+          addonConnected: addonIsConnected,
+          tradeLogSenderActive: currentStatusFromServer?.tradeLogSenderActive ?? prevStatus.tradeLogSenderActive ?? false,
           netPosition: currentStatusFromServer?.netPosition ?? 0,
           hedgeSize: currentStatusFromServer?.hedgeSize ?? 0,
           queueSize: currentStatusFromServer?.queueSize ?? 0,
-          // tradeLogSenderActive: currentStatusFromServer?.tradeLogSenderActive ?? false, // Update if needed
         };
       });
 
       // Update specific HedgeBot status state based on polled data
-      // This ensures the UI is correct even if the event is missed or before the first event
-      setIsHedgeBotActive(currentStatusFromServer?.hedgebotActive ?? false);
+      setIsHedgeBotActive(hedgebotIsActive);
 
     } catch (err) {
       console.error("Failed to fetch bridge status:", err);
@@ -167,15 +174,15 @@ function App() {
   }, []); // Runs once on mount
 
   // Helper to get status display text and class
-  const getStatusDisplay = (isActive) => {
-    return isActive
-      ? { text: 'Active', className: 'healthy' }
-      : { text: 'False', className: 'disconnected' }; // Capitalized 'False'
-  };
+  const getStatusDisplay = (isActive, texts = { on: 'Online', off: 'Offline' }) => (
+    isActive
+      ? { text: texts.on, className: 'healthy' }
+      : { text: texts.off, className: 'disconnected' }
+  );
 
-  const bridgeDisplay = getStatusDisplay(bridgeStatus.bridgeActive);
-  const hedgebotDisplay = getStatusDisplay(isHedgeBotActive); // Use the dedicated state
-  const tradeLogSenderDisplay = getStatusDisplay(bridgeStatus.addonConnected); // Use addonConnected from bridgeStatus
+  const bridgeDisplay = getStatusDisplay(bridgeStatus.bridgeActive, { on: 'Online', off: 'Offline' });
+  const hedgebotDisplay = getStatusDisplay(isHedgeBotActive, { on: 'Connected', off: 'Disconnected' });
+  const tradeLogSenderDisplay = getStatusDisplay(bridgeStatus.addonConnected, { on: 'Connected', off: 'Disconnected' });
 
 // Helper function to show a notification
   const showNotification = (message, type = 'info', duration = 3000) => {
