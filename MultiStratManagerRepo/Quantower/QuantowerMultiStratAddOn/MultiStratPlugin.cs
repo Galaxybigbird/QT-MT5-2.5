@@ -2,9 +2,11 @@ using System;
 #nullable disable
 
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Threading;
 
@@ -14,6 +16,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using TradingPlatform.PresentationLayer.Plugins;
 using Quantower.MultiStrat.Utilities;
+using Quantower.Bridge.Client;
 using WpfApplication = System.Windows.Application;
 
 namespace Quantower.MultiStrat
@@ -25,28 +28,39 @@ namespace Quantower.MultiStrat
         {
             SafeFileDebug("GetInfo() called");
 
-            var win = new NativeWindowParameters(NativeWindowParameters.Panel)
+            try
             {
-                HeaderVisible = true,
-                BindingBehaviour = BindingBehaviour.Bindable,
-                // Use built-in browser host so panel reliably opens without WPF hosting
-                BrowserUsageType = BrowserUsageType.Default
-            };
-
-            return new PluginInfo
-            {
-                Name = "MultiStratQuantower_WPF",
-                Title = "Multi-Strat Bridge (WPF Fallback)",
-                Group = PluginGroup.Misc,
-                ShortName = "MSB-WPF",
-                // Load on-disk template shipped with the plugin
-                TemplateName = "layout.html",
-                WindowParameters = win,
-                CustomProperties = new System.Collections.Generic.Dictionary<string, object>
+                // Simplified configuration - minimal browser panel
+                var info = new PluginInfo
                 {
-                    { PluginInfo.Const.ALLOW_MANUAL_CREATION, true }
-                }
-            };
+                    Name = "MultiStratQuantower",
+                    Title = "Multi-Strat Bridge",
+                    Group = PluginGroup.Misc,
+                    ShortName = "MSB",
+                    // Use browser template
+                    TemplateName = "layout.html",
+                    // Minimal window parameters
+                    WindowParameters = new NativeWindowParameters(NativeWindowParameters.Panel)
+                    {
+                        HeaderVisible = true,
+                        BindingBehaviour = BindingBehaviour.Bindable,
+                        BrowserUsageType = BrowserUsageType.Default
+                    },
+                    CustomProperties = new System.Collections.Generic.Dictionary<string, object>
+                    {
+                        { PluginInfo.Const.ALLOW_MANUAL_CREATION, true }
+                    }
+                };
+
+                SafeFileDebug($"GetInfo() returning plugin info: Name={info.Name}, Title={info.Title}, Template={info.TemplateName}");
+                return info;
+            }
+            catch (Exception ex)
+            {
+                SafeFileDebug($"GetInfo() failed: {ex.Message}");
+                SafeFileDebug($"GetInfo() stack trace: {ex.StackTrace}");
+                throw;
+            }
         }
 
         public override System.Drawing.Size DefaultSize => new System.Drawing.Size(720, 540);
@@ -55,11 +69,11 @@ namespace Quantower.MultiStrat
         private readonly MultiStratManagerService _managerService = new();
 
         private Dispatcher? _dispatcher;
+        private SynchronizationContext? _uiContext;
         private TextBox? _addressTextBox;
         private Button? _connectButton;
         private Button? _disconnectButton;
         private TextBlock? _statusText;
-        private ListBox? _logList;
         private StackPanel? _accountsPanel;
         private TextBox? _takeProfitInput;
         private TextBox? _lossLimitInput;
@@ -80,39 +94,22 @@ namespace Quantower.MultiStrat
         private TextBox? _demaMultiplierInput;
         private TextBox? _atrPeriodInput;
         private TextBox? _demaPeriodInput;
-
-        private object? _browser = null;
+        // Browser bridge fields
+        private object? _browser;
         private bool _browserBridgeAttached;
+        private bool _serviceHandlersAttached;
+        private bool _initialized;
+        private string _statusTextValue = "Initializing";
+        private bool _isBusy;
+        private bool _hasEverConnected;
+        private bool _userInitiatedDisconnect;
+        private bool _pendingConnect;
+        private string? _pendingAddress;
+        private BridgeGrpcClient.StreamingState _lastStreamingState = BridgeGrpcClient.StreamingState.Disconnected;
 
-        private void PushStatusToBrowser()
-        {
-            try
-            {
-                if (_browser == null) return;
-                var payload = new System.Collections.Generic.Dictionary<string, object?>
-                {
-                    ["connected"] = _managerService.IsConnected,
-                    ["address"] = _managerService.CurrentAddress ?? string.Empty,
-                };
-                var json = SimpleJson.SerializeObject(payload);
-                TryBrowserInvokeJs($"window.MSB && MSB.setStatus({json})");
-            }
-            catch { /* ignore */ }
-        }
 
-        private void TryBrowserInvokeJs(string script)
-        {
-            try
-            {
-                if (_browser == null || string.IsNullOrWhiteSpace(script)) return;
-                var mi = _browser.GetType().GetMethod("UpdateHtml", new[] { typeof(string), typeof(HtmlAction), typeof(string) });
-                if (mi != null)
-                {
-                    mi.Invoke(_browser, new object[] { string.Empty, HtmlAction.InvokeJs, script });
-                }
-            }
-            catch { /* ignore to avoid blocking UI */ }
-        }
+
+
 
         private static string JsEscape(string text)
         {
@@ -123,246 +120,86 @@ namespace Quantower.MultiStrat
         static MultiStratPlugin()
         {
             SafeFileDebug("MultiStratPlugin static ctor loaded.");
-        }
 
-        private void AttachBrowserCommandBridge()
-        {
             try
             {
-                var b = _browser;
-                if (b == null) return;
-                if (_browserBridgeAttached) return;
-                var t = b.GetType();
-                foreach (var ev in t.GetEvents())
-                {
-                    var n = ev.Name ?? string.Empty;
-                    bool looksLikeNav = n.IndexOf("Navig", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || n.IndexOf("NewWindow", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || n.IndexOf("Address", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || n.IndexOf("Url", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || n.IndexOf("Location", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || n.IndexOf("Start", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || n.IndexOf("Load", StringComparison.OrdinalIgnoreCase) >= 0;
-                    if (!looksLikeNav) continue;
-
-                    var handlerType = ev.EventHandlerType;
-                    if (handlerType == typeof(EventHandler))
-                    {
-                        var mi = GetType().GetMethod(nameof(OnBrowserNavEvent), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                        if (mi != null)
-                        {
-                            var del = Delegate.CreateDelegate(handlerType, this, mi);
-                            ev.AddEventHandler(b, del);
-                            AddLogEntry("INFO", $"Attached browser handler: {ev.Name}");
-                            continue;
-                        }
-                    }
-                    else if (handlerType != null && handlerType.IsGenericType && handlerType.GetGenericTypeDefinition() == typeof(EventHandler<>))
-                    {
-                        var argType = handlerType.GetGenericArguments()[0];
-                        var miGeneric = GetType().GetMethod(nameof(OnBrowserNavGeneric), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                        if (miGeneric != null)
-                        {
-                            var mi = miGeneric.MakeGenericMethod(argType);
-                            var del = Delegate.CreateDelegate(handlerType, this, mi);
-                            ev.AddEventHandler(b, del);
-                            AddLogEntry("INFO", $"Attached browser handler: {ev.Name}<{argType.Name}>");
-                            continue;
-                        }
-                    }
-                }
-
-                _browserBridgeAttached = true;
-            }
-            catch (Exception ex)
-            {
-                AddLogEntry("WARN", $"Failed to attach Browser command bridge: {ex.Message}");
-            }
-        }
-
-        private void OnBrowserNavEvent(object? sender, EventArgs e) => HandleBrowserNavArgs(e);
-        private void OnBrowserNavGeneric<T>(object? sender, T e) => HandleBrowserNavArgs(e as object);
-
-        private void HandleBrowserNavArgs(object? e)
-        {
-            try
-            {
-                if (e == null) return;
-
-                var url = TryGetUrlFromArgs(e);
-                if (string.IsNullOrWhiteSpace(url)) return;
-
-                if (url.StartsWith("msb://", StringComparison.OrdinalIgnoreCase))
-                {
-
-                        // Hook Browser command bridge (msb:// scheme)
-                        AttachBrowserCommandBridge();
-
-                    TryCancelNavigation(e);
-                    HandleMsbCommand(url);
-                }
-            }
-            catch (Exception ex)
-            {
-                AddLogEntry("WARN", $"Bridge nav handler error: {ex.Message}");
-            }
-        }
-
-        private static string? TryGetUrlFromArgs(object e)
-        {
-            var t = e.GetType();
-            string? Read(string name)
-            {
-                var p = t.GetProperty(name);
-                if (p != null)
-                {
-                    var v = p.GetValue(e);
-                    return v?.ToString();
-                }
-                return null;
-            }
-            return Read("Url") ?? Read("URI") ?? Read("Uri") ?? Read("Address") ?? Read("TargetUrl") ?? Read("Link") ?? Read("Location");
-        }
-
-        private static void TryCancelNavigation(object e)
-        {
-            var t = e.GetType();
-            var pCancel = t.GetProperty("Cancel");
-            if (pCancel != null && pCancel.PropertyType == typeof(bool))
-            {
-                pCancel.SetValue(e, true);
-                return;
-            }
-            var pHandled = t.GetProperty("Handled");
-            if (pHandled != null && pHandled.PropertyType == typeof(bool))
-            {
-                pHandled.SetValue(e, true);
-                return;
-            }
-            var mCancel = t.GetMethod("Cancel");
-            if (mCancel != null && mCancel.GetParameters().Length == 0)
-            {
-                mCancel.Invoke(e, null);
-            }
-        }
-
-        private void HandleMsbCommand(string url)
-        {
-            try
-            {
-                var uri = new Uri(url);
-                var cmd = uri.Host?.Trim().ToLowerInvariant() ?? string.Empty;
-                // Minimal query parse (avoid System.Web dependency)
-                string? data = null;
-                var q = uri.Query;
-                if (!string.IsNullOrEmpty(q))
-                {
-                    if (q.StartsWith("?")) q = q.Substring(1);
-                    foreach (var part in q.Split('&'))
-                    {
-                        if (string.IsNullOrEmpty(part)) continue;
-                        var idx = part.IndexOf('=');
-                        if (idx <= 0) continue;
-                        var key = part.Substring(0, idx);
-                        if (!key.Equals("d", StringComparison.Ordinal)) continue;
-                        var value = part.Substring(idx + 1);
-                        data = Uri.UnescapeDataString(value);
-                        break;
-                    }
-                }
-                var payload = new Dictionary<string, object?>();
-                if (!string.IsNullOrEmpty(data))
+                AppDomain.CurrentDomain.FirstChanceException += (_, args) =>
                 {
                     try
                     {
-                        var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(Uri.UnescapeDataString(data)));
-                        payload = SimpleJson.DeserializeObject<Dictionary<string, object?>>(json) ?? new Dictionary<string, object?>();
-                    }
-                    catch { /* ignore malformed */ }
-                }
+                        var ex = args.Exception;
+                        if (ex == null)
+                        {
+                            return;
+                        }
 
-                switch (cmd)
-                {
-                    case "connect":
-                        if (payload.TryGetValue("address", out var addrObj) && addrObj is string addr && !string.IsNullOrWhiteSpace(addr))
+                        if (ex is System.BadImageFormatException bad && !string.IsNullOrEmpty(bad.FileName))
                         {
-                            _ = _managerService.ConnectAsync(addr).ContinueWith(t =>
+                            var file = bad.FileName;
+                            if (!string.IsNullOrEmpty(file) && file.IndexOf("Native\\\\Windows", StringComparison.OrdinalIgnoreCase) >= 0)
                             {
-                                void Work()
-                                {
-                                    PushStatusToBrowser();
-                                    if (t.IsFaulted)
-                                    {
-                                        AddLogEntry("ERROR", $"Connect command failed: {t.Exception?.GetBaseException().Message}");
-                                    }
-                                }
-
-                                var dispatcher = _dispatcher;
-                                if (dispatcher != null && !dispatcher.CheckAccess())
-                                {
-                                    dispatcher.BeginInvoke((Action)Work, DispatcherPriority.Background);
-                                }
-                                else
-                                {
-                                    Work();
-                                }
-                            }, TaskScheduler.Default);
-                        }
-                        break;
-                    case "flatten_all":
-                        {
-                            var disable = payload.TryGetValue("disableAfter", out var disObj) && disObj is bool b && b;
-                            _ = _managerService.FlattenAllAsync(disable, "Quantower UI flatten");
-                        }
-                        break;
-                    case "reset_daily":
-                        {
-                            _managerService.ResetDailyRisk(null);
-                        }
-                        break;
-                    case "update_trailing":
-                        {
-                            Services.TrailingElasticService.ProfitUnitType ParseUnit(object? o)
-                            {
-                                if (o is string s && Enum.TryParse<Services.TrailingElasticService.ProfitUnitType>(s, true, out var u))
-                                    return u;
-                                return Services.TrailingElasticService.ProfitUnitType.Dollars;
+                                return;
                             }
-                            double D(object? o){ return (o is IConvertible c) ? Convert.ToDouble(c, CultureInfo.InvariantCulture) : 0d; }
-                            int I(object? o){ return (o is IConvertible c) ? Convert.ToInt32(c, CultureInfo.InvariantCulture) : 0; }
+                        }
 
-                            var update = new MultiStratManagerService.TrailingSettingsUpdate(
-                                EnableElastic: payload.TryGetValue("enable_elastic", out var ee) && ee is bool be && be,
-                                ElasticTriggerUnits: ParseUnit(payload.GetValueOrDefault("elastic_trigger_units")),
-                                ProfitUpdateThreshold: D(payload.GetValueOrDefault("profit_update_threshold")),
-                                ElasticIncrementUnits: ParseUnit(payload.GetValueOrDefault("elastic_increment_units")),
-                                ElasticIncrementValue: D(payload.GetValueOrDefault("elastic_increment_value")),
-                                EnableTrailing: payload.TryGetValue("enable_trailing", out var et) && et is bool bt && bt,
-                                UseDemaAtrTrailing: payload.TryGetValue("enable_dema_atr_trailing", out var da) && da is bool bda && bda,
-                                TrailingActivationUnits: ParseUnit(payload.GetValueOrDefault("trailing_activation_units")),
-                                TrailingActivationValue: D(payload.GetValueOrDefault("trailing_activation_value")),
-                                TrailingStopUnits: ParseUnit(payload.GetValueOrDefault("trailing_stop_units")),
-                                TrailingStopValue: D(payload.GetValueOrDefault("trailing_stop_value")),
-                                DemaAtrMultiplier: D(payload.GetValueOrDefault("dema_atr_multiplier")),
-                                AtrPeriod: Math.Max(1, I(payload.GetValueOrDefault("atr_period"))),
-                                DemaPeriod: Math.Max(1, I(payload.GetValueOrDefault("dema_period")))
-                            );
-                            _managerService.UpdateTrailingSettings(update);
-                        }
-                        break;
-                    case "window":
-                        if (payload.TryGetValue("action", out var act) && act is string a)
+                        if (ex is System.IO.FileNotFoundException missing && !string.IsNullOrEmpty(missing.FileName))
                         {
-                            SetWindowAction(a);
+                            if (missing.FileName.IndexOf("CefSharp.Wpf.resources.dll", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                return;
+                            }
                         }
-                        break;
-                }
+
+                        if (ex is System.OperationCanceledException || ex is System.Threading.Tasks.TaskCanceledException)
+                        {
+                            return;
+                        }
+
+                        if (ex is System.IO.IOException io && !string.IsNullOrEmpty(io.Message) && io.Message.IndexOf("msb-plugin.log", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            return;
+                        }
+
+                        SafeFileDebug($"FirstChanceException: {ex.GetType().FullName}: {ex.Message}");
+                    }
+                    catch
+                    {
+                        // ignore logging failures
+                    }
+                };
+
+                AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+                {
+                    try
+                    {
+                        if (args.ExceptionObject is Exception ex)
+                        {
+                            SafeFileDebug($"UnhandledException: {ex.GetType().FullName}: {ex.Message}");
+                        }
+                        else
+                        {
+                            SafeFileDebug($"UnhandledException: {args.ExceptionObject}");
+                        }
+                    }
+                    catch { }
+                };
             }
             catch (Exception ex)
             {
-                AddLogEntry("WARN", $"Failed to handle msb command: {ex.Message}");
+                SafeFileDebug($"Failed to hook AppDomain diagnostics: {ex.Message}");
             }
         }
+
+
+
+
+
+
+
+
+
+
+
 
         private void SetWindowAction(string action)
         {
@@ -400,158 +237,87 @@ namespace Quantower.MultiStrat
 
         public MultiStratPlugin()
         {
-            Title = "Multi-Strat Bridge";
-            SafeFileDebug("MultiStratPlugin instance ctor.");
+            try
+            {
+                SafeFileDebug("MultiStratPlugin instance ctor started.");
+                // Don't set Title in constructor - it causes null reference in Quantower framework
+                // Title will be set from PluginInfo.Title instead
+                SafeFileDebug("MultiStratPlugin instance ctor completed successfully.");
+            }
+            catch (Exception ex)
+            {
+                SafeFileDebug($"MultiStratPlugin constructor failed: {ex.Message}");
+                SafeFileDebug($"MultiStratPlugin constructor stack trace: {ex.StackTrace}");
+                throw;
+            }
         }
 
         public override void Initialize()
         {
-            base.Initialize();
+            SafeFileDebug("=== Initialize() CALLED ===");
 
-            SafeFileDebug($"Initialize entered. Thread={Thread.CurrentThread.ManagedThreadId}");
-
-            // If Quantower Browser host is available (TemplateName provided), use it to ensure the
-            // panel opens reliably. We will wire interactive elements in follow-ups.
-            try
+            if (_initialized)
             {
-                var wndType = this.Window?.GetType().FullName ?? "<null>";
-                SafeFileDebug($"Window type: {wndType}");
-
-                var browser = this.Window?.Browser;
-                SafeFileDebug($"Browser host present: { (browser != null) }");
-                if (browser != null)
-                {
-                    _browser = browser; // keep reference for pushing status/logs
-                    _browserBridgeAttached = false;
-
-                    // Minimal ping to verify browser is alive (no-op if element id not found)
-                    TryBrowserInvokeJs("console.log('Multi-Strat Bridge loaded')");
-
-                    // Prime UI with trailing/risk snapshot
-                    try
-                    {
-                        var trailing = _managerService.GetTrailingSettings();
-                        var risk = _managerService.GetRiskSnapshot();
-                        var trailingJson = SimpleJson.SerializeObject(new System.Collections.Generic.Dictionary<string, object?>
-                        {
-                            ["enable_elastic"] = trailing.EnableElastic,
-                            ["elastic_trigger_units"] = trailing.ElasticTriggerUnits.ToString(),
-                            ["profit_update_threshold"] = trailing.ProfitUpdateThreshold,
-                            ["elastic_increment_units"] = trailing.ElasticIncrementUnits.ToString(),
-                            ["elastic_increment_value"] = trailing.ElasticIncrementValue,
-                            ["enable_trailing"] = trailing.EnableTrailing,
-                            ["enable_dema_atr_trailing"] = trailing.UseDemaAtrTrailing,
-                            ["trailing_activation_units"] = trailing.TrailingActivationUnits.ToString(),
-                            ["trailing_activation_value"] = trailing.TrailingActivationValue,
-                            ["trailing_stop_units"] = trailing.TrailingStopUnits.ToString(),
-                            ["trailing_stop_value"] = trailing.TrailingStopValue,
-                            ["dema_atr_multiplier"] = trailing.DemaAtrMultiplier,
-                            ["atr_period"] = trailing.AtrPeriod,
-                            ["dema_period"] = trailing.DemaPeriod,
-                        });
-                        var riskJson = SimpleJson.SerializeObject(new System.Collections.Generic.Dictionary<string, object?>
-                        {
-                            ["disable_on_limit"] = risk.DisableOnLimit,
-                        });
-                        TryBrowserInvokeJs($"window.MSB && MSB.prime({trailingJson}, {riskJson})");
-                    }
-                    catch { /* snapshot optional */ }
-
-
-                        // Attach Browser command bridge early so msb:// links are intercepted
-                        AttachBrowserCommandBridge();
-
-                    // Push initial connection status
-                    PushStatusToBrowser();
-
-                    // Log wiring
-                    _managerService.Log += OnBridgeLog;
-
-                    // Auto-connect if not already
-                    if (!_managerService.IsConnected)
-                    {
-                        var addr = _managerService.CurrentAddress ?? "127.0.0.1:50051";
-                        _ = _managerService.ConnectAsync(addr).ContinueWith(t =>
-                        {
-                            void Work()
-                            {
-                                PushStatusToBrowser();
-                                if (t.IsFaulted)
-                                    AddLogEntry("ERROR", $"Auto-connect failed: {t.Exception?.GetBaseException().Message}");
-                            }
-
-                            var dispatcher = _dispatcher;
-                            if (dispatcher != null && !dispatcher.CheckAccess())
-                            {
-                                dispatcher.BeginInvoke((Action)Work, DispatcherPriority.Background);
-                            }
-                            else
-                            {
-                                Work();
-                            }
-                        }, System.Threading.CancellationToken.None, System.Threading.Tasks.TaskContinuationOptions.None, System.Threading.Tasks.TaskScheduler.Default);
-                    }
-
-                    SafeFileDebug("Using Browser host path. Returning to let template render.");
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                SafeFileDebug($"Browser host not available: {ex.Message}");
-                AddLogEntry("WARN", $"Browser host not available: {ex.Message}. Falling back to WPF layout.");
-            }
-
-            if (WpfApplication.Current != null)
-            {
-                _dispatcher = WpfApplication.Current.Dispatcher;
-            }
-            else
-            {
-                _dispatcher = Dispatcher.FromThread(Thread.CurrentThread);
-            }
-            if (_dispatcher == null)
-            {
-                SafeFileDebug("No dispatcher detected. Initialize should run on UI thread. Returning.");
-                AddLogEntry("ERROR", "MultiStratPlugin.Initialize must run on the UI thread.");
-                // Do NOT throw to avoid blocking panel creation; just return with empty content
+                SafeFileDebug("Initialize() invoked more than once; returning early.");
                 return;
             }
 
-            _managerService.Log += OnBridgeLog;
-            _managerService.AccountsChanged += OnAccountsChanged;
-
-            var layout = BuildLayout();
-            SafeFileDebug("Built WPF layout. Attaching to window content...");
-            AttachContent(layout);
-
-            UpdateStatus("Disconnected", Brushes.Gray);
             try
             {
-                _managerService.RefreshAccounts();
+                base.Initialize();
+                SafeFileDebug("base.Initialize() completed");
+
+                try
+                {
+                    Title = "Multi-Strat Bridge";
+                    SafeFileDebug("Title set successfully in Initialize()");
+                }
+                catch (Exception ex)
+                {
+                    SafeFileDebug($"Failed to set title in Initialize(): {ex.Message}");
+                }
+
+                _uiContext = SynchronizationContext.Current;
+                SafeFileDebug($"Initialize entered. Thread={Thread.CurrentThread.ManagedThreadId}");
             }
             catch (Exception ex)
             {
-                SafeFileDebug($"RefreshAccounts failed: {ex.Message}");
-                AddLogEntry("ERROR", $"Unable to load accounts: {ex}");
-                // Continue with empty accounts so the panel can still open
+                SafeFileDebug($"Initialize() failed: {ex.Message}");
+                SafeFileDebug($"Initialize() stack trace: {ex.StackTrace}");
+                throw;
             }
-            RenderAccounts();
-            PopulateRiskUi();
-            PopulateTrailingUi();
-            SafeFileDebug("Initialize completed normally.");
+
+            _dispatcher = WpfApplication.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+
+            EnsureServiceHandlers();
+
+            var browserReady = TryInitializeBrowserUi();
+            if (!browserReady)
+            {
+                AttachWpfFallbackUi();
+            }
+
+            StartAutoConnectIfNeeded();
+
+            SafeFileDebug(browserReady
+                ? "Initialize completed (browser host)."
+                : "Initialize completed (WPF fallback).");
+
+            _initialized = true;
         }
 
         public override void Dispose()
         {
             _managerService.Log -= OnBridgeLog;
             _managerService.AccountsChanged -= OnAccountsChanged;
+            _managerService.PropertyChanged -= OnManagerPropertyChanged;
+            _managerService.StreamingStateChanged -= OnBridgeStreamingStateChanged;
 
             try
             {
                 if (_managerService.IsConnected)
                 {
-                    var disconnectTask = _managerService.DisconnectAsync();
+                    var disconnectTask = _managerService.DisconnectAsync("plugin dispose");
 
                     if (!disconnectTask.IsCompleted)
                     {
@@ -689,18 +455,6 @@ namespace Quantower.MultiStrat
             var accountsSection = BuildAccountsSection();
             root.Children.Add(accountsSection);
             Grid.SetRow(accountsSection, 4);
-
-            _logList = new ListBox
-            {
-                ItemsSource = _logBuffer,
-                Background = new SolidColorBrush(Color.FromRgb(28, 28, 28)),
-                Foreground = Brushes.Gainsboro,
-                BorderThickness = new Thickness(1),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 45, 45))
-            };
-
-            root.Children.Add(_logList);
-            Grid.SetRow(_logList, 5);
 
             return root;
         }
@@ -1266,12 +1020,16 @@ namespace Quantower.MultiStrat
 
             SetButtonsBusy(true);
             UpdateStatus("Connecting...", Brushes.DarkOrange);
+            _pendingConnect = true;
+            _pendingAddress = address;
+            _userInitiatedDisconnect = false;
 
             try
             {
                 var ok = await _managerService.ConnectAsync(address).ConfigureAwait(true);
                 if (ok)
                 {
+                    var fullyOnline = _managerService.IsConnected;
                     try
                     {
                         _managerService.RefreshAccounts();
@@ -1284,13 +1042,30 @@ namespace Quantower.MultiStrat
                         AddLogEntry("WARN", $"Failed to refresh accounts: {ex.Message}");
                     }
 
-                    UpdateStatus("Connected", Brushes.LightGreen);
-                    SetButtonStates(connected: true);
+                    if (fullyOnline)
+                    {
+                        UpdateStatus("Connected", Brushes.LightGreen);
+                        SetButtonStates(connected: true);
+                        _pendingConnect = false;
+                        _pendingAddress = null;
+                    }
+                    else
+                    {
+                        var awaitingLabel = string.IsNullOrWhiteSpace(address)
+                            ? "Awaiting trading stream"
+                            : $"Awaiting trading stream on {address}";
+                        UpdateStatus(awaitingLabel, Brushes.DarkOrange);
+                        SetButtonStates(connected: false);
+                        _pendingConnect = true;
+                        _pendingAddress = address;
+                    }
                 }
                 else
                 {
                     UpdateStatus("Connection failed", Brushes.IndianRed);
                     SetButtonStates(connected: false);
+                    _pendingConnect = false;
+                    _pendingAddress = null;
                 }
             }
             catch (Exception ex)
@@ -1298,6 +1073,8 @@ namespace Quantower.MultiStrat
                 AddLogEntry("ERROR", $"Connection attempt failed: {ex.Message}");
                 UpdateStatus("Connection failed", Brushes.IndianRed);
                 SetButtonStates(connected: false);
+                _pendingConnect = false;
+                _pendingAddress = null;
             }
             finally
             {
@@ -1307,9 +1084,13 @@ namespace Quantower.MultiStrat
 
         private async Task DisconnectAsync()
         {
+            _userInitiatedDisconnect = true;
+            _pendingConnect = false;
+            _pendingAddress = null;
+
             try
             {
-                await _managerService.DisconnectAsync().ConfigureAwait(true);
+                await _managerService.DisconnectAsync("ui command").ConfigureAwait(true);
             }
             catch (Exception ex)
             {
@@ -1336,13 +1117,10 @@ namespace Quantower.MultiStrat
                     _logBuffer.RemoveAt(0);
                 }
 
+                SafeFileDebug(formatted, alsoLogToBridge: false);
+
                 // Push to Browser UI if present
                 TryBrowserInvokeJs($"window.MSB && MSB.appendLog('{JsEscape(formatted)}')");
-
-                if (_logList != null && _logList.Items.Count > 0)
-                {
-                    _logList.ScrollIntoView(_logList.Items[_logList.Items.Count - 1]);
-                }
 
                 if (entry.Message.IndexOf("Risk limit", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
@@ -1361,10 +1139,44 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private void AddLogEntry(string level, string message)
+        private void AddLogEntry(string level, string message, string? details = null)
         {
             var lvl = Enum.TryParse(level, true, out QuantowerBridgeService.BridgeLogLevel parsed) ? parsed : QuantowerBridgeService.BridgeLogLevel.Info;
-            OnBridgeLog(new QuantowerBridgeService.BridgeLogEntry(DateTime.UtcNow, lvl, message, null, null, null));
+            EmitPluginLog(lvl, message, details);
+        }
+
+        private void EmitPluginLog(QuantowerBridgeService.BridgeLogLevel level, string message, string? details = null)
+        {
+            TryLogToBridge(level, message, details);
+            OnBridgeLog(new QuantowerBridgeService.BridgeLogEntry(DateTime.UtcNow, level, message, null, null, details));
+        }
+
+        private static void TryLogToBridge(QuantowerBridgeService.BridgeLogLevel level, string message, string? details)
+        {
+            var payload = string.IsNullOrWhiteSpace(details) ? message : $"{message} ({details})";
+
+            try
+            {
+                switch (level)
+                {
+                    case QuantowerBridgeService.BridgeLogLevel.Debug:
+                        BridgeGrpcClient.LogDebug("qt_addon_ui", payload);
+                        break;
+                    case QuantowerBridgeService.BridgeLogLevel.Info:
+                        BridgeGrpcClient.LogInfo("qt_addon_ui", payload);
+                        break;
+                    case QuantowerBridgeService.BridgeLogLevel.Warn:
+                        BridgeGrpcClient.LogWarn("qt_addon_ui", payload);
+                        break;
+                    case QuantowerBridgeService.BridgeLogLevel.Error:
+                        BridgeGrpcClient.LogError("qt_addon_ui", payload, errorCode: "ui_log");
+                        break;
+                }
+            }
+            catch
+            {
+                // Bridge client may not be initialized yet; ignore and rely on local log sink.
+            }
         }
 
         private void RefreshAccounts()
@@ -1395,6 +1207,187 @@ namespace Quantower.MultiStrat
             if (dispatcher != null)
             {
                 _ = dispatcher.BeginInvoke((Action)UpdateUi, DispatcherPriority.Background);
+            }
+            else
+            {
+                UpdateUi();
+            }
+        }
+
+        private void OnManagerPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (!string.Equals(e.PropertyName, nameof(MultiStratManagerService.IsConnected), StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            void UpdateUi()
+            {
+                var connected = _managerService.IsConnected;
+
+                if (connected)
+                {
+                    _hasEverConnected = true;
+                    _userInitiatedDisconnect = false;
+                    _pendingConnect = false;
+                    if (!string.IsNullOrWhiteSpace(_managerService.CurrentAddress))
+                    {
+                        _pendingAddress = _managerService.CurrentAddress;
+                    }
+
+                    var address = _managerService.CurrentAddress;
+                    var label = string.IsNullOrWhiteSpace(address)
+                        ? "Connected"
+                        : $"Connected to {address}";
+
+                    UpdateStatus(label, Brushes.LightGreen);
+                    SetButtonStates(true);
+                    SetButtonsBusy(false);
+
+                    EmitPluginLog(QuantowerBridgeService.BridgeLogLevel.Info, label);
+                    PushStatusToBrowser();
+                }
+                else
+                {
+                    if (_managerService.IsBridgeRunning &&
+                        (_lastStreamingState == BridgeGrpcClient.StreamingState.Connected ||
+                         _lastStreamingState == BridgeGrpcClient.StreamingState.Connecting))
+                    {
+                        // Streaming layer reports connected/connecting; keep current status and wait for health probe.
+                        return;
+                    }
+
+                    if (_pendingConnect)
+                    {
+                        var label = string.IsNullOrWhiteSpace(_pendingAddress)
+                            ? "Awaiting trading stream"
+                            : $"Awaiting trading stream on {_pendingAddress}";
+
+                        UpdateStatus(label, Brushes.DarkOrange);
+                        SetButtonStates(false);
+                        // keep busy indicator untouched to avoid fighting concurrent updates
+                        EmitPluginLog(QuantowerBridgeService.BridgeLogLevel.Info, label);
+                        PushStatusToBrowser();
+                        return;
+                    }
+
+                    var wasManual = _userInitiatedDisconnect || !_hasEverConnected;
+                    var message = wasManual ? "Disconnected" : "Disconnected (connection lost)";
+                    var brush = wasManual ? Brushes.Gray : Brushes.IndianRed;
+
+                    UpdateStatus(message, brush);
+                    SetButtonStates(false);
+                    SetButtonsBusy(false);
+
+                    if (!wasManual)
+                    {
+                        EmitPluginLog(QuantowerBridgeService.BridgeLogLevel.Warn, "Bridge connection lost", "Reconnect when ready");
+                    }
+                    else
+                    {
+                        EmitPluginLog(QuantowerBridgeService.BridgeLogLevel.Info, message);
+                    }
+
+                    PushStatusToBrowser();
+                }
+            }
+
+            if (_dispatcher != null && !_dispatcher.CheckAccess())
+            {
+                _dispatcher.BeginInvoke((Action)UpdateUi, DispatcherPriority.Background);
+            }
+            else
+            {
+                UpdateUi();
+            }
+        }
+
+        private void OnBridgeStreamingStateChanged(BridgeGrpcClient.StreamingState state, string? details)
+        {
+            void UpdateUi()
+            {
+                if (_userInitiatedDisconnect)
+                {
+                    return;
+                }
+
+                _lastStreamingState = state;
+
+                switch (state)
+                {
+                    case BridgeGrpcClient.StreamingState.Connected:
+                    {
+                        _pendingConnect = false;
+                        var address = _managerService.CurrentAddress;
+                        var statusText = string.IsNullOrWhiteSpace(address)
+                            ? "Connected"
+                            : $"Connected to {address}";
+                        UpdateStatus(statusText, Brushes.LightGreen);
+                        SetButtonStates(true);
+                        SetButtonsBusy(false);
+                        break;
+                    }
+
+                    case BridgeGrpcClient.StreamingState.Connecting:
+                    {
+                        _pendingConnect = true;
+                        if (string.IsNullOrWhiteSpace(_pendingAddress))
+                        {
+                            _pendingAddress = _managerService.CurrentAddress;
+                        }
+
+                        var pendingAddress = _pendingAddress;
+                        var statusText = string.IsNullOrWhiteSpace(pendingAddress)
+                            ? "Reconnecting…"
+                            : $"Reconnecting to {pendingAddress}";
+
+                        UpdateStatus(statusText, Brushes.DarkOrange);
+                        SetButtonStates(false);
+                        break;
+                    }
+
+                    case BridgeGrpcClient.StreamingState.Disconnected:
+                    {
+                        if (!_managerService.IsBridgeRunning)
+                        {
+                            UpdateStatus("Disconnected (retrying)", Brushes.IndianRed);
+                            SetButtonStates(false);
+                            if (string.IsNullOrWhiteSpace(_pendingAddress))
+                            {
+                                _pendingAddress = _managerService.CurrentAddress ?? _pendingAddress;
+                            }
+                            _pendingConnect = true;
+                            if (!_userInitiatedDisconnect)
+                            {
+                                QueueAutoReconnect();
+                            }
+                            break;
+                        }
+
+                        _pendingConnect = true;
+                        if (string.IsNullOrWhiteSpace(_pendingAddress))
+                        {
+                            _pendingAddress = _managerService.CurrentAddress;
+                        }
+
+                        var pendingAddress = _pendingAddress;
+                        var statusText = string.IsNullOrWhiteSpace(pendingAddress)
+                            ? "Reconnecting…"
+                            : $"Reconnecting to {pendingAddress}";
+
+                        UpdateStatus(statusText, Brushes.DarkOrange);
+                        SetButtonStates(false);
+                        break;
+                    }
+                }
+
+                PushStatusToBrowser();
+            }
+
+            var dispatcher = _dispatcher;
+            if (dispatcher != null && !dispatcher.CheckAccess())
+            {
+                dispatcher.BeginInvoke((Action)UpdateUi, DispatcherPriority.Background);
             }
             else
             {
@@ -1514,6 +1507,8 @@ namespace Quantower.MultiStrat
 
         private void UpdateStatus(string text, Brush color)
         {
+            _statusTextValue = text ?? string.Empty;
+
             void Update()
             {
                 if (_statusText != null)
@@ -1531,10 +1526,14 @@ namespace Quantower.MultiStrat
             {
                 _ = _dispatcher.InvokeAsync(Update, DispatcherPriority.Render);
             }
+
+            PushStatusToBrowser();
         }
 
         private void SetButtonsBusy(bool busy)
         {
+            _isBusy = busy;
+
             void Update()
             {
                 if (_connectButton != null)
@@ -1561,6 +1560,8 @@ namespace Quantower.MultiStrat
             {
                 _ = _dispatcher.InvokeAsync(Update, DispatcherPriority.Normal);
             }
+
+            PushStatusToBrowser();
         }
 
         private void SetButtonStates(bool connected)
@@ -1596,6 +1597,272 @@ namespace Quantower.MultiStrat
             {
                 RenderAccounts();
             }
+
+            PushStatusToBrowser();
+        }
+
+        private void EnsureServiceHandlers()
+        {
+            if (_serviceHandlersAttached)
+            {
+                return;
+            }
+
+            _managerService.Log += OnBridgeLog;
+            _managerService.AccountsChanged += OnAccountsChanged;
+            _managerService.PropertyChanged += OnManagerPropertyChanged;
+            _managerService.StreamingStateChanged += OnBridgeStreamingStateChanged;
+            _serviceHandlersAttached = true;
+        }
+
+        private bool TryInitializeBrowserUi()
+        {
+            try
+            {
+                var window = this.Window;
+                var wndType = window?.GetType().FullName ?? "<null>";
+                SafeFileDebug($"Window type: {wndType}");
+
+                var browser = window?.Browser;
+                SafeFileDebug($"Browser host present: {browser != null}");
+                if (browser == null)
+                {
+                    return false;
+                }
+
+                _dispatcher = WpfApplication.Current?.Dispatcher ?? _dispatcher ?? Dispatcher.CurrentDispatcher;
+
+                _browser = browser;
+                _browserBridgeAttached = false;
+
+                SafeFileDebug("Setting browser HTML from layout.html");
+                TryBrowserSetHtmlFromFile("layout.html");
+
+                TryBrowserInvokeJs("console.log('Multi-Strat Bridge loaded')");
+
+                try
+                {
+                    var trailing = _managerService.GetTrailingSettings();
+                    var risk = _managerService.GetRiskSnapshot();
+                    var trailingJson = SimpleJson.SerializeObject(new System.Collections.Generic.Dictionary<string, object?>
+                    {
+                        ["enable_elastic"] = trailing.EnableElastic,
+                        ["elastic_trigger_units"] = trailing.ElasticTriggerUnits.ToString(),
+                        ["profit_update_threshold"] = trailing.ProfitUpdateThreshold,
+                        ["elastic_increment_units"] = trailing.ElasticIncrementUnits.ToString(),
+                        ["elastic_increment_value"] = trailing.ElasticIncrementValue,
+                        ["enable_trailing"] = trailing.EnableTrailing,
+                        ["enable_dema_atr_trailing"] = trailing.UseDemaAtrTrailing,
+                        ["trailing_activation_units"] = trailing.TrailingActivationUnits.ToString(),
+                        ["trailing_activation_value"] = trailing.TrailingActivationValue,
+                        ["trailing_stop_units"] = trailing.TrailingStopUnits.ToString(),
+                        ["trailing_stop_value"] = trailing.TrailingStopValue,
+                        ["dema_atr_multiplier"] = trailing.DemaAtrMultiplier,
+                        ["atr_period"] = trailing.AtrPeriod,
+                        ["dema_period"] = trailing.DemaPeriod,
+                    });
+                    var riskJson = SimpleJson.SerializeObject(new System.Collections.Generic.Dictionary<string, object?>
+                    {
+                        ["disable_on_limit"] = risk.DisableOnLimit,
+                    });
+                    TryBrowserInvokeJs($"window.MSB && MSB.prime({trailingJson}, {riskJson})");
+                }
+                catch
+                {
+                    // Priming is best-effort only.
+                }
+
+                AttachBrowserCommandBridge();
+                PushStatusToBrowser();
+
+                SafeFileDebug("Using Browser host path. Returning to let template render.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                SafeFileDebug($"Browser host initialization failed: {ex.Message}");
+                SafeFileDebug($"Browser host stack trace: {ex.StackTrace}");
+                AddLogEntry("ERROR", $"Browser host initialization failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private void AttachWpfFallbackUi()
+        {
+            SafeFileDebug("Browser host unavailable; falling back to WPF panel.");
+
+            var app = WpfApplication.Current;
+            if (app == null)
+            {
+                SafeFileDebug("No WPF Application.Current detected; creating a new instance.");
+                app = new WpfApplication
+                {
+                    ShutdownMode = ShutdownMode.OnExplicitShutdown
+                };
+            }
+
+            var root = BuildLayout();
+            _dispatcher = root.Dispatcher ?? app.Dispatcher ?? _dispatcher ?? Dispatcher.CurrentDispatcher;
+
+            AttachContent(root);
+
+            try
+            {
+                PopulateRiskUi();
+                PopulateTrailingUi();
+                RenderAccounts();
+            }
+            catch (Exception ex)
+            {
+                SafeFileDebug($"Failed to populate initial WPF UI: {ex.Message}");
+                AddLogEntry("WARN", $"Failed to populate initial WPF UI: {ex.Message}");
+            }
+
+            UpdateStatus(_managerService.IsConnected ? "Connected" : "Disconnected",
+                _managerService.IsConnected ? Brushes.LightGreen : Brushes.Gray);
+            SetButtonStates(_managerService.IsConnected);
+        }
+
+        private void StartAutoConnectIfNeeded()
+        {
+            if (_managerService.IsConnected)
+            {
+                PushStatusToBrowser();
+                return;
+            }
+
+            var address = _managerService.CurrentAddress ?? "127.0.0.1:50051";
+            BeginConnect(address, "Auto-connect");
+        }
+
+        private void QueueAutoReconnect()
+        {
+            if (_userInitiatedDisconnect || _pendingConnect)
+            {
+                return;
+            }
+
+            if (_managerService.IsConnected)
+            {
+                return;
+            }
+
+            var address = _pendingAddress ?? _managerService.CurrentAddress ?? _addressTextBox?.Text ?? "127.0.0.1:50051";
+            if (string.IsNullOrWhiteSpace(address))
+            {
+                return;
+            }
+
+            BeginConnect(address, "Auto-reconnect");
+        }
+
+        private void BeginConnect(string address, string origin)
+        {
+            _userInitiatedDisconnect = false;
+
+            if (string.IsNullOrWhiteSpace(address))
+            {
+                AddLogEntry("WARN", $"{origin} request ignored: address was empty");
+                return;
+            }
+
+            var trimmed = address.Trim();
+
+            if (_managerService.IsConnected && string.Equals(_managerService.CurrentAddress, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                AddLogEntry("INFO", $"{origin}: already connected to {trimmed}");
+                UpdateStatus($"Connected to {trimmed}", Brushes.LightGreen);
+                PushStatusToBrowser();
+                return;
+            }
+
+            SafeFileDebug($"{origin} attempting to reach {trimmed}");
+            UpdateStatus("Connecting...", Brushes.DarkOrange);
+            SetButtonsBusy(true);
+            PushStatusToBrowser();
+
+            _pendingConnect = true;
+            _pendingAddress = trimmed;
+
+            _ = Task.Run(async () =>
+            {
+                Exception? failure = null;
+                var connected = false;
+
+                try
+                {
+                    connected = await _managerService.ConnectAsync(trimmed).ConfigureAwait(false);
+                    if (connected)
+                    {
+                        _managerService.RefreshAccounts();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                }
+
+                void UpdateUi()
+                {
+                    SetButtonsBusy(false);
+                    SetButtonStates(_managerService.IsConnected);
+
+                    if (!connected || failure != null)
+                    {
+                        var message = failure?.GetBaseException().Message ?? "Bridge unavailable";
+                        SafeFileDebug($"{origin} failed for {trimmed}: {message}");
+                        AddLogEntry("ERROR", $"{origin} failed for {trimmed}: {message}");
+                        UpdateStatus($"Connection failed: {message}", Brushes.IndianRed);
+                        _pendingConnect = false;
+                        _pendingAddress = null;
+                        return;
+                    }
+
+                    var fullyOnline = _managerService.IsConnected;
+
+                    if (fullyOnline)
+                    {
+                        SafeFileDebug($"{origin} connected to {trimmed}");
+                        AddLogEntry("INFO", $"{origin} connected to {trimmed}");
+                        UpdateStatus($"Connected to {trimmed}", Brushes.LightGreen);
+                        _pendingConnect = false;
+                        _pendingAddress = null;
+                    }
+                    else
+                    {
+                        SafeFileDebug($"{origin} established control channel to {trimmed}; awaiting trading stream");
+                        AddLogEntry("INFO", $"{origin} established control channel to {trimmed}; awaiting trading stream");
+                        UpdateStatus($"Awaiting trading stream on {trimmed}", Brushes.DarkOrange);
+                        _pendingConnect = true;
+                        _pendingAddress = trimmed;
+                    }
+
+                    try
+                    {
+                        PopulateRiskUi();
+                        PopulateTrailingUi();
+                        RenderAccounts();
+                    }
+                    catch (Exception ex)
+                    {
+                        AddLogEntry("WARN", $"Post-connect UI refresh failed: {ex.Message}");
+                    }
+                }
+
+                var dispatcher = _dispatcher;
+                if (dispatcher != null && !dispatcher.CheckAccess())
+                {
+                    dispatcher.BeginInvoke((Action)UpdateUi, DispatcherPriority.Background);
+                }
+                else if (_uiContext != null)
+                {
+                    _uiContext.Post(_ => UpdateUi(), null);
+                }
+                else
+                {
+                    UpdateUi();
+                }
+            });
         }
 
         private void AttachContent(UIElement element)
@@ -1655,7 +1922,7 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private static void SafeFileDebug(string message)
+        private static void SafeFileDebug(string message, bool alsoLogToBridge = true)
         {
             try
             {
@@ -1678,8 +1945,529 @@ namespace Quantower.MultiStrat
                     System.IO.File.AppendAllText(path2, line);
                 }
                 catch { }
+
+                if (alsoLogToBridge)
+                {
+                    try
+                    {
+                        BridgeGrpcClient.LogDebug("qt_addon_ui", message);
+                    }
+                    catch
+                    {
+                        // Ignore when bridge logging is unavailable (e.g. before initialization)
+                    }
+                }
             }
             catch { /* never throw from diagnostics */ }
         }
+        private void AttachBrowserCommandBridge()
+        {
+            try
+            {
+                var browser = _browser;
+                if (browser == null || _browserBridgeAttached)
+                {
+                    return;
+                }
+
+                foreach (var ev in browser.GetType().GetEvents())
+                {
+                    var name = ev.Name ?? string.Empty;
+                    bool looksLikeNav = name.IndexOf("Navig", StringComparison.OrdinalIgnoreCase) >= 0
+                                     || name.IndexOf("NewWindow", StringComparison.OrdinalIgnoreCase) >= 0
+                                     || name.IndexOf("Address", StringComparison.OrdinalIgnoreCase) >= 0
+                                     || name.IndexOf("Url", StringComparison.OrdinalIgnoreCase) >= 0
+                                     || name.IndexOf("Location", StringComparison.OrdinalIgnoreCase) >= 0
+                                     || name.IndexOf("Start", StringComparison.OrdinalIgnoreCase) >= 0
+                                     || name.IndexOf("Load", StringComparison.OrdinalIgnoreCase) >= 0;
+                    if (!looksLikeNav)
+                    {
+                        continue;
+                    }
+
+                    var handlerType = ev.EventHandlerType;
+                    if (handlerType == typeof(EventHandler))
+                    {
+                        var method = GetType().GetMethod(nameof(OnBrowserNavEvent), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        if (method != null)
+                        {
+                            var del = Delegate.CreateDelegate(handlerType, this, method);
+                            ev.AddEventHandler(browser, del);
+                            AddLogEntry("INFO", $"Attached browser handler: {ev.Name}");
+                            continue;
+                        }
+                    }
+                    else if (handlerType != null && handlerType.IsGenericType && handlerType.GetGenericTypeDefinition() == typeof(EventHandler<>))
+                    {
+                        var argType = handlerType.GetGenericArguments()[0];
+                        var methodGeneric = GetType().GetMethod(nameof(OnBrowserNavGeneric), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        if (methodGeneric != null)
+                        {
+                            var method = methodGeneric.MakeGenericMethod(argType);
+                            var del = Delegate.CreateDelegate(handlerType, this, method);
+                            ev.AddEventHandler(browser, del);
+                            AddLogEntry("INFO", $"Attached browser handler: {ev.Name}<{argType.Name}>");
+                            continue;
+                        }
+                    }
+                }
+
+                _browserBridgeAttached = true;
+            }
+            catch (Exception ex)
+            {
+                AddLogEntry("WARN", $"Failed to attach Browser command bridge: {ex.Message}");
+            }
+        }
+
+        private static object? TryGetValue(IDictionary<string, object?> payload, string key)
+        {
+            if (payload == null)
+            {
+                return null;
+            }
+
+            payload.TryGetValue(key, out var value);
+            return value;
+        }
+
+        private void HandleMsbCommand(string url)
+        {
+            try
+            {
+                var uri = new Uri(url);
+                var cmd = uri.Host?.Trim().ToLowerInvariant() ?? string.Empty;
+
+                string? data = null;
+                var query = uri.Query;
+                if (!string.IsNullOrEmpty(query))
+                {
+                    var raw = query.StartsWith("?") ? query.Substring(1) : query;
+                    foreach (var part in raw.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var separator = part.IndexOf('=');
+                        if (separator <= 0)
+                        {
+                            continue;
+                        }
+
+                        if (!string.Equals(part.Substring(0, separator), "d", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        data = Uri.UnescapeDataString(part.Substring(separator + 1));
+                        break;
+                    }
+                }
+
+                var payload = new Dictionary<string, object?>();
+                if (!string.IsNullOrEmpty(data))
+                {
+                    try
+                    {
+                        var json = Encoding.UTF8.GetString(Convert.FromBase64String(data));
+                        payload = SimpleJson.DeserializeObject<Dictionary<string, object?>>(json) ?? new Dictionary<string, object?>();
+                    }
+                    catch (Exception decodeEx)
+                    {
+                        AddLogEntry("WARN", $"Failed to decode command payload: {decodeEx.Message}");
+                    }
+                }
+
+                switch (cmd)
+                {
+                    case "connect":
+                    {
+                        var addr = TryGetValue(payload, "address") as string;
+                        if (string.IsNullOrWhiteSpace(addr))
+                        {
+                            AddLogEntry("WARN", "Manual connect ignored: address missing");
+                            break;
+                        }
+
+                        BeginConnect(addr, "Manual connect");
+                        break;
+                    }
+                    case "flatten_all":
+                    {
+                        var disable = TryGetValue(payload, "disableAfter") is bool b && b;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var ok = await _managerService.FlattenAllAsync(disable, "Quantower UI flatten").ConfigureAwait(false);
+                                AddLogEntry(ok ? "INFO" : "WARN", ok ? "Flattened all accounts" : "Flatten all reported issues");
+                            }
+                            catch (Exception ex)
+                            {
+                                AddLogEntry("ERROR", $"Flatten all failed: {ex.Message}");
+                            }
+                        });
+                        break;
+                    }
+                    case "reset_daily":
+                    {
+                        var target = TryGetValue(payload, "id") as string ?? TryGetValue(payload, "account_id") as string;
+                        _ = Task.Run(() =>
+                        {
+                            try
+                            {
+                                _managerService.ResetDailyRisk(string.IsNullOrWhiteSpace(target) ? null : target);
+                                var message = string.IsNullOrWhiteSpace(target)
+                                    ? "Reset daily risk for all accounts"
+                                    : $"Reset daily risk for {target}";
+                                AddLogEntry("INFO", message);
+
+                                void RefreshUi()
+                                {
+                                    PopulateRiskUi();
+                                    RenderAccounts();
+                                    PushStatusToBrowser();
+                                }
+
+                                var dispatcher = _dispatcher;
+                                if (dispatcher != null && !dispatcher.CheckAccess())
+                                {
+                                    dispatcher.BeginInvoke((Action)RefreshUi, DispatcherPriority.Background);
+                                }
+                                else
+                                {
+                                    RefreshUi();
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                AddLogEntry("ERROR", $"Reset daily failed: {ex.Message}");
+                            }
+                        });
+                        break;
+                    }
+                    case "update_trailing":
+                    {
+                        Services.TrailingElasticService.ProfitUnitType ParseUnit(object? value)
+                        {
+                            if (value is string s && Enum.TryParse<Services.TrailingElasticService.ProfitUnitType>(s, true, out var parsed))
+                            {
+                                return parsed;
+                            }
+
+                            if (value is int i && Enum.IsDefined(typeof(Services.TrailingElasticService.ProfitUnitType), i))
+                            {
+                                return (Services.TrailingElasticService.ProfitUnitType)i;
+                            }
+
+                            return Services.TrailingElasticService.ProfitUnitType.Dollars;
+                        }
+
+                        double ReadDouble(object? value) => value is IConvertible convertible
+                            ? Convert.ToDouble(convertible, CultureInfo.InvariantCulture)
+                            : 0d;
+
+                        int ReadInt(object? value) => value is IConvertible convertible
+                            ? Convert.ToInt32(convertible, CultureInfo.InvariantCulture)
+                            : 0;
+
+                        try
+                        {
+                            var update = new MultiStratManagerService.TrailingSettingsUpdate(
+                                EnableElastic: TryGetValue(payload, "enable_elastic") is bool be && be,
+                                ElasticTriggerUnits: ParseUnit(TryGetValue(payload, "elastic_trigger_units")),
+                                ProfitUpdateThreshold: ReadDouble(TryGetValue(payload, "profit_update_threshold")),
+                                ElasticIncrementUnits: ParseUnit(TryGetValue(payload, "elastic_increment_units")),
+                                ElasticIncrementValue: ReadDouble(TryGetValue(payload, "elastic_increment_value")),
+                                EnableTrailing: TryGetValue(payload, "enable_trailing") is bool bt && bt,
+                                UseDemaAtrTrailing: TryGetValue(payload, "enable_dema_atr_trailing") is bool bda && bda,
+                                TrailingActivationUnits: ParseUnit(TryGetValue(payload, "trailing_activation_units")),
+                                TrailingActivationValue: ReadDouble(TryGetValue(payload, "trailing_activation_value")),
+                                TrailingStopUnits: ParseUnit(TryGetValue(payload, "trailing_stop_units")),
+                                TrailingStopValue: ReadDouble(TryGetValue(payload, "trailing_stop_value")),
+                                DemaAtrMultiplier: ReadDouble(TryGetValue(payload, "dema_atr_multiplier")),
+                                AtrPeriod: Math.Max(1, ReadInt(TryGetValue(payload, "atr_period"))),
+                                DemaPeriod: Math.Max(1, ReadInt(TryGetValue(payload, "dema_period"))));
+
+                            _managerService.UpdateTrailingSettings(update);
+                            AddLogEntry("INFO", "Updated trailing settings");
+                        }
+                        catch (Exception ex)
+                        {
+                            AddLogEntry("ERROR", $"Failed to update trailing settings: {ex.Message}");
+                        }
+                        break;
+                    }
+                    case "select_account":
+                    {
+                        var account = TryGetValue(payload, "id") as string ?? TryGetValue(payload, "account_id") as string;
+                        var normalized = string.IsNullOrWhiteSpace(account) ? null : account.Trim();
+                        var success = _managerService.SelectAccount(normalized);
+                        if (!success && normalized != null)
+                        {
+                            AddLogEntry("WARN", $"Select account ignored: {normalized}");
+                        }
+                        else
+                        {
+                            var message = normalized == null ? "Disabled all accounts" : $"Selected account {normalized}";
+                            AddLogEntry("INFO", message);
+                        }
+
+                        RenderAccounts();
+                        PushStatusToBrowser();
+                        break;
+                    }
+                    case "window":
+                    {
+                        if (TryGetValue(payload, "action") is string action && !string.IsNullOrWhiteSpace(action))
+                        {
+                            SetWindowAction(action);
+                        }
+
+                        break;
+                    }
+                    case "ui_status_debug":
+                    {
+                        var connected = TryGetValue(payload, "connected") is bool cb && cb;
+                        var reconnecting = TryGetValue(payload, "reconnecting") is bool rb && rb;
+                        var streamState = TryGetValue(payload, "stream_state") as string ?? "<unknown>";
+                        var busy = TryGetValue(payload, "busy") is bool bb && bb;
+                        var label = TryGetValue(payload, "label") as string ?? string.Empty;
+                        SafeFileDebug($"UI status callback: connected={connected}, reconnecting={reconnecting}, stream_state={streamState}, busy={busy}, label={label}");
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLogEntry("WARN", $"Failed to handle msb command: {ex.Message}");
+            }
+        }
+
+        private void HandleBrowserNavArgs(object? args)
+        {
+            try
+            {
+                if (args == null)
+                {
+                    return;
+                }
+
+                var url = TryGetUrlFromArgs(args);
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    return;
+                }
+
+                if (!url.StartsWith("msb://", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                TryCancelNavigation(args);
+                HandleMsbCommand(url);
+            }
+            catch (Exception ex)
+            {
+                AddLogEntry("WARN", $"Browser navigation handling failed: {ex.Message}");
+            }
+        }
+
+        private static string? TryGetUrlFromArgs(object e)
+        {
+            var type = e.GetType();
+
+            string? Read(string name)
+            {
+                var property = type.GetProperty(name);
+                if (property != null)
+                {
+                    var value = property.GetValue(e);
+                    return value?.ToString();
+                }
+
+                return null;
+            }
+
+            return Read("Url") ??
+                   Read("URI") ??
+                   Read("Uri") ??
+                   Read("Address") ??
+                   Read("TargetUrl") ??
+                   Read("Link") ??
+                   Read("Location");
+        }
+
+        private static void TryCancelNavigation(object e)
+        {
+            var type = e.GetType();
+            var cancelProperty = type.GetProperty("Cancel");
+            if (cancelProperty != null && cancelProperty.PropertyType == typeof(bool))
+            {
+                cancelProperty.SetValue(e, true);
+                return;
+            }
+
+            var handledProperty = type.GetProperty("Handled");
+            if (handledProperty != null && handledProperty.PropertyType == typeof(bool))
+            {
+                handledProperty.SetValue(e, true);
+                return;
+            }
+
+            var cancelMethod = type.GetMethod("Cancel");
+            if (cancelMethod != null && cancelMethod.GetParameters().Length == 0)
+            {
+                cancelMethod.Invoke(e, null);
+            }
+        }
+
+        private void PushStatusToBrowser()
+        {
+            try
+            {
+                var dispatcher = _dispatcher;
+                if (dispatcher != null && !dispatcher.CheckAccess())
+                {
+                    dispatcher.BeginInvoke((Action)PushStatusToBrowserCore, DispatcherPriority.Background);
+                    return;
+                }
+
+                PushStatusToBrowserCore();
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private void PushStatusToBrowserCore()
+        {
+            if (_browser == null)
+            {
+                return;
+            }
+
+            var accounts = new List<Dictionary<string, object?>>();
+            foreach (var account in _managerService.Accounts)
+            {
+                accounts.Add(new Dictionary<string, object?>
+                {
+                    ["id"] = account.AccountId,
+                    ["name"] = account.DisplayName,
+                    ["enabled"] = account.IsEnabled
+                });
+            }
+
+            var streamState = _lastStreamingState;
+            var uiConnected = _managerService.IsConnected || streamState == BridgeGrpcClient.StreamingState.Connected;
+            var uiReconnecting = _managerService.IsReconnecting ||
+                                  streamState == BridgeGrpcClient.StreamingState.Connecting ||
+                                  _pendingConnect;
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["connected"] = uiConnected,
+                ["bridge_running"] = _managerService.IsBridgeRunning,
+                ["stream_state"] = streamState.ToString(),
+                ["address"] = _managerService.CurrentAddress ?? string.Empty,
+                ["status_text"] = _statusTextValue,
+                ["busy"] = _isBusy,
+                ["reconnecting"] = uiReconnecting,
+                ["accounts"] = accounts
+            };
+
+            var json = SimpleJson.SerializeObject(payload);
+            SafeFileDebug($"PushStatus payload: {json}");
+            TryBrowserInvokeJs($"window.MSB && MSB.setStatus({json})");
+        }
+
+        private void TryBrowserInvokeJs(string script)
+        {
+            try
+            {
+                if (_browser == null || string.IsNullOrWhiteSpace(script))
+                {
+                    return;
+                }
+
+                var method = _browser.GetType().GetMethod("UpdateHtml", new[] { typeof(string), typeof(HtmlAction), typeof(string) });
+                method?.Invoke(_browser, new object[] { string.Empty, HtmlAction.InvokeJs, script });
+            }
+            catch
+            {
+                // ignore browser invocation failures
+            }
+        }
+
+        private void TryBrowserSetHtml(string html)
+        {
+            try
+            {
+                if (_browser == null || string.IsNullOrEmpty(html)) return;
+                var js = "(function(){document.open();document.write('" + JsEscape(html) + "');document.close();})();";
+                TryBrowserInvokeJs(js);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private void TryBrowserSetHtmlFromFile(string fileName)
+        {
+            try
+            {
+                var baseDir = System.IO.Path.GetDirectoryName(GetType().Assembly.Location);
+                if (!string.IsNullOrEmpty(baseDir))
+                {
+                    var path = System.IO.Path.Combine(baseDir, fileName);
+                    if (!System.IO.File.Exists(path))
+                    {
+                        var sdkGuess = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(baseDir) ?? baseDir, "HTML", fileName);
+                        if (System.IO.File.Exists(sdkGuess))
+                        {
+                            path = sdkGuess;
+                        }
+                        else
+                        {
+                            path = null;
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(path) && System.IO.File.Exists(path))
+                    {
+                        var html = System.IO.File.ReadAllText(path);
+                        TryBrowserSetHtml(html);
+                        return;
+                    }
+                }
+
+                // Fallback to embedded resource lookup (Quantower samples embed layout.html)
+                var asm = GetType().Assembly;
+                var resourceName = asm.GetManifestResourceNames()
+                    .FirstOrDefault(n => n.EndsWith(fileName, StringComparison.OrdinalIgnoreCase));
+                if (resourceName == null)
+                {
+                    return;
+                }
+
+                using var stream = asm.GetManifestResourceStream(resourceName);
+                if (stream == null)
+                {
+                    return;
+                }
+
+                using var reader = new System.IO.StreamReader(stream);
+                var embeddedHtml = reader.ReadToEnd();
+                TryBrowserSetHtml(embeddedHtml);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+
+        private void OnBrowserNavEvent(object? sender, EventArgs e) => HandleBrowserNavArgs(e);
+
+        private void OnBrowserNavGeneric<T>(object? sender, T e) => HandleBrowserNavArgs(e);
     }
 }

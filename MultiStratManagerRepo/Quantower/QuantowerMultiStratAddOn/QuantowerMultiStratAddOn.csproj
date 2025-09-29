@@ -23,6 +23,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Remove="HTML\layout.html" />
+    <EmbeddedResource Include="HTML\layout.html" />
     <Content Include="HTML\layout.html">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
@@ -34,7 +36,6 @@
     <Compile Include="MultiStratManagerService.cs" />
     <Compile Include="AccountSubscription.cs" />
     <Compile Include="MultiStratPlugin.cs" />
-    <Compile Include="MinimalBrowserPlugin.cs" />
     <Compile Include="QuantowerBridgeService.cs" />
     <Compile Include="Utilities\SimpleJson.cs" />
     <Compile Include="Utilities\PnLUtils.cs" />

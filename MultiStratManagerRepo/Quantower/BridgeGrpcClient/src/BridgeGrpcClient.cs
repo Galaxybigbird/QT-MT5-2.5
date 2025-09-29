@@ -13,6 +13,13 @@ namespace Quantower.Bridge.Client
     /// </summary>
     public static class BridgeGrpcClient
     {
+        public enum StreamingState
+        {
+            Connecting,
+            Connected,
+            Disconnected
+        }
+
         private static ITradingClient? _client;
         private static readonly object InitLock = new();
         private static volatile bool _initialized;
@@ -63,6 +70,8 @@ namespace Quantower.Bridge.Client
                 CorrelationByBaseId.TryRemove(baseId, out _);
             }
         }
+
+        public static event Action<StreamingState, string?>? StreamingStateChanged;
 
         public static string LastError { get; private set; } = string.Empty;
 
@@ -306,6 +315,16 @@ namespace Quantower.Bridge.Client
                 }
 
                 onTradeReceived?.Invoke(payload);
+            }, (state, error) =>
+            {
+                try
+                {
+                    StreamingStateChanged?.Invoke(state, error);
+                }
+                catch
+                {
+                    // Suppress downstream listener errors.
+                }
             });
         }
 
@@ -314,6 +333,13 @@ namespace Quantower.Bridge.Client
             if (TryGetClient(out var client, setError: false))
             {
                 client!.StopTradingStream();
+                try
+                {
+                    StreamingStateChanged?.Invoke(StreamingState.Disconnected, null);
+                }
+                catch
+                {
+                }
             }
         }
 

@@ -13,7 +13,7 @@ namespace Quantower.Bridge.Client
         Task<OperationResult> SubmitTrailingUpdateAsync(string updateJson);
         Task<OperationResult> NotifyHedgeCloseAsync(string notificationJson);
         Task<OperationResult> SubmitCloseHedgeAsync(string notificationJson);
-        void StartTradingStream(Action<string>? onTradeReceived);
+        void StartTradingStream(Action<string>? onTradeReceived, Action<BridgeGrpcClient.StreamingState, string?>? onStreamStateChanged = null);
         void StopTradingStream();
         void LogFireAndForget(string level, string component, string message, string tradeId = "", string errorCode = "", string baseId = "", string? correlationId = null);
     }

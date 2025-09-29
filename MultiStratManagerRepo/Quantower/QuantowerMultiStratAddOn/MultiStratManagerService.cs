@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
+using Quantower.Bridge.Client;
 using Quantower.MultiStrat.Indicators;
 using Quantower.MultiStrat.Persistence;
 using Quantower.MultiStrat.Services;
@@ -36,6 +37,7 @@ namespace Quantower.MultiStrat
         private int _disposed; // 0 = active, 1 = disposed
         private Timer? _riskTimer;
         private bool _coreEventsAttached;
+        private volatile bool _isReconnecting;
         public TimeSpan RiskTimerInterval { get; set; } = TimeSpan.FromSeconds(5);
 
         public MultiStratManagerService()
@@ -45,10 +47,13 @@ namespace Quantower.MultiStrat
                 LogWarning = message => EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, message)
             };
             _bridgeService = new QuantowerBridgeService();
+            _bridgeService.ConnectionStateChanged += OnBridgeConnectionStateChanged;
+            _bridgeService.StreamingStateChanged += OnBridgeStreamingStateChanged;
             _bridgeService.Log += entry => Log?.Invoke(entry);
             _bridgeService.TradeReceived += HandleTrade;
             _bridgeService.PositionAdded += HandlePositionAdded;
             _bridgeService.PositionRemoved += HandlePositionRemoved;
+            _bridgeService.StreamEnvelopeReceived += OnBridgeStreamEnvelopeReceived;
             _accountsView = new ReadOnlyObservableCollection<AccountSubscription>(_accounts);
             LoadSettings();
             StartRiskTimer();
@@ -58,10 +63,13 @@ namespace Quantower.MultiStrat
         public event Action<QuantowerBridgeService.BridgeLogEntry>? Log;
         public event EventHandler? AccountsChanged;
         public event PropertyChangedEventHandler? PropertyChanged;
+        public event Action<BridgeGrpcClient.StreamingState, string?>? StreamingStateChanged;
 
         public ReadOnlyObservableCollection<AccountSubscription> Accounts => _accountsView;
 
-        public bool IsConnected => _bridgeService.IsRunning;
+        public bool IsConnected => _bridgeService.IsOnline;
+        public bool IsReconnecting => Volatile.Read(ref _isReconnecting);
+        public bool IsBridgeRunning => _bridgeService.IsRunning;
 
         public string? CurrentAddress => _bridgeService.CurrentAddress;
 
@@ -79,9 +87,12 @@ namespace Quantower.MultiStrat
             return true;
         }
 
-        public async Task DisconnectAsync()
+        public async Task DisconnectAsync(string reason = "unspecified")
         {
             ThrowIfDisposed();
+
+            var stack = Environment.StackTrace;
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Disconnect requested ({reason})", details: stack);
 
             await _bridgeService.StopAsync().ConfigureAwait(false);
             StopAllTracking();
@@ -376,6 +387,55 @@ namespace Quantower.MultiStrat
             }
         }
 
+        public bool SelectAccount(string? accountId)
+        {
+            ThrowIfDisposed();
+
+            List<AccountSubscription> snapshot;
+            lock (_accountsLock)
+            {
+                snapshot = _accounts.ToList();
+            }
+
+            var normalized = string.IsNullOrWhiteSpace(accountId) ? null : accountId.Trim();
+            var found = false;
+
+            foreach (var subscription in snapshot)
+            {
+                var shouldEnable = normalized != null && string.Equals(subscription.AccountId, normalized, StringComparison.OrdinalIgnoreCase);
+                if (shouldEnable)
+                {
+                    found = true;
+                }
+
+                if (subscription.IsEnabled != shouldEnable)
+                {
+                    subscription.IsEnabled = shouldEnable;
+                }
+            }
+
+            if (normalized == null)
+            {
+                // Disable all accounts when no selection is provided.
+                foreach (var subscription in snapshot)
+                {
+                    if (subscription.IsEnabled)
+                    {
+                        subscription.IsEnabled = false;
+                    }
+                }
+
+                return true;
+            }
+
+            if (!found)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"SelectAccount ignored – unknown account '{normalized}'");
+            }
+
+            return found;
+        }
+
         private void SubscribeToCoreEvents()
         {
             if (_coreEventsAttached)
@@ -446,6 +506,47 @@ namespace Quantower.MultiStrat
             RefreshAccounts();
         }
 
+        private void OnBridgeConnectionStateChanged(bool isOnline)
+        {
+            OnPropertyChanged(nameof(IsConnected));
+
+            if (isOnline)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, "Bridge connection established");
+            }
+            else
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, "Bridge connection lost");
+            }
+        }
+
+        private void OnBridgeStreamingStateChanged(BridgeGrpcClient.StreamingState state, string? details)
+        {
+            var reconnecting = state switch
+            {
+                BridgeGrpcClient.StreamingState.Connected => false,
+                BridgeGrpcClient.StreamingState.Disconnected => _bridgeService.IsRunning,
+                BridgeGrpcClient.StreamingState.Connecting => _bridgeService.IsRunning,
+                _ => Volatile.Read(ref _isReconnecting)
+            };
+
+            var previous = Volatile.Read(ref _isReconnecting);
+            if (previous != reconnecting)
+            {
+                Volatile.Write(ref _isReconnecting, reconnecting);
+                OnPropertyChanged(nameof(IsReconnecting));
+            }
+
+            try
+            {
+                StreamingStateChanged?.Invoke(state, details);
+            }
+            catch
+            {
+                // Suppress listener failures so stream recovery isn't impacted.
+            }
+        }
+
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -469,6 +570,9 @@ namespace Quantower.MultiStrat
                     DetachSubscription(subscription);
                 }
 
+                _bridgeService.ConnectionStateChanged -= OnBridgeConnectionStateChanged;
+                _bridgeService.StreamingStateChanged -= OnBridgeStreamingStateChanged;
+                _bridgeService.StreamEnvelopeReceived -= OnBridgeStreamEnvelopeReceived;
                 _bridgeService.TradeReceived -= HandleTrade;
                 _bridgeService.PositionAdded -= HandlePositionAdded;
                 _bridgeService.PositionRemoved -= HandlePositionRemoved;
@@ -483,9 +587,9 @@ namespace Quantower.MultiStrat
             }
         }
 
-        private void EmitLog(QuantowerBridgeService.BridgeLogLevel level, string message)
+        private void EmitLog(QuantowerBridgeService.BridgeLogLevel level, string message, string? details = null)
         {
-            Log?.Invoke(new QuantowerBridgeService.BridgeLogEntry(DateTime.UtcNow, level, message, null, null, null));
+            Log?.Invoke(new QuantowerBridgeService.BridgeLogEntry(DateTime.UtcNow, level, message, null, null, details));
         }
 
         private void RaiseAccountsChanged()
@@ -933,6 +1037,42 @@ namespace Quantower.MultiStrat
                 {
                     EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"SLTP handler error: {ex.Message}");
                 }
+            }
+        }
+
+        private void OnBridgeStreamEnvelopeReceived(QuantowerBridgeService.BridgeStreamEnvelope envelope)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                return;
+            }
+
+            var baseId = envelope.BaseId;
+            if (string.IsNullOrWhiteSpace(baseId))
+            {
+                return;
+            }
+
+            var action = envelope.Action;
+            if (!string.IsNullOrWhiteSpace(action))
+            {
+                if (action.Equals("HEDGE_CLOSED", StringComparison.OrdinalIgnoreCase) ||
+                    action.Equals("NT_CLOSE_ACK", StringComparison.OrdinalIgnoreCase) ||
+                    action.Equals("CLOSE_HEDGE", StringComparison.OrdinalIgnoreCase))
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Bridge confirmed hedge close for {baseId}. Stopping local trackers.");
+                    StopTracking(baseId);
+                    _trailingService.RemoveTracker(baseId);
+                    return;
+                }
+            }
+
+            var eventType = envelope.EventType;
+            if (!string.IsNullOrWhiteSpace(eventType) && eventType.Equals("quantower_position_closed", StringComparison.OrdinalIgnoreCase))
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Bridge acknowledged Quantower position closure for {baseId}");
+                StopTracking(baseId);
+                _trailingService.RemoveTracker(baseId);
             }
         }
 

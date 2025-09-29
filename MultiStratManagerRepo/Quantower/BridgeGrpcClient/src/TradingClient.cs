@@ -40,11 +40,11 @@ namespace Quantower.Bridge.Client
             var canonical = serverAddress;
             var channel = ChannelCache.GetOrAdd(canonical, key =>
             {
+                // Disable aggressive HTTP/2 keepalive pings; the Go bridge does not currently respond
+                // to HTTP/2 ping frames, which caused the .NET client to cancel the stream after ~20s.
                 var handler = new SocketsHttpHandler
                 {
                     PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-                    KeepAlivePingDelay = TimeSpan.FromSeconds(15),
-                    KeepAlivePingTimeout = TimeSpan.FromSeconds(5),
                     EnableMultipleHttp2Connections = true
                 };
 
@@ -225,7 +225,7 @@ namespace Quantower.Bridge.Client
             return await call.ResponseAsync.ConfigureAwait(false);
         }
 
-        public void StartTradingStream(Action<string>? onTradeReceived)
+        public void StartTradingStream(Action<string>? onTradeReceived, Action<BridgeGrpcClient.StreamingState, string?>? onStreamStateChanged = null)
         {
             StopTradingStream();
 
@@ -237,6 +237,20 @@ namespace Quantower.Bridge.Client
                 var rand = new Random();
                 var attempt = 0;
 
+                void ReportState(BridgeGrpcClient.StreamingState state, string? error = null)
+                {
+                    try
+                    {
+                        onStreamStateChanged?.Invoke(state, error);
+                    }
+                    catch
+                    {
+                        // Ignore downstream listener errors so the stream loop keeps running.
+                    }
+                }
+
+                ReportState(BridgeGrpcClient.StreamingState.Connecting);
+
                 while (!token.IsCancellationRequested)
                 {
                     try
@@ -245,19 +259,30 @@ namespace Quantower.Bridge.Client
                         await stream.RequestStream.WriteAsync(new Trade { Id = "init_stream" }).ConfigureAwait(false);
                         attempt = 0;
 
+                        ReportState(BridgeGrpcClient.StreamingState.Connected);
+
                         while (await stream.ResponseStream.MoveNext(token).ConfigureAwait(false))
                         {
                             var trade = stream.ResponseStream.Current;
                             var tradeJson = ProtoTradeToJson(trade);
                             onTradeReceived?.Invoke(tradeJson);
                         }
+
+                        ReportState(BridgeGrpcClient.StreamingState.Disconnected, "stream completed");
                     }
                     catch (OperationCanceledException)
                     {
+                        ReportState(BridgeGrpcClient.StreamingState.Disconnected, "cancelled");
                         break;
                     }
-                    catch
+                    catch (RpcException rpcEx)
                     {
+                        ReportState(BridgeGrpcClient.StreamingState.Disconnected, rpcEx.Status.Detail);
+                        // transient errors – fall through to backoff and retry
+                    }
+                    catch (Exception ex)
+                    {
+                        ReportState(BridgeGrpcClient.StreamingState.Disconnected, ex.Message);
                         // transient errors – fall through to backoff and retry
                     }
 

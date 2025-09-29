@@ -17,17 +17,30 @@ namespace Quantower.MultiStrat
 
         private readonly ConcurrentDictionary<string, byte> _pendingTrades = new();
         private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
+        private readonly object _healthSync = new();
+
+        private CancellationTokenSource? _healthMonitorCts;
+        private Task? _healthMonitorTask;
+
+        private static readonly TimeSpan HealthProbeInterval = TimeSpan.FromSeconds(5);
+        private const int MaxHealthCheckFailures = 3;
 
         private QuantowerEventBridge? _eventBridge;
         private string? _grpcAddress;
         private bool _isRunning;
+        private bool _streamHealthy;
 
         public event Action<BridgeLogEntry>? Log;
         public event Action<Trade>? TradeReceived;
         public event Action<Position>? PositionAdded;
         public event Action<Position>? PositionRemoved;
+        public event Action<bool>? ConnectionStateChanged;
+        public event Action<BridgeGrpcClient.StreamingState, string?>? StreamingStateChanged;
+        public event Action<BridgeStreamEnvelope>? StreamEnvelopeReceived;
 
         public bool IsRunning => _isRunning;
+
+        public bool IsOnline => _isRunning && _streamHealthy;
 
         public string? CurrentAddress => _grpcAddress;
 
@@ -108,6 +121,10 @@ namespace Quantower.MultiStrat
                 return false;
             }
 
+            _streamHealthy = false;
+            _isRunning = true;
+
+            BridgeGrpcClient.StreamingStateChanged += HandleStreamingStateChanged;
             BridgeGrpcClient.StartTradingStream(OnBridgeTradeReceived);
 
             if (QuantowerEventBridge.TryCreate(OnQuantowerTrade, OnQuantowerPositionAdded, OnQuantowerPositionClosed, out var bridge) && bridge != null)
@@ -127,7 +144,8 @@ namespace Quantower.MultiStrat
             }
 
             _pendingTrades.Clear();
-            _isRunning = true;
+
+            StartHealthMonitor();
             EmitLog(BridgeLogLevel.Info, "Bridge ready");
             return true;
         }
@@ -138,6 +156,14 @@ namespace Quantower.MultiStrat
             {
                 return;
             }
+
+            var stack = Environment.StackTrace;
+
+            EmitLog(BridgeLogLevel.Warn, "StopCore invoked", details: stack);
+
+            BridgeGrpcClient.StreamingStateChanged -= HandleStreamingStateChanged;
+            _streamHealthy = false;
+            StopHealthMonitor();
 
             try
             {
@@ -162,7 +188,9 @@ namespace Quantower.MultiStrat
                 _eventBridge = null;
                 _pendingTrades.Clear();
                 _isRunning = false;
-                EmitLog(BridgeLogLevel.Info, "Bridge stopped");
+                RaiseStreamingStateChanged(BridgeGrpcClient.StreamingState.Disconnected, "stopped");
+                EmitLog(BridgeLogLevel.Info, "Bridge stopped", details: stack);
+                SafeNotifyConnectionChanged(IsOnline);
             }
         }
 
@@ -232,9 +260,127 @@ namespace Quantower.MultiStrat
             };
         }
 
+        private static string? GetStringValueCaseInsensitive(JsonElement element, params string[] propertyNames)
+        {
+            foreach (var name in propertyNames)
+            {
+                if (!string.IsNullOrEmpty(name) && element.TryGetProperty(name, out var value))
+                {
+                    return ExtractString(value);
+                }
+            }
+
+            if (propertyNames.Length == 0)
+            {
+                return null;
+            }
+
+            foreach (var property in element.EnumerateObject())
+            {
+                foreach (var candidate in propertyNames)
+                {
+                    if (!string.IsNullOrEmpty(candidate) && string.Equals(property.Name, candidate, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return ExtractString(property.Value);
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static string? ExtractString(JsonElement value)
+        {
+            return value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
+                JsonValueKind.True or JsonValueKind.False => value.GetBoolean().ToString(),
+                _ => null
+            };
+        }
+
         private void OnBridgeTradeReceived(string tradeJson)
         {
+            if (string.IsNullOrWhiteSpace(tradeJson))
+            {
+                return;
+            }
+
             EmitLog(BridgeLogLevel.Debug, $"Bridge stream payload received: {tradeJson}");
+
+            BridgeStreamEnvelope? envelope = null;
+            try
+            {
+                using var doc = JsonDocument.Parse(tradeJson);
+                var root = doc.RootElement;
+
+                var action = GetStringValueCaseInsensitive(root, "action");
+                var eventType = GetStringValueCaseInsensitive(root, "event_type");
+                var baseId = GetStringValueCaseInsensitive(root, "base_id", "qt_position_id");
+                var status = GetStringValueCaseInsensitive(root, "status");
+                var tradeId = GetStringValueCaseInsensitive(root, "id", "qt_trade_id");
+                var instrument = GetStringValueCaseInsensitive(root, "instrument", "symbol", "nt_instrument_symbol");
+                var account = GetStringValueCaseInsensitive(root, "account_name", "account", "nt_account_name");
+                var ticketRaw = GetStringValueCaseInsensitive(root, "mt5_ticket", "ticket");
+                ulong.TryParse(ticketRaw, out var ticket);
+
+                envelope = new BridgeStreamEnvelope(
+                    action ?? string.Empty,
+                    eventType ?? string.Empty,
+                    baseId ?? string.Empty,
+                    status ?? string.Empty,
+                    tradeId ?? string.Empty,
+                    instrument ?? string.Empty,
+                    account ?? string.Empty,
+                    ticket,
+                    tradeJson);
+            }
+            catch (JsonException ex)
+            {
+                EmitLog(BridgeLogLevel.Warn, "Failed to parse bridge stream payload", details: ex.Message);
+            }
+            catch (Exception ex)
+            {
+                EmitLog(BridgeLogLevel.Warn, "Unexpected error decoding bridge stream payload", details: ex.Message);
+            }
+
+            if (envelope.HasValue)
+            {
+                HandleStreamEnvelope(envelope.Value);
+            }
+        }
+
+        private void HandleStreamEnvelope(BridgeStreamEnvelope envelope)
+        {
+            var action = envelope.Action;
+            var eventType = envelope.EventType;
+            var baseId = envelope.BaseId;
+
+            if (!string.IsNullOrWhiteSpace(action))
+            {
+                if (action.Equals("HEDGE_CLOSED", StringComparison.OrdinalIgnoreCase) ||
+                    action.Equals("NT_CLOSE_ACK", StringComparison.OrdinalIgnoreCase) ||
+                    action.Equals("CLOSE_HEDGE", StringComparison.OrdinalIgnoreCase))
+                {
+                    EmitLog(BridgeLogLevel.Info, $"Bridge stream reports hedge closed for {baseId}", envelope.TradeId, baseId, envelope.Status);
+                }
+                else if (action.Equals("HEDGE_OPENED", StringComparison.OrdinalIgnoreCase))
+                {
+                    EmitLog(BridgeLogLevel.Info, $"Bridge stream reports hedge opened for {baseId}", envelope.TradeId, baseId, envelope.Status);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(eventType))
+            {
+                if (eventType.Equals("elastic_hedge_update", StringComparison.OrdinalIgnoreCase) ||
+                    eventType.Equals("trailing_stop_update", StringComparison.OrdinalIgnoreCase))
+                {
+                    EmitLog(BridgeLogLevel.Debug, $"Bridge stream event '{eventType}' for {baseId}", envelope.TradeId, baseId, envelope.Status);
+                }
+            }
+
+            RaiseStreamEnvelopeReceived(envelope);
         }
 
         private void OnQuantowerTrade(Trade trade)
@@ -398,6 +544,211 @@ namespace Quantower.MultiStrat
             }
         }
 
+        private void SafeNotifyConnectionChanged(bool online)
+        {
+            try
+            {
+                ConnectionStateChanged?.Invoke(online);
+            }
+            catch
+            {
+                // Suppress notification errors to keep diagnostics from interrupting shutdown paths.
+            }
+        }
+
+        private void HandleStreamingStateChanged(BridgeGrpcClient.StreamingState state, string? details)
+        {
+            var wasHealthy = _streamHealthy;
+            var wasOnline = _isRunning && wasHealthy;
+
+            switch (state)
+            {
+                case BridgeGrpcClient.StreamingState.Connecting:
+                    // No-op; we only log on actual state changes below.
+                    RaiseStreamingStateChanged(state, details);
+                    return;
+                case BridgeGrpcClient.StreamingState.Connected:
+                    _streamHealthy = true;
+                    if (!wasHealthy)
+                    {
+                        EmitLog(BridgeLogLevel.Info, "Trading stream connected");
+                    }
+                    RaiseStreamingStateChanged(state, details);
+                    break;
+                case BridgeGrpcClient.StreamingState.Disconnected:
+                    _streamHealthy = false;
+                    if (wasHealthy)
+                    {
+                        var message = string.IsNullOrWhiteSpace(details)
+                            ? "Trading stream disconnected; retrying"
+                            : $"Trading stream disconnected; retrying ({details})";
+                        EmitLog(BridgeLogLevel.Warn, message);
+                    }
+                    RaiseStreamingStateChanged(state, details);
+                    break;
+            }
+
+            var isOnline = _isRunning && _streamHealthy;
+            if (isOnline != wasOnline)
+            {
+                SafeNotifyConnectionChanged(isOnline);
+            }
+        }
+
+        private void RaiseStreamingStateChanged(BridgeGrpcClient.StreamingState state, string? details)
+        {
+            try
+            {
+                StreamingStateChanged?.Invoke(state, details);
+            }
+            catch
+            {
+                // Swallow to avoid destabilising stream loop when observers throw.
+            }
+        }
+
+        private void RaiseStreamEnvelopeReceived(BridgeStreamEnvelope envelope)
+        {
+            try
+            {
+                StreamEnvelopeReceived?.Invoke(envelope);
+            }
+            catch (Exception ex)
+            {
+                EmitLog(BridgeLogLevel.Warn, "Stream envelope listener threw", envelope.TradeId, envelope.BaseId, ex.Message);
+            }
+        }
+
+        private void StartHealthMonitor()
+        {
+            StopHealthMonitor();
+
+            if (!_isRunning)
+            {
+                return;
+            }
+
+            lock (_healthSync)
+            {
+                if (_healthMonitorCts != null)
+                {
+                    return;
+                }
+
+                var cts = new CancellationTokenSource();
+                _healthMonitorCts = cts;
+                _healthMonitorTask = Task.Run(() => MonitorHealthAsync(cts.Token));
+            }
+        }
+
+        private void StopHealthMonitor()
+        {
+            CancellationTokenSource? cts;
+            Task? task;
+
+            lock (_healthSync)
+            {
+                cts = _healthMonitorCts;
+                task = _healthMonitorTask;
+                _healthMonitorCts = null;
+                _healthMonitorTask = null;
+            }
+
+            if (cts != null)
+            {
+                try
+                {
+                    cts.Cancel();
+                }
+                catch
+                {
+                    // ignore cancellation failures
+                }
+            }
+
+            cts?.Dispose();
+        }
+
+        private async Task MonitorHealthAsync(CancellationToken token)
+        {
+            var consecutiveFailures = 0;
+            var reportedUnhealthy = false;
+
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(HealthProbeInterval, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                if (!_isRunning || token.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                OperationResult result;
+                try
+                {
+                    result = await BridgeGrpcClient.HealthCheckAsync("addon").ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    result = OperationResult.Failure(ex.Message);
+                }
+
+                if (token.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                if (!result.Success)
+                {
+                    consecutiveFailures++;
+                    var reason = !string.IsNullOrWhiteSpace(result.ErrorMessage)
+                        ? result.ErrorMessage
+                        : BridgeGrpcClient.LastError;
+
+                    EmitLog(BridgeLogLevel.Warn, $"Health check failed ({consecutiveFailures}/{MaxHealthCheckFailures})", details: reason);
+                    reportedUnhealthy = true;
+
+                    if (consecutiveFailures >= MaxHealthCheckFailures)
+                    {
+                        await HandleConnectionLostAsync(reason).ConfigureAwait(false);
+                        break;
+                    }
+                }
+                else
+                {
+                    if (reportedUnhealthy)
+                    {
+                        EmitLog(BridgeLogLevel.Info, "Bridge health restored");
+                        reportedUnhealthy = false;
+                    }
+
+                    consecutiveFailures = 0;
+                }
+            }
+        }
+
+        private async Task HandleConnectionLostAsync(string reason)
+        {
+            EmitLog(BridgeLogLevel.Error, "Bridge connection lost; stopping", details: reason);
+
+            await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                StopCore();
+            }
+            finally
+            {
+                _lifecycleLock.Release();
+            }
+        }
+
         private void EmitLog(BridgeLogLevel level, string message, string? tradeId = null, string? baseId = null, string? details = null)
         {
             var entry = new BridgeLogEntry(DateTime.UtcNow, level, message, tradeId, baseId, details);
@@ -439,5 +790,16 @@ namespace Quantower.MultiStrat
         }
 
         public sealed record BridgeLogEntry(DateTime TimestampUtc, BridgeLogLevel Level, string Message, string? TradeId, string? BaseId, string? Details);
+
+        public readonly record struct BridgeStreamEnvelope(
+            string Action,
+            string EventType,
+            string BaseId,
+            string Status,
+            string TradeId,
+            string Instrument,
+            string Account,
+            ulong Mt5Ticket,
+            string RawJson);
     }
 }

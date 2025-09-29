@@ -90,14 +90,24 @@
       letter-spacing:0.05em;
       transition:background .2s ease, border-color .2s ease, color .2s ease;
     }
-    .status-pill[data-state="connected"]{
+    .status-pill[data-state="connected"],
+    body[data-msb-connected="1"] .status-pill{
       background:#10352a;
       border-color:#1f8d58;
       color:#7df6ba;
     }
-    .status-pill[data-state="connecting"]{
+    .status-pill[data-state="connecting"],
+    body[data-msb-stream-state="connecting"] .status-pill{
       background:#2b2a17;
       border-color:#8f7f32;
+      color:#f6e97d;
+    }
+    body[data-msb-connected="1"] #statusNote,
+    body[data-msb-connected="1"] #statusDetail{
+      color:#7df6ba;
+    }
+    body[data-msb-stream-state="connecting"] #statusNote,
+    body[data-msb-stream-state="connecting"] #statusDetail{
       color:#f6e97d;
     }
     .content{
@@ -538,15 +548,6 @@
           <button id="btnFlattenAll" class="danger">Flatten All</button>
         </section>
 
-        <section class="section-card span-2 logs-card">
-          <div class="section-header">
-            <div>
-              <h2>Unified Logs</h2>
-              <p class="section-note">Bridge activity, trailing updates, and error diagnostics.</p>
-            </div>
-          </div>
-          <div id="logs"></div>
-        </section>
       </div>
     </div>
   </div>
@@ -554,6 +555,7 @@
     const logBufferLimit = 5000;
     let priming = false;
     let trailingUpdateTimer = null;
+    let lastStatusSignature = '';
 
     function base64EncodeUtf8(value) {
       if (value == null) {
@@ -603,15 +605,24 @@
     const statusPill = document.getElementById('statusPill');
     const statusDetail = document.getElementById('statusDetail');
 
-    function setStatusBadge(stateText, connected){
+    function setStatusBadge(stateText, connected, reconnecting){
       if (!statusNote) return;
-      statusNote.textContent = stateText;
-      statusDetail && (statusDetail.textContent = stateText);
+      const pillLabel = connected
+        ? 'Connected'
+        : (reconnecting ? 'Reconnecting' : 'Disconnected');
+      statusNote.textContent = pillLabel;
+      if (statusDetail){
+        statusDetail.textContent = stateText;
+      }
       if (statusPill){
         const lower = (stateText || '').toLowerCase();
+        const looksConnecting = reconnecting
+          || lower.includes('reconnecting')
+          || lower.includes('connecting')
+          || lower.includes('awaiting');
         const state = connected
           ? 'connected'
-          : (lower.includes('connecting') ? 'connecting' : 'disconnected');
+          : (looksConnecting ? 'connecting' : 'disconnected');
         statusPill.setAttribute('data-state', state);
       }
     }
@@ -698,7 +709,7 @@
       if (!sel) return;
       sel.addEventListener('change', () => {
         const id = sel.value;
-        if (id) send('select_account', { id });
+        send('select_account', { id: id || null });
       });
     })();
 
@@ -727,29 +738,71 @@
     window.MSB = {
       setStatus(s) {
         if (!s) return;
-        const connected = !!s.connected;
-        const label = connected ? `Connected to ${s.address}` : 'Disconnected';
-        setStatusBadge(label, connected);
+        const streamState = typeof s.stream_state === 'string' ? s.stream_state.toLowerCase() : '';
+        const connected = !!s.connected || streamState === 'connected';
+        const label = s.status_text || (connected
+          ? (s.address ? `Connected to ${s.address}` : 'Connected')
+          : 'Disconnected');
+        const reconnecting = !!s.reconnecting || streamState === 'connecting';
+        setStatusBadge(label, connected, reconnecting);
+        document.body.dataset.msbConnected = connected ? '1' : '';
+        document.body.dataset.msbStreamState = streamState;
+        document.body.dataset.msbBridgeRunning = s.bridge_running ? '1' : '';
+        document.title = `Multi-Strat Bridge | ${label}`;
+        const signature = `${connected}|${label}|${reconnecting}|${streamState}|${!!s.busy}`;
+        if (signature !== lastStatusSignature) {
+          lastStatusSignature = signature;
+          send('ui_status_debug', {
+            connected,
+            label,
+            reconnecting,
+            stream_state: streamState,
+            busy: !!s.busy
+          });
+        }
         if (Array.isArray(s.accounts)) {
           this.setAccounts(s.accounts);
+        }
+        const connectBtn = document.getElementById('btnConnect');
+        if (connectBtn && typeof s.busy === 'boolean') {
+          connectBtn.disabled = !!s.busy;
+        }
+        document.body.classList.toggle('msb-busy', !!s.busy);
+        const addressField = document.getElementById('addr');
+        if (addressField && typeof s.address === 'string' && s.address.length > 0) {
+          if (addressField.value !== s.address) {
+            addressField.value = s.address;
+          }
         }
       },
       setAccounts(accs){
         const sel = document.getElementById('selAccount');
         if (!sel) return;
+        const previous = sel.value;
         sel.innerHTML = '';
         const def = document.createElement('option');
         def.value = '';
         def.textContent = 'Select account…';
         sel.appendChild(def);
+        if (!Array.isArray(accs)) {
+          accs = [];
+        }
+        let selected = false;
         for (const a of accs){
           const opt = document.createElement('option');
           opt.value = a.id;
           opt.textContent = a.name || a.id;
-          if (a.enabled) opt.selected = true;
+          if (!selected && (a.enabled || (previous && previous === opt.value))) {
+            opt.selected = true;
+            selected = true;
+          }
           sel.appendChild(opt);
         }
-        sel.disabled = false;
+        if (!selected && sel.options.length > 0) {
+          sel.selectedIndex = 0;
+        }
+        const connected = document.body.dataset.msbConnected === '1';
+        sel.disabled = !connected || accs.length === 0;
       },
       appendLog(line) {
         const el = document.getElementById('logs');
