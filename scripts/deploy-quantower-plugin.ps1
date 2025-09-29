@@ -79,6 +79,37 @@ function Detect-QuantowerSdk {
     return $null
 }
 
+function Remove-LegacyPluginFolders {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [string]$Context = "Quantower"
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path $Root)) {
+        return
+    }
+
+    $pattern = 'MultiStratBridge*'
+    $legacyFolders = Get-ChildItem -Path $Root -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like $pattern }
+
+    if (-not $legacyFolders) {
+        Write-Host "No legacy MultiStratBridge folders found under ${Context}." -ForegroundColor DarkCyan
+        return
+    }
+
+    foreach ($folder in $legacyFolders) {
+        try {
+            Write-Host "Removing legacy MultiStratBridge folder: $($folder.FullName)" -ForegroundColor DarkYellow
+            Remove-Item -LiteralPath $folder.FullName -Recurse -Force -ErrorAction Stop
+            Write-Host "Removed legacy folder '$($folder.Name)' from ${Context}." -ForegroundColor DarkCyan
+        }
+        catch {
+            Write-Warning "Failed to remove legacy folder '$($folder.FullName)' in ${Context}: $($_.Exception.Message)"
+        }
+    }
+}
+
 
 
 function Clear-PublishDirectory {
@@ -153,6 +184,9 @@ if (!(Test-Path $publishDir)) {
 
 $pluginsRoot = Resolve-DefaultQuantowerPluginsPath -OverridePath $QuantowerPluginsPath
 $destination = Join-Path $pluginsRoot $PluginFolderName
+
+Write-Host "Scanning for legacy MultiStratBridge deployments..." -ForegroundColor DarkCyan
+Remove-LegacyPluginFolders -Root $pluginsRoot -Context "Quantower user plug-ins"
 
 Write-Host "Publish output: $publishDir" -ForegroundColor DarkCyan
 (Get-ChildItem -Path $publishDir -File | Select-Object Name,Length,LastWriteTime | Format-Table | Out-String).Trim() | Write-Host
@@ -230,6 +264,8 @@ if ($qtSdkBin) {
         if (!(Test-Path $binPlugins)) {
             New-Item -ItemType Directory -Path $binPlugins -Force | Out-Null
         }
+        Write-Host "Scanning SDK plug-in directory for legacy MultiStratBridge folders..." -ForegroundColor DarkCyan
+        Remove-LegacyPluginFolders -Root $binPlugins -Context "Quantower SDK plug-ins"
         $binDest = Join-Path $binPlugins $PluginFolderName
         if (Test-Path $binDest) {
             Write-Host "Cleaning SDK mirror folder: $binDest" -ForegroundColor DarkYellow
