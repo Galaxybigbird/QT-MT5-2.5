@@ -46,7 +46,7 @@ namespace Quantower.MultiStrat.Infrastructure
                     ["origin_platform"] = "quantower"
                 };
 
-                var qtTradeId = SafeString(trade.Id) ?? SafeString(trade.UniqueId);
+                var qtTradeId = SafeString(trade.Id);
                 var positionId = SafeString(trade.PositionId);
                 var orderId = SafeString(trade.OrderId);
 
@@ -114,7 +114,7 @@ namespace Quantower.MultiStrat.Infrastructure
                     ["origin_platform"] = "quantower"
                 };
 
-                var positionId = SafeString(position.Id) ?? SafeString(position.UniqueId);
+                var positionId = SafeString(position.Id);
                 positionTradeId = positionId ?? Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
 
                 payload["id"] = positionTradeId;
@@ -167,7 +167,7 @@ namespace Quantower.MultiStrat.Infrastructure
                     ["closure_reason"] = "qt_position_removed"
                 };
 
-                var resolvedPositionId = SafeString(position.Id) ?? SafeString(position.UniqueId);
+                var resolvedPositionId = SafeString(position.Id);
                 var closureEnvelopeId = resolvedPositionId ?? Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
 
                 payload["id"] = closureEnvelopeId;

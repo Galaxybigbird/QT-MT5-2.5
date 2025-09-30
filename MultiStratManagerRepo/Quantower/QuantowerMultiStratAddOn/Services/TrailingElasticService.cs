@@ -48,6 +48,7 @@ namespace Quantower.MultiStrat.Services
         private readonly ConcurrentDictionary<string, double> _tickSizeCache = new(StringComparer.OrdinalIgnoreCase);
 
         public Action<string>? LogWarning { get; set; }
+        public Action<string>? LogDebug { get; set; }
 
         public bool EnableElasticHedging { get; set; } = true;
         public bool EnableTrailing { get; set; } = true;
@@ -56,8 +57,8 @@ namespace Quantower.MultiStrat.Services
         public double ProfitUpdateThreshold { get; set; } = 100.0;
         public ProfitUnitType ElasticIncrementUnits { get; set; } = ProfitUnitType.Dollars;
         public double ElasticIncrementValue { get; set; } = 10.0;
-        public ProfitUnitType TrailingActivationUnits { get; set; } = ProfitUnitType.Percent;
-        public double TrailingActivationValue { get; set; } = 1.0;
+        // REMOVED: TrailingActivationUnits and TrailingActivationValue
+        // Trailing now uses the SAME trigger as elastic (ElasticTriggerUnits and ProfitUpdateThreshold)
         public ProfitUnitType TrailingStopUnits { get; set; } = ProfitUnitType.Dollars;
         public double TrailingStopValue { get; set; } = 50.0;
         public double DemaAtrMultiplier { get; set; } = 1.5;
@@ -193,14 +194,22 @@ namespace Quantower.MultiStrat.Services
 
         public Dictionary<string, object?>? TryBuildElasticUpdate(string baseId, Position position)
         {
-            if (!EnableElasticHedging || position == null)
+            if (!EnableElasticHedging)
             {
+                LogDebug?.Invoke($"[Elastic] {baseId}: elastic hedging disabled, skipping");
+                return null;
+            }
+
+            if (position == null)
+            {
+                LogDebug?.Invoke($"[Elastic] {baseId}: position is null, skipping");
                 return null;
             }
 
             var tracker = GetTracker(baseId, position);
             if (tracker == null)
             {
+                LogDebug?.Invoke($"[Elastic] {baseId}: tracker is null, skipping");
                 return null;
             }
 
@@ -218,25 +227,36 @@ namespace Quantower.MultiStrat.Services
                 var profitDollars = PnLUtils.GetMoney(position.GrossPnL);
                 var triggerUnits = ConvertUnits(ElasticTriggerUnits, position, tracker, currentPrice, profitDollars);
 
+                LogDebug?.Invoke($"[Elastic] {baseId}: triggerUnits={triggerUnits:F2}, threshold={ProfitUpdateThreshold:F2}, profit=${profitDollars:F2}, triggerType={ElasticTriggerUnits}, triggered={tracker.Triggered}");
+
                 if (!tracker.Triggered && triggerUnits >= ProfitUpdateThreshold)
                 {
                     tracker.Triggered = true;
                     tracker.TriggerUnitsAtActivation = ConvertUnits(ElasticIncrementUnits, position, tracker, currentPrice, profitDollars);
                     tracker.LastReportedLevel = 0;
+                    LogDebug?.Invoke($"[Elastic] {baseId}: ✅ ACTIVATED! triggerUnitsAtActivation={tracker.TriggerUnitsAtActivation:F2}");
                 }
 
                 if (!tracker.Triggered)
                 {
+                    LogDebug?.Invoke($"[Elastic] {baseId}: activation threshold not met ({triggerUnits:F2} < {ProfitUpdateThreshold:F2}), skipping");
                     return null;
                 }
 
                 var incrementUnits = ConvertUnits(ElasticIncrementUnits, position, tracker, currentPrice, profitDollars);
                 var deltaUnits = Math.Max(0.0, incrementUnits - tracker.TriggerUnitsAtActivation);
                 var increments = 1 + (int)Math.Floor(deltaUnits / Math.Max(ElasticIncrementValue, 1e-6));
+
+                LogDebug?.Invoke($"[Elastic] {baseId}: incrementUnits={incrementUnits:F2}, deltaUnits={deltaUnits:F2}, increments={increments}, lastReportedLevel={tracker.LastReportedLevel}");
+
                 if (increments <= tracker.LastReportedLevel)
                 {
+                    LogDebug?.Invoke($"[Elastic] {baseId}: no new increment level ({increments} <= {tracker.LastReportedLevel}), skipping");
                     return null;
                 }
+
+                LogDebug?.Invoke($"[Elastic] {baseId}: ✅ Building elastic update - newLevel={increments}, profit=${profitDollars:F2}");
+
 
                 tracker.LastReportedLevel = increments;
                 tracker.LastReportedProfit = profitDollars;
@@ -293,14 +313,22 @@ namespace Quantower.MultiStrat.Services
 
         public Dictionary<string, object?>? TryBuildTrailingUpdate(string baseId, Position position)
         {
-            if (!EnableTrailing || position == null)
+            if (!EnableTrailing)
             {
+                LogDebug?.Invoke($"[Trailing] {baseId}: EnableTrailing=false, skipping");
+                return null;
+            }
+
+            if (position == null)
+            {
+                LogDebug?.Invoke($"[Trailing] {baseId}: position is null, skipping");
                 return null;
             }
 
             var tracker = GetTracker(baseId, position);
             if (tracker == null)
             {
+                LogDebug?.Invoke($"[Trailing] {baseId}: tracker not found, skipping");
                 return null;
             }
 
@@ -313,23 +341,40 @@ namespace Quantower.MultiStrat.Services
                     currentPrice = tracker.LastSourcePrice <= 0 ? tracker.EntryPrice : tracker.LastSourcePrice;
                 }
 
-                var activationUnits = ConvertUnits(TrailingActivationUnits, position, tracker, currentPrice, PnLUtils.GetMoney(position.GrossPnL));
-                if (activationUnits < TrailingActivationValue)
+                var profitDollars = PnLUtils.GetMoney(position.GrossPnL);
+                // Use the SAME trigger as elastic hedging (ElasticTriggerUnits and ProfitUpdateThreshold)
+                var activationUnits = ConvertUnits(ElasticTriggerUnits, position, tracker, currentPrice, profitDollars);
+
+                LogDebug?.Invoke($"[Trailing] {baseId}: activationUnits={activationUnits:F2}, threshold={ProfitUpdateThreshold:F2}, profit=${profitDollars:F2}, triggerType={ElasticTriggerUnits}");
+
+                if (activationUnits < ProfitUpdateThreshold)
                 {
+                    LogDebug?.Invoke($"[Trailing] {baseId}: activation threshold not met ({activationUnits:F2} < {ProfitUpdateThreshold:F2}), skipping");
                     return null;
                 }
 
                 var offset = ComputeTrailingOffset(position, tracker, currentPrice);
+
+                LogDebug?.Invoke($"[Trailing] {baseId}: computed offset={offset:F5}, currentPrice={currentPrice:F5}, useDemaAtr={UseDemaAtrTrailing}");
+
                 if (offset <= 0)
                 {
+                    LogDebug?.Invoke($"[Trailing] {baseId}: offset <= 0, skipping");
                     return null;
                 }
 
                 var newStop = tracker.Side == Side.Sell ? currentPrice + offset : currentPrice - offset;
-                if (!IsImprovedStop(tracker, newStop))
+                var improved = IsImprovedStop(tracker, newStop);
+
+                LogDebug?.Invoke($"[Trailing] {baseId}: newStop={newStop:F5}, lastStop={tracker.LastTrailingStop?.ToString("F5") ?? "null"}, improved={improved}");
+
+                if (!improved)
                 {
+                    LogDebug?.Invoke($"[Trailing] {baseId}: stop not improved, skipping");
                     return null;
                 }
+
+                LogDebug?.Invoke($"[Trailing] {baseId}: ✅ Building trailing update - newStop={newStop:F5}");
 
                 tracker.LastTrailingStop = newStop;
                 tracker.LastSourcePrice = currentPrice;

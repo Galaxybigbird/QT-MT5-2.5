@@ -331,20 +331,46 @@ namespace Quantower.Bridge.Client
                 }
             }
 
+            // CRITICAL FIX: Offload blocking wait to background thread to prevent UI freeze
+            // When bridge is killed, the stream task might be stuck waiting on a dead connection
+            // Blocking the UI thread here causes Quantower to freeze completely
             if (toAwait != null)
             {
-                try
+                // Fire-and-forget cleanup on background thread with reduced timeout
+                _ = Task.Run(() =>
                 {
-                    toAwait.Wait(2000);
-                }
-                catch (Exception ex)
-                {
-                    LogFireAndForget("WARN", _component, $"Failed to stop trading stream task: {ex.Message}");
-                }
+                    try
+                    {
+                        // Reduced timeout from 2000ms to 500ms for faster recovery
+                        if (!toAwait.Wait(500))
+                        {
+                            LogFireAndForget("WARN", _component, "Trading stream task did not complete within timeout - abandoning wait");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogFireAndForget("WARN", _component, $"Failed to stop trading stream task: {ex.Message}");
+                    }
+                    finally
+                    {
+                        // Dispose cancellation token source
+                        if (toCancel != null)
+                        {
+                            try
+                            {
+                                toCancel.Dispose();
+                            }
+                            catch (Exception ex)
+                            {
+                                LogFireAndForget("DEBUG", _component, $"Error disposing cancellation source: {ex.Message}");
+                            }
+                        }
+                    }
+                });
             }
-
-            if (toCancel != null)
+            else if (toCancel != null)
             {
+                // No task to wait for, just dispose the cancellation token
                 try
                 {
                     toCancel.Dispose();

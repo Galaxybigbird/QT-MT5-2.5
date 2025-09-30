@@ -16,6 +16,7 @@ namespace Quantower.MultiStrat
         private static readonly TimeSpan TradeSubmitTimeout = TimeSpan.FromSeconds(10);
 
         private readonly ConcurrentDictionary<string, byte> _pendingTrades = new();
+        private readonly ConcurrentDictionary<string, DateTime> _recentClosures = new(StringComparer.OrdinalIgnoreCase);
         private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
         private readonly object _healthSync = new();
 
@@ -91,17 +92,56 @@ namespace Quantower.MultiStrat
         [Obsolete("Use StopAsync() instead.")]
         public void Stop()
         {
-            StopAsync().GetAwaiter().GetResult();
+            // CRITICAL FIX: Fire-and-forget shutdown to prevent UI freeze
+            // When bridge is killed, blocking here causes Quantower to freeze completely
+            // This is called during Quantower shutdown, often on the UI thread
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // Use a timeout to prevent indefinite blocking
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                    await StopAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    EmitLog(BridgeLogLevel.Warn, $"Stop() encountered error: {ex.Message}");
+                }
+            });
         }
 
         public void Dispose()
         {
             if (_isRunning)
             {
-                StopCore();
+                // CRITICAL FIX: Fire-and-forget shutdown to prevent UI freeze
+                // Dispose() is often called on the UI thread during Quantower shutdown
+                // Blocking here causes Quantower to freeze when bridge is killed
+                _ = Task.Run(() =>
+                {
+                    try
+                    {
+                        StopCore();
+                    }
+                    catch (Exception ex)
+                    {
+                        EmitLog(BridgeLogLevel.Warn, $"Dispose() encountered error: {ex.Message}");
+                    }
+                });
             }
 
-            _lifecycleLock.Dispose();
+            // Dispose the lifecycle lock on a background thread to prevent blocking
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    _lifecycleLock.Dispose();
+                }
+                catch
+                {
+                    // Ignore disposal errors
+                }
+            });
         }
 
         private async Task<bool> StartCoreAsync()
@@ -385,6 +425,24 @@ namespace Quantower.MultiStrat
 
         private void OnQuantowerTrade(Trade trade)
         {
+            var positionId = trade?.PositionId;
+
+            // CRITICAL FIX (Issue #1 & #4): Check if this position was recently closed
+            // When a position is closed in Quantower, it generates a closing Trade event
+            // We don't want to send this as a new trade to MT5, as it would reopen the position
+            if (!string.IsNullOrWhiteSpace(positionId) &&
+                _recentClosures.TryGetValue(positionId, out var closureTime))
+            {
+                if ((DateTime.UtcNow - closureTime).TotalSeconds < 2)
+                {
+                    EmitLog(BridgeLogLevel.Debug, $"Skipping trade {trade?.Id} - position {positionId} was recently closed (cooldown active)");
+                    _recentClosures.TryRemove(positionId, out _);
+                    return;
+                }
+                // Cooldown expired, remove from dictionary
+                _recentClosures.TryRemove(positionId, out _);
+            }
+
             if (!QuantowerTradeMapper.TryBuildTradeEnvelope(trade, out var payload, out var tradeId))
             {
                 EmitLog(BridgeLogLevel.Warn, "Unable to translate Quantower trade event into bridge payload", trade?.Id, trade?.PositionId);
@@ -421,6 +479,15 @@ namespace Quantower.MultiStrat
 
         private void OnQuantowerPositionClosed(Position position)
         {
+            // CRITICAL FIX (Issue #1 & #4): Mark this position as recently closed
+            // This prevents the closing trade from being sent as a new trade to MT5
+            var positionId = position?.Id;
+            if (!string.IsNullOrWhiteSpace(positionId))
+            {
+                _recentClosures[positionId] = DateTime.UtcNow;
+                EmitLog(BridgeLogLevel.Debug, $"Marked position {positionId} as recently closed (cooldown active for 2 seconds)");
+            }
+
             if (!QuantowerTradeMapper.TryBuildPositionClosure(position, out var payload, out var closureId))
             {
                 EmitLog(BridgeLogLevel.Warn, "Unable to map Quantower position closure to bridge notification", closureId, closureId);
@@ -436,7 +503,7 @@ namespace Quantower.MultiStrat
             }
             catch (Exception ex)
             {
-                EmitLog(BridgeLogLevel.Warn, "PositionRemoved listener threw", position.Id, position.UniqueId, ex.Message);
+                EmitLog(BridgeLogLevel.Warn, "PositionRemoved listener threw", position.Id, ex.Message);
             }
         }
 
@@ -454,7 +521,7 @@ namespace Quantower.MultiStrat
             }
             catch (Exception ex)
             {
-                EmitLog(BridgeLogLevel.Warn, "PositionAdded listener threw", position.Id, position.UniqueId, ex.Message);
+                EmitLog(BridgeLogLevel.Warn, "PositionAdded listener threw", position.Id, ex.Message);
             }
         }
 
@@ -499,7 +566,7 @@ namespace Quantower.MultiStrat
             }
             catch (Exception ex)
             {
-                EmitLog(BridgeLogLevel.Warn, "PositionAdded listener threw", position.Id, position.UniqueId, ex.Message);
+                EmitLog(BridgeLogLevel.Warn, "PositionAdded listener threw", position.Id, ex.Message);
             }
         }
 
@@ -511,7 +578,7 @@ namespace Quantower.MultiStrat
             }
             catch (Exception ex)
             {
-                EmitLog(BridgeLogLevel.Warn, "PositionRemoved listener threw", position.Id, position.UniqueId, ex.Message);
+                EmitLog(BridgeLogLevel.Warn, "PositionRemoved listener threw", position.Id, ex.Message);
             }
         }
 

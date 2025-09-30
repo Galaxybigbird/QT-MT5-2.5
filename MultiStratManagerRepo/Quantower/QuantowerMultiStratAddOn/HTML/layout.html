@@ -45,25 +45,6 @@
       box-shadow:0 6px 18px rgba(0,0,0,0.45);
     }
     .panel-header-inner{display:flex;align-items:center;justify-content:space-between;gap:12px;}
-    .window-controls{display:flex;gap:6px;}
-    .window-controls .win-btn{
-      width:28px;
-      height:24px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      background:var(--qt-control);
-      border:1px solid var(--qt-border);
-      border-radius:6px;
-      color:var(--qt-text);
-      cursor:pointer;
-    }
-      .window-controls .win-btn:hover{background:var(--qt-control-hover);}
-      .window-controls .win-btn.danger:hover{
-        background:#3a2020;
-        border-color:#5a2a2a;
-        color:#ffb3b3;
-      }
     .panel-title{
       display:flex;
       flex-direction:column;
@@ -390,11 +371,6 @@
             <span id="statusNote">Disconnected</span>
           </span>
         </div>
-        <div class="window-controls">
-          <button id="btnMin" class="win-btn" title="Minimize">–</button>
-          <button id="btnMax" class="win-btn" title="Maximize">▢</button>
-          <button id="btnClose" class="win-btn danger" title="Close">×</button>
-        </div>
       </div>
     </header>
     <div class="content">
@@ -712,17 +688,6 @@
         send('select_account', { id: id || null });
       });
     })();
-
-    // Window control buttons
-    (function(){
-      const btnMin = document.getElementById('btnMin');
-      const btnMax = document.getElementById('btnMax');
-      const btnClose = document.getElementById('btnClose');
-      if (btnMin) btnMin.addEventListener('click', () => send('window', { action: 'minimize' }));
-      if (btnMax) btnMax.addEventListener('click', () => send('window', { action: 'maximize' }));
-      if (btnClose) btnClose.addEventListener('click', () => send('window', { action: 'close' }));
-    })();
-
 
     document.getElementById('btnFlattenAll').addEventListener('click', () => {
       send('flatten_all', { disableAfter: document.getElementById('chkDisableAfter').checked });

@@ -34,6 +34,10 @@ namespace Quantower.MultiStrat
         private readonly TimeSpan _trackingInterval = TimeSpan.FromSeconds(2);
         private readonly object _riskLock = new();
         private readonly object _settingsSaveLock = new();
+        private readonly ConcurrentDictionary<string, bool> _processingPositions = new();
+        private readonly ConcurrentDictionary<string, DateTime> _closedPositionCooldowns = new();
+        private readonly ConcurrentDictionary<string, string> _baseIdToPositionId = new(StringComparer.OrdinalIgnoreCase);
+        private const int COOLDOWN_SECONDS = 5;
         private int _disposed; // 0 = active, 1 = disposed
         private Timer? _riskTimer;
         private bool _coreEventsAttached;
@@ -44,7 +48,8 @@ namespace Quantower.MultiStrat
         {
             _trailingService = new Services.TrailingElasticService
             {
-                LogWarning = message => EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, message)
+                LogWarning = message => EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, message),
+                LogDebug = message => EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, message)
             };
             _bridgeService = new QuantowerBridgeService();
             _bridgeService.ConnectionStateChanged += OnBridgeConnectionStateChanged;
@@ -232,8 +237,7 @@ namespace Quantower.MultiStrat
                 _trailingService.ElasticIncrementValue,
                 _trailingService.EnableTrailing,
                 _trailingService.UseDemaAtrTrailing,
-                _trailingService.TrailingActivationUnits,
-                _trailingService.TrailingActivationValue,
+                // REMOVED: TrailingActivationUnits and TrailingActivationValue
                 _trailingService.TrailingStopUnits,
                 _trailingService.TrailingStopValue,
                 _trailingService.DemaAtrMultiplier,
@@ -252,8 +256,8 @@ namespace Quantower.MultiStrat
             _trailingService.ElasticIncrementValue = update.ElasticIncrementValue;
             _trailingService.EnableTrailing = update.EnableTrailing;
             _trailingService.UseDemaAtrTrailing = update.EnableTrailing && update.UseDemaAtrTrailing;
-            _trailingService.TrailingActivationUnits = update.TrailingActivationUnits;
-            _trailingService.TrailingActivationValue = update.TrailingActivationValue;
+            // REMOVED: TrailingActivationUnits and TrailingActivationValue
+            // Trailing now uses the SAME trigger as elastic
             _trailingService.TrailingStopUnits = update.TrailingStopUnits;
             _trailingService.TrailingStopValue = update.TrailingStopValue;
             _trailingService.DemaAtrMultiplier = update.DemaAtrMultiplier;
@@ -762,15 +766,8 @@ namespace Quantower.MultiStrat
                         _trailingService.UseDemaAtrTrailing = enableDema.GetBoolean();
                     }
 
-                    if (json.TryGetProperty("trailing_activation_units", out var activationUnits) && activationUnits.ValueKind == JsonValueKind.String && Enum.TryParse(activationUnits.GetString(), true, out Services.TrailingElasticService.ProfitUnitType activationType))
-                    {
-                        _trailingService.TrailingActivationUnits = activationType;
-                    }
-
-                    if (json.TryGetProperty("trailing_activation_value", out var activationValue) && activationValue.TryGetDouble(out var actVal))
-                    {
-                        _trailingService.TrailingActivationValue = actVal;
-                    }
+                    // REMOVED: trailing_activation_units and trailing_activation_value
+                    // Trailing now uses the SAME trigger as elastic
 
                     if (json.TryGetProperty("trailing_stop_units", out var stopUnits) && stopUnits.ValueKind == JsonValueKind.String && Enum.TryParse(stopUnits.GetString(), true, out Services.TrailingElasticService.ProfitUnitType stopType))
                     {
@@ -904,8 +901,8 @@ namespace Quantower.MultiStrat
                 ["elastic_increment_value"] = _trailingService.ElasticIncrementValue,
                 ["enable_trailing"] = _trailingService.EnableTrailing,
                 ["enable_dema_atr_trailing"] = _trailingService.UseDemaAtrTrailing,
-                ["trailing_activation_units"] = _trailingService.TrailingActivationUnits.ToString(),
-                ["trailing_activation_value"] = _trailingService.TrailingActivationValue,
+                // REMOVED: trailing_activation_units and trailing_activation_value
+                // Trailing now uses the SAME trigger as elastic
                 ["trailing_stop_units"] = _trailingService.TrailingStopUnits.ToString(),
                 ["trailing_stop_value"] = _trailingService.TrailingStopValue,
                 ["dema_atr_multiplier"] = _trailingService.DemaAtrMultiplier,
@@ -935,7 +932,6 @@ namespace Quantower.MultiStrat
         {
             public string BaseId { get; init; } = string.Empty;
             public string? PositionId { get; set; }
-            public string? UniqueId { get; set; }
             public string? AccountId { get; set; }
             public string? SymbolName { get; set; }
             public Timer Timer { get; set; } = null!;
@@ -988,8 +984,8 @@ namespace Quantower.MultiStrat
             double ElasticIncrementValue,
             bool EnableTrailing,
             bool UseDemaAtrTrailing,
-            Services.TrailingElasticService.ProfitUnitType TrailingActivationUnits,
-            double TrailingActivationValue,
+            // REMOVED: TrailingActivationUnits and TrailingActivationValue
+            // Trailing now uses the SAME trigger as elastic
             Services.TrailingElasticService.ProfitUnitType TrailingStopUnits,
             double TrailingStopValue,
             double DemaAtrMultiplier,
@@ -1004,8 +1000,8 @@ namespace Quantower.MultiStrat
             double ElasticIncrementValue,
             bool EnableTrailing,
             bool UseDemaAtrTrailing,
-            Services.TrailingElasticService.ProfitUnitType TrailingActivationUnits,
-            double TrailingActivationValue,
+            // REMOVED: TrailingActivationUnits and TrailingActivationValue
+            // Trailing now uses the SAME trigger as elastic
             Services.TrailingElasticService.ProfitUnitType TrailingStopUnits,
             double TrailingStopValue,
             double DemaAtrMultiplier,
@@ -1065,6 +1061,107 @@ namespace Quantower.MultiStrat
                     _trailingService.RemoveTracker(baseId);
                     return;
                 }
+
+                // Handle MT5 closure notifications - close corresponding Quantower position
+                if (action.Equals("MT5_CLOSE_NOTIFICATION", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Parse the raw JSON to determine if this is a full close or partial close
+                    bool isFullClose = false;
+                    string tradeResult = string.Empty;
+                    double totalQuantity = -1;
+
+                    if (!string.IsNullOrWhiteSpace(envelope.RawJson))
+                    {
+                        try
+                        {
+                            var json = System.Text.Json.JsonDocument.Parse(envelope.RawJson);
+                            if (json.RootElement.TryGetProperty("nt_trade_result", out var tradeResultElement))
+                            {
+                                tradeResult = tradeResultElement.GetString() ?? string.Empty;
+                            }
+                            if (json.RootElement.TryGetProperty("total_quantity", out var totalQtyElement))
+                            {
+                                totalQuantity = totalQtyElement.GetDouble();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to parse MT5_CLOSE_NOTIFICATION JSON: {ex.Message}");
+                        }
+                    }
+
+                    // Determine if this is a full close
+                    // PRIORITY 1: Check nt_trade_result first (most reliable indicator)
+                    // Full close indicators:
+                    // - "MT5_position_closed" - MT5 closed the position
+                    // - "already_closed" - Position was already closed when close was attempted
+                    // - "mt5_closed" - Generic MT5 closure
+                    // - "success" - Close operation succeeded
+                    // - Contains "position_closed" - Any variant of position closed
+                    //
+                    // Partial close indicators:
+                    // - "elastic_partial_close" - Elastic hedge partial close
+                    // - Contains "partial" - Any partial close variant
+
+                    // Check for partial close first (explicit indicator)
+                    if (tradeResult.Contains("partial", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isFullClose = false;
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"MT5 close notification for {baseId}: tradeResult='{tradeResult}' indicates PARTIAL close");
+                    }
+                    // Check for full close indicators
+                    else if (tradeResult.Contains("position_closed", StringComparison.OrdinalIgnoreCase) ||
+                             tradeResult.Contains("already_closed", StringComparison.OrdinalIgnoreCase) ||
+                             tradeResult.Contains("mt5_closed", StringComparison.OrdinalIgnoreCase) ||
+                             tradeResult.Equals("success", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isFullClose = true;
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"MT5 close notification for {baseId}: tradeResult='{tradeResult}' indicates FULL close");
+                    }
+                    // PRIORITY 2: If nt_trade_result is ambiguous, check total_quantity
+                    else if (totalQuantity == 0)
+                    {
+                        isFullClose = true;
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"MT5 close notification for {baseId}: totalQty={totalQuantity} indicates FULL close");
+                    }
+                    else
+                    {
+                        // Default to partial close if unclear
+                        isFullClose = false;
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"MT5 close notification for {baseId}: tradeResult='{tradeResult}', totalQty={totalQuantity} - UNCLEAR, defaulting to partial close");
+                    }
+
+                    if (isFullClose)
+                    {
+                        // Find and close the Quantower position
+                        var position = FindPositionByBaseId(baseId);
+                        if (position != null)
+                        {
+                            try
+                            {
+                                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Closing Quantower position {position.Id} (base_id={baseId}) due to MT5 full closure");
+                                _ = Task.Run(() => position.Close());
+                                StopTracking(baseId);
+                                _trailingService.RemoveTracker(baseId);
+                            }
+                            catch (Exception ex)
+                            {
+                                EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"Failed to close Quantower position for {baseId}: {ex.Message}");
+                            }
+                        }
+                        else
+                        {
+                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"MT5 full closure notification for {baseId} but no matching Quantower position found");
+                            StopTracking(baseId);
+                            _trailingService.RemoveTracker(baseId);
+                        }
+                    }
+                    else
+                    {
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"MT5 partial close for {baseId} - ignoring (Quantower position remains open)");
+                    }
+                    return;
+                }
             }
 
             var eventType = envelope.EventType;
@@ -1076,6 +1173,56 @@ namespace Quantower.MultiStrat
             }
         }
 
+        private Position? FindPositionByBaseId(string baseId)
+        {
+            if (string.IsNullOrWhiteSpace(baseId))
+            {
+                return null;
+            }
+
+            var core = Core.Instance;
+            if (core?.Positions == null)
+            {
+                return null;
+            }
+
+            // CRITICAL FIX (Issue #2): Check the baseId → Position.Id mapping first
+            // This allows us to find Quantower positions when MT5 sends closure notifications
+            if (_baseIdToPositionId.TryGetValue(baseId, out var positionId))
+            {
+                foreach (var position in core.Positions)
+                {
+                    if (string.Equals(position.Id, positionId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Found position via mapping: baseId {baseId} -> Position.Id {positionId}");
+                        return position;
+                    }
+                }
+                // Position was in mapping but no longer exists - remove stale mapping
+                _baseIdToPositionId.TryRemove(baseId, out _);
+            }
+
+            // Fallback to existing logic
+            foreach (var position in core.Positions)
+            {
+                // Check if position ID matches base_id
+                if (string.Equals(position.Id, baseId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return position;
+                }
+
+                // Also check tracked positions
+                var trackedBaseId = TryResolveTrackedBaseId(position);
+                if (!string.IsNullOrWhiteSpace(trackedBaseId) &&
+                    string.Equals(trackedBaseId, baseId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return position;
+                }
+            }
+
+            return null;
+        }
+
         private void HandlePositionAdded(Position position)
         {
             if (position == null)
@@ -1085,16 +1232,68 @@ namespace Quantower.MultiStrat
 
             var baseId = GetBaseId(position);
 
-            if (!IsAccountEnabled(position))
+            // CRITICAL FIX 1: Check if position was recently closed (cooldown period)
+            if (_closedPositionCooldowns.TryGetValue(baseId, out var closedTime))
             {
-                StopTracking(baseId);
-                _trailingService.RemoveTracker(baseId);
+                var elapsed = DateTime.UtcNow - closedTime;
+                if (elapsed.TotalSeconds < COOLDOWN_SECONDS)
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Position {baseId} was closed {elapsed.TotalSeconds:F1}s ago - ignoring reopen (cooldown)");
+                    return;
+                }
+                // Cooldown expired, remove from dictionary
+                _closedPositionCooldowns.TryRemove(baseId, out _);
+            }
+
+            // CRITICAL FIX 2: Prevent concurrent processing of the same position
+            // Try to add to processing set - if already processing, skip
+            if (!_processingPositions.TryAdd(baseId, true))
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Position {baseId} already being processed - skipping duplicate event");
                 return;
             }
 
-            _trailingService.RegisterPosition(baseId, position);
-            SendElasticAndTrailing(position, baseId);
-            StartTracking(position, baseId);
+            try
+            {
+                if (!IsAccountEnabled(position))
+                {
+                    StopTracking(baseId);
+                    _trailingService.RemoveTracker(baseId);
+                    return;
+                }
+
+                // CRITICAL FIX 3: Deduplicate position additions
+                // Positions can be added multiple times:
+                // 1. From SnapshotPositions() at startup
+                // 2. From Core.PositionAdded event
+                // 3. From RefreshAccountPositions() when account is enabled
+                // Check if we're already tracking this position to avoid duplicates
+                lock (_trackingLock)
+                {
+                    if (_trackingStates.ContainsKey(baseId))
+                    {
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Position {baseId} already being tracked - skipping duplicate add");
+                        return;
+                    }
+                }
+
+                // CRITICAL FIX (Issue #2): Maintain baseId → Position.Id mapping
+                // This allows us to find Quantower positions when MT5 sends closure notifications
+                if (!string.IsNullOrWhiteSpace(baseId) && !string.IsNullOrWhiteSpace(position.Id))
+                {
+                    _baseIdToPositionId[baseId] = position.Id;
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Mapped baseId {baseId} -> Position.Id {position.Id}");
+                }
+
+                _trailingService.RegisterPosition(baseId, position);
+                SendElasticAndTrailing(position, baseId);
+                StartTracking(position, baseId);
+            }
+            finally
+            {
+                // Remove from processing set
+                _processingPositions.TryRemove(baseId, out _);
+            }
         }
 
         private void HandlePositionRemoved(Position position)
@@ -1107,11 +1306,28 @@ namespace Quantower.MultiStrat
             var existingBaseId = TryResolveTrackedBaseId(position);
             if (!string.IsNullOrWhiteSpace(existingBaseId))
             {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Quantower position removed ({existingBaseId}) - stopping tracking");
+
+                // Add to cooldown dictionary to prevent immediate reopening
+                _closedPositionCooldowns[existingBaseId] = DateTime.UtcNow;
+
+                // CRITICAL FIX (Issue #2): Remove baseId → Position.Id mapping
+                _baseIdToPositionId.TryRemove(existingBaseId, out _);
+
                 StopTracking(existingBaseId);
                 return;
             }
 
-            StopTracking(GetBaseId(position));
+            var baseId = GetBaseId(position);
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Quantower position removed ({baseId}) - stopping tracking");
+
+            // Add to cooldown dictionary to prevent immediate reopening
+            _closedPositionCooldowns[baseId] = DateTime.UtcNow;
+
+            // CRITICAL FIX (Issue #2): Remove baseId → Position.Id mapping
+            _baseIdToPositionId.TryRemove(baseId, out _);
+
+            StopTracking(baseId);
         }
 
         private void SendElasticAndTrailing(Position position, string? cachedBaseId = null)
@@ -1128,19 +1344,87 @@ namespace Quantower.MultiStrat
                 if (elasticPayload != null)
                 {
                     var elasticJson = SimpleJson.SerializeObject(elasticPayload);
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"📤 Sending elastic update for {baseId}");
                     _ = _bridgeService.SubmitElasticUpdateAsync(elasticJson, baseId);
                 }
 
                 var trailingPayload = _trailingService.TryBuildTrailingUpdate(baseId, position);
                 if (trailingPayload != null)
                 {
-                    var trailingJson = SimpleJson.SerializeObject(trailingPayload);
-                    _ = _bridgeService.SubmitTrailingUpdateAsync(trailingJson, baseId);
+                    var newStop = trailingPayload.ContainsKey("new_stop_price") ? trailingPayload["new_stop_price"] : null;
+                    if (newStop != null && newStop is double newStopPrice)
+                    {
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"🎯 Updating Quantower stop loss for {baseId} - newStop={newStopPrice:F2}");
+
+                        // CRITICAL FIX: Create or modify the Quantower position's stop loss!
+                        if (position.StopLoss != null)
+                        {
+                            // Stop loss order exists - modify it
+                            try
+                            {
+                                var result = Core.Instance.ModifyOrder(position.StopLoss, price: newStopPrice);
+                                if (result.Status == TradingOperationResultStatus.Success)
+                                {
+                                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"✅ Successfully updated Quantower stop loss to {newStopPrice:F2}");
+                                }
+                                else
+                                {
+                                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"❌ Failed to update Quantower stop loss: {result.Message}");
+                                }
+                            }
+                            catch (Exception modifyEx)
+                            {
+                                EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"❌ Exception modifying stop loss: {modifyEx.Message}");
+                            }
+                        }
+                        else
+                        {
+                            // Stop loss order doesn't exist - create it using PlaceOrder
+                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"📝 Creating new stop loss order for {baseId} at {newStopPrice:F2}");
+
+                            try
+                            {
+                                // Determine the side for the stop loss order (opposite of position side)
+                                var stopSide = position.Side == Side.Buy ? Side.Sell : Side.Buy;
+
+                                // Place a stop loss order
+                                var result = Core.Instance.PlaceOrder(new PlaceOrderRequestParameters
+                                {
+                                    Symbol = position.Symbol,
+                                    Account = position.Account,
+                                    Side = stopSide,
+                                    OrderTypeId = OrderType.Stop,
+                                    TriggerPrice = newStopPrice,
+                                    Quantity = position.Quantity,
+                                    TimeInForce = TimeInForce.GTC
+                                });
+
+                                if (result.Status == TradingOperationResultStatus.Success)
+                                {
+                                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"✅ Successfully created Quantower stop loss at {newStopPrice:F2}");
+                                }
+                                else
+                                {
+                                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"❌ Failed to create Quantower stop loss: {result.Message}");
+                                }
+                            }
+                            catch (Exception createEx)
+                            {
+                                EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"❌ Exception creating stop loss: {createEx.Message}");
+                            }
+                        }
+
+                        // CRITICAL FIX (Issue #3): DO NOT send trailing updates to MT5
+                        // Trailing stops should ONLY modify the Quantower stop loss locally
+                        // Only elastic updates should be sent to MT5
+                        // The code above already modified the Quantower stop loss using Core.ModifyOrder()
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Trailing stop updated locally in Quantower for {baseId} - NOT sending to MT5");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to push trailing update: {ex.Message}");
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to process trailing/elastic update: {ex.Message}");
             }
         }
 
@@ -1164,7 +1448,6 @@ namespace Quantower.MultiStrat
                 if (_trackingStates.TryGetValue(baseId, out var existing))
                 {
                     existing.PositionId = position.Id ?? existing.PositionId;
-                    existing.UniqueId = position.UniqueId ?? existing.UniqueId;
                     existing.AccountId = GetAccountId(position.Account);
                     existing.SymbolName = position.Symbol?.Name;
                     return;
@@ -1174,7 +1457,6 @@ namespace Quantower.MultiStrat
                 {
                     BaseId = baseId,
                     PositionId = position.Id,
-                    UniqueId = position.UniqueId,
                     AccountId = GetAccountId(position.Account),
                     SymbolName = position.Symbol?.Name
                 };
@@ -1537,12 +1819,6 @@ namespace Quantower.MultiStrat
                     return position;
                 }
 
-                if (!string.IsNullOrEmpty(state.UniqueId) &&
-                    string.Equals(position.UniqueId, state.UniqueId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return position;
-                }
-
                 if (!string.IsNullOrEmpty(state.SymbolName) &&
                     string.Equals(position.Symbol?.Name, state.SymbolName, StringComparison.OrdinalIgnoreCase) &&
                     !string.IsNullOrEmpty(state.AccountId) &&
@@ -1687,11 +1963,7 @@ namespace Quantower.MultiStrat
                 return position.Id;
             }
 
-            if (!string.IsNullOrWhiteSpace(position.UniqueId))
-            {
-                return position.UniqueId;
-            }
-
+            // Fallback: generate a unique ID based on account, symbol, and open time
             var accountId = GetAccountId(position.Account) ?? "account";
             var symbolName = position.Symbol?.Name ?? "symbol";
             var seed = position.OpenTime != default
@@ -1704,7 +1976,6 @@ namespace Quantower.MultiStrat
         {
             var baseIdCandidate = GetBaseId(position);
             var positionId = position.Id;
-            var uniqueId = position.UniqueId;
             var accountId = GetAccountId(position.Account);
             var symbolName = position.Symbol?.Name;
 
@@ -1720,11 +1991,6 @@ namespace Quantower.MultiStrat
                     var state = pair.Value;
 
                     if (!string.IsNullOrWhiteSpace(positionId) && string.Equals(state.PositionId, positionId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return pair.Key;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(uniqueId) && string.Equals(state.UniqueId, uniqueId, StringComparison.OrdinalIgnoreCase))
                     {
                         return pair.Key;
                     }

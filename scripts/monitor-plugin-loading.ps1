@@ -1,35 +1,53 @@
 # Monitor Quantower Plugin Loading
 # This script helps diagnose plugin loading issues
 
+$LogFile = "C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt"
+
 Write-Host "=== Quantower Plugin Loading Monitor ===" -ForegroundColor Cyan
 Write-Host "This script will monitor the plugin loading process." -ForegroundColor Yellow
+Write-Host "Log file: $LogFile" -ForegroundColor Cyan
 Write-Host ""
+
+# Clear log file on each run
+if (Test-Path $LogFile) {
+    Clear-Content $LogFile
+    Write-Host "✅ Cleared previous log file" -ForegroundColor Green
+} else {
+    New-Item -Path $LogFile -ItemType File -Force | Out-Null
+    Write-Host "✅ Created new log file" -ForegroundColor Green
+}
 
 # Check if plugin files exist
 $pluginPath = "C:\Quantower\Settings\Scripts\plug-ins\MultiStratQuantower"
 $dllPath = Join-Path $pluginPath "QuantowerMultiStratAddOn.dll"
 $htmlPath = Join-Path $pluginPath "layout.html"
 
+Write-Host ""
 Write-Host "Checking plugin deployment..." -ForegroundColor Green
 if (Test-Path $dllPath) {
     $dll = Get-Item $dllPath
-    Write-Host "✅ Plugin DLL found: $($dll.FullName)" -ForegroundColor Green
-    Write-Host "   Size: $($dll.Length) bytes" -ForegroundColor Gray
-    Write-Host "   Modified: $($dll.LastWriteTime)" -ForegroundColor Gray
+    $msg = "✅ Plugin DLL found: $($dll.FullName) (Size: $($dll.Length) bytes, Modified: $($dll.LastWriteTime))"
+    Write-Host $msg -ForegroundColor Green
+    Add-Content -Path $LogFile -Value $msg
 } else {
-    Write-Host "❌ Plugin DLL NOT found at: $dllPath" -ForegroundColor Red
+    $msg = "❌ Plugin DLL NOT found at: $dllPath"
+    Write-Host $msg -ForegroundColor Red
+    Add-Content -Path $LogFile -Value $msg
 }
 
 if (Test-Path $htmlPath) {
     $html = Get-Item $htmlPath
-    Write-Host "✅ HTML template found: $($html.FullName)" -ForegroundColor Green
-    Write-Host "   Size: $($html.Length) bytes" -ForegroundColor Gray
+    $msg = "✅ HTML template found: $($html.FullName) (Size: $($html.Length) bytes)"
+    Write-Host $msg -ForegroundColor Green
+    Add-Content -Path $LogFile -Value $msg
 } else {
-    Write-Host "❌ HTML template NOT found at: $htmlPath" -ForegroundColor Red
+    $msg = "❌ HTML template NOT found at: $htmlPath"
+    Write-Host $msg -ForegroundColor Red
+    Add-Content -Path $LogFile -Value $msg
 }
 
 Write-Host ""
-Write-Host "Clearing old log files..." -ForegroundColor Green
+Write-Host "Clearing old temp log files..." -ForegroundColor Green
 Remove-Item "$env:TEMP\msb-plugin.log" -ErrorAction SilentlyContinue
 
 # Check for existing Quantower processes
@@ -52,17 +70,22 @@ Write-Host ""
 # Function to monitor logs
 function Watch-PluginLogs {
     Write-Host "Monitoring plugin logs (press Ctrl+C to stop)..." -ForegroundColor Yellow
+    Write-Host "Writing to: $LogFile" -ForegroundColor Cyan
     Write-Host ""
-    
-    $logPath = "$env:TEMP\msb-plugin.log"
+
+    $tempLogPath = "$env:TEMP\msb-plugin.log"
     $lastSize = 0
-    
+
     while ($true) {
-        if (Test-Path $logPath) {
-            $currentSize = (Get-Item $logPath).Length
+        if (Test-Path $tempLogPath) {
+            $currentSize = (Get-Item $tempLogPath).Length
             if ($currentSize -gt $lastSize) {
-                $content = Get-Content $logPath -Tail 10
+                $content = Get-Content $tempLogPath -Tail 10
                 foreach ($line in $content) {
+                    # Write to file
+                    Add-Content -Path $LogFile -Value $line
+
+                    # Write to console with colors
                     if ($line -match "GetInfo") {
                         Write-Host $line -ForegroundColor Green
                     } elseif ($line -match "ctor|Initialize") {

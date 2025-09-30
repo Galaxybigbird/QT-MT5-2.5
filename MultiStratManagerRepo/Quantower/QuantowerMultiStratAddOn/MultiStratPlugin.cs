@@ -838,8 +838,8 @@ namespace Quantower.MultiStrat
                 var elasticIncrementValue = ParseDouble(_elasticIncrementValueInput?.Text, culture, snapshot.ElasticIncrementValue);
                 var enableTrailing = _enableTrailingCheckbox?.IsChecked ?? snapshot.EnableTrailing;
                 var useDemaAtr = _enableDemaCheckbox?.IsChecked ?? snapshot.UseDemaAtrTrailing;
-                var trailingActivationUnits = _trailingActivationCombo?.SelectedItem is Services.TrailingElasticService.ProfitUnitType tau ? tau : snapshot.TrailingActivationUnits;
-                var trailingActivationValue = ParseDouble(_trailingActivationValueInput?.Text, culture, snapshot.TrailingActivationValue);
+                // REMOVED: trailingActivationUnits and trailingActivationValue
+                // Trailing now uses the SAME trigger as elastic
                 var trailingStopUnits = _trailingStopCombo?.SelectedItem is Services.TrailingElasticService.ProfitUnitType tsu ? tsu : snapshot.TrailingStopUnits;
                 var trailingStopValue = ParseDouble(_trailingStopValueInput?.Text, culture, snapshot.TrailingStopValue);
                 var demaMultiplier = ParseDouble(_demaMultiplierInput?.Text, culture, snapshot.DemaAtrMultiplier);
@@ -854,8 +854,7 @@ namespace Quantower.MultiStrat
                     elasticIncrementValue,
                     enableTrailing,
                     useDemaAtr,
-                    trailingActivationUnits,
-                    trailingActivationValue,
+                    // REMOVED: trailingActivationUnits and trailingActivationValue
                     trailingStopUnits,
                     trailingStopValue,
                     demaMultiplier,
@@ -963,15 +962,8 @@ namespace Quantower.MultiStrat
                     _enableDemaCheckbox.IsChecked = snapshot.UseDemaAtrTrailing;
                 }
 
-                if (_trailingActivationCombo != null)
-                {
-                    _trailingActivationCombo.SelectedItem = snapshot.TrailingActivationUnits;
-                }
-
-                if (_trailingActivationValueInput != null)
-                {
-                    _trailingActivationValueInput.Text = snapshot.TrailingActivationValue.ToString("F2", CultureInfo.CurrentCulture);
-                }
+                // REMOVED: _trailingActivationCombo and _trailingActivationValueInput
+                // Trailing now uses the SAME trigger as elastic
 
                 if (_trailingStopCombo != null)
                 {
@@ -1653,8 +1645,8 @@ namespace Quantower.MultiStrat
                         ["elastic_increment_value"] = trailing.ElasticIncrementValue,
                         ["enable_trailing"] = trailing.EnableTrailing,
                         ["enable_dema_atr_trailing"] = trailing.UseDemaAtrTrailing,
-                        ["trailing_activation_units"] = trailing.TrailingActivationUnits.ToString(),
-                        ["trailing_activation_value"] = trailing.TrailingActivationValue,
+                        // REMOVED: trailing_activation_units and trailing_activation_value
+                        // Trailing now uses the SAME trigger as elastic
                         ["trailing_stop_units"] = trailing.TrailingStopUnits.ToString(),
                         ["trailing_stop_value"] = trailing.TrailingStopValue,
                         ["dema_atr_multiplier"] = trailing.DemaAtrMultiplier,
@@ -2092,12 +2084,14 @@ namespace Quantower.MultiStrat
                     case "flatten_all":
                     {
                         var disable = TryGetValue(payload, "disableAfter") is bool b && b;
+                        AddLogEntry("INFO", $"Flatten all command received (disableAfter={disable})");
                         _ = Task.Run(async () =>
                         {
                             try
                             {
+                                AddLogEntry("INFO", "Executing flatten all...");
                                 var ok = await _managerService.FlattenAllAsync(disable, "Quantower UI flatten").ConfigureAwait(false);
-                                AddLogEntry(ok ? "INFO" : "WARN", ok ? "Flattened all accounts" : "Flatten all reported issues");
+                                AddLogEntry(ok ? "INFO" : "WARN", ok ? "Flattened all accounts successfully" : "Flatten all reported issues");
                             }
                             catch (Exception ex)
                             {
@@ -2178,8 +2172,8 @@ namespace Quantower.MultiStrat
                                 ElasticIncrementValue: ReadDouble(TryGetValue(payload, "elastic_increment_value")),
                                 EnableTrailing: TryGetValue(payload, "enable_trailing") is bool bt && bt,
                                 UseDemaAtrTrailing: TryGetValue(payload, "enable_dema_atr_trailing") is bool bda && bda,
-                                TrailingActivationUnits: ParseUnit(TryGetValue(payload, "trailing_activation_units")),
-                                TrailingActivationValue: ReadDouble(TryGetValue(payload, "trailing_activation_value")),
+                                // REMOVED: TrailingActivationUnits and TrailingActivationValue
+                                // Trailing now uses the SAME trigger as elastic
                                 TrailingStopUnits: ParseUnit(TryGetValue(payload, "trailing_stop_units")),
                                 TrailingStopValue: ReadDouble(TryGetValue(payload, "trailing_stop_value")),
                                 DemaAtrMultiplier: ReadDouble(TryGetValue(payload, "dema_atr_multiplier")),

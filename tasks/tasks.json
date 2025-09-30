@@ -1,0 +1,66 @@
+{
+  "quantower": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Research Quantower window controls APIs",
+        "description": "Investigate Quantower's native plugin UI APIs to implement fixed window controls that persist during scrolling and provide functional minimize, maximize, and close behaviors.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Study NT-MT5-gRPC trailing logic",
+        "description": "Review the NinjaTrader addon implementation in the NT-MT5-gRPC repository to understand how trailing and elastic hedging interact across the two checkbox scenarios.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Refine trailing settings UI",
+        "description": "Implement fixed header controls, professional section separation, revised checkbox layout, and remove the Apply button in the Quantower plugin UI using Quantower UI APIs.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "Port trailing logic to Quantower",
+        "description": "Convert the NinjaTrader elastic and trailing scenarios into the Quantower plugin code ensuring both checkbox scenarios behave identically to the original implementation.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 5,
+        "title": "Verify updated Quantower plugin behavior",
+        "description": "Exercise the updated UI and trailing logic inside Quantower or via unit tests/logging to ensure no regressions in elastic updates or trailing flows.",
+        "details": "",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2025-09-25T00:02:08.339Z",
+      "updated": "2025-09-25T00:36:00.543Z",
+      "description": "Quantower plugin fixes"
+    }
+  }
+}
