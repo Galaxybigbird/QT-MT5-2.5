@@ -183,12 +183,14 @@ func (s *Server) Stop() {
 func (s *Server) SubmitTrade(ctx context.Context, req *trading.Trade) (*trading.GenericResponse, error) {
 	log.Printf("gRPC: Received trade submission - ID: %s, Action: %s, Quantity: %.2f",
 		req.Id, req.Action, req.Quantity)
-	// Dedup guard: skip if we've very recently processed this trade ID
-	if s.wasRecentlyProcessed(req.Id, 3*time.Second) {
-		log.Printf("gRPC: Skipping duplicate trade submission ID: %s", req.Id)
+	// CRITICAL FIX: Include quantity in dedup key to allow multiple positions with same base_id
+	// This prevents blocking legitimate separate positions that share the same base_id
+	dedupKey := fmt.Sprintf("%s_%.2f_%s", req.Id, req.Quantity, req.Action)
+	if s.wasRecentlyProcessed(dedupKey, 3*time.Second) {
+		log.Printf("gRPC: Skipping duplicate trade submission ID: %s (qty=%.2f)", req.Id, req.Quantity)
 		return &trading.GenericResponse{Status: "success", Message: "Duplicate suppressed"}, nil
 	}
-	s.markProcessed(req.Id)
+	s.markProcessed(dedupKey)
 
 	// Update addon connection status
 	s.app.SetAddonConnected(true)
@@ -218,41 +220,15 @@ func (s *Server) SubmitTrade(ctx context.Context, req *trading.Trade) (*trading.
 	}, nil
 }
 
-// enqueueTradeWithSplit splits multi-quantity Buy/Sell entries into unit trades to create distinct MT5 tickets.
-// This keeps MT5 hedges aligned 1:1 with contract count and preserves ticket-specific close behaviour.
+// enqueueTradeWithSplit handles trade enqueueing without splitting.
+// CRITICAL FIX: Do NOT split multi-quantity trades - each QT position should create exactly 1 MT5 hedge
+// regardless of quantity. This ensures 1 QT trade = 1 MT5 hedge for proper correlation.
 func (s *Server) enqueueTradeWithSplit(req *trading.Trade) error {
 	// Convert to internal once as a base template
 	base := convertProtoToInternalTrade(req)
 
-	// Normalize action casing
-	act := strings.ToLower(req.Action)
-
-	// Only split for entry actions (buy/sell). Leave CLOSE/MT5 notifications untouched.
-	if act == "buy" || act == "sell" {
-		// Split any aggregated multi-quantity entry to ensure 1:1 MT5 tickets per contract.
-		// This remains robust to varying addon batching patterns (e.g., submissions of Qty=2 remaining of a 3 group).
-		if req.Quantity > 1 {
-			n := int(req.Quantity + 1e-9)
-			if n > 1 {
-				log.Printf("gRPC: Splitting entry (Qty=%.2f → %d units) for BaseID %s", req.Quantity, n, req.BaseId)
-				for i := 1; i <= n; i++ {
-					t := *base // shallow copy
-					// Unique ID per unit contract; keep BaseID same for correlation
-					t.ID = fmt.Sprintf("%s_%dof%d", req.Id, i, n)
-					t.Quantity = 1
-					t.TotalQuantity = 1
-					t.ContractNum = i
-					// Add to queue
-					if err := s.app.AddToTradeQueue(&t); err != nil {
-						return err
-					}
-					// History
-					s.app.AddToTradeHistory(&t)
-				}
-				return nil
-			}
-		}
-	}
+	// REMOVED SPLITTING LOGIC: Each trade is sent to MT5 as-is with its original quantity
+	// This ensures 1 QT position = 1 MT5 hedge, making closing logic straightforward
 
 	// Default path: no split
 	if err := s.app.AddToTradeQueue(base); err != nil {
@@ -1115,12 +1091,13 @@ func (s *Server) TradingStream(stream trading.StreamingService_TradingStreamServ
 			// Process incoming trade (similar to SubmitTrade)
 			log.Printf("gRPC: Received trade via bidirectional stream - ID: %s", trade.Id)
 
-			// Dedup guard: skip if we've very recently processed this trade ID
-			if s.wasRecentlyProcessed(trade.Id, 3*time.Second) {
-				log.Printf("gRPC: Skipping duplicate streamed trade ID: %s", trade.Id)
+			// CRITICAL FIX: Include quantity in dedup key to allow multiple positions with same base_id
+			dedupKey := fmt.Sprintf("%s_%.2f_%s", trade.Id, trade.Quantity, trade.Action)
+			if s.wasRecentlyProcessed(dedupKey, 3*time.Second) {
+				log.Printf("gRPC: Skipping duplicate streamed trade ID: %s (qty=%.2f)", trade.Id, trade.Quantity)
 				continue
 			}
-			s.markProcessed(trade.Id)
+			s.markProcessed(dedupKey)
 
 			// Enqueue with smart splitting so MT5 tickets remain 1:1 with contract count
 			if err := s.enqueueTradeWithSplit(trade); err != nil {

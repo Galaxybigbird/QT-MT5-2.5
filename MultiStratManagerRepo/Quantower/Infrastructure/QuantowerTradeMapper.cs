@@ -50,20 +50,26 @@ namespace Quantower.MultiStrat.Infrastructure
                 var positionId = SafeString(trade.PositionId);
                 var orderId = SafeString(trade.OrderId);
 
+                // CRITICAL: base_id MUST be Quantower Position.Id for proper correlation
+                if (string.IsNullOrWhiteSpace(positionId))
+                {
+                    ReportError($"[QT][ERROR] Trade missing required PositionId - cannot process. TradeId: {qtTradeId ?? "unknown"}, OrderId: {orderId ?? "unknown"}", null);
+                    json = string.Empty;
+                    tradeId = null;
+                    return false;
+                }
+
                 tradeId = qtTradeId ?? positionId ?? orderId ?? Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
 
                 payload["id"] = tradeId;
-                payload["base_id"] = positionId ?? tradeId;
+                payload["base_id"] = positionId;  // REQUIRED: Only use PositionId as base_id
 
                 if (!string.IsNullOrWhiteSpace(qtTradeId))
                 {
                     payload["qt_trade_id"] = qtTradeId;
                 }
 
-                if (!string.IsNullOrWhiteSpace(positionId))
-                {
-                    payload["qt_position_id"] = positionId;
-                }
+                payload["qt_position_id"] = positionId;  // Always include for audit trail
 
                 if (!string.IsNullOrWhiteSpace(orderId))
                 {
@@ -115,11 +121,21 @@ namespace Quantower.MultiStrat.Infrastructure
                 };
 
                 var positionId = SafeString(position.Id);
-                positionTradeId = positionId ?? Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+
+                // CRITICAL: base_id MUST be Quantower Position.Id for proper correlation
+                if (string.IsNullOrWhiteSpace(positionId))
+                {
+                    ReportError($"[QT][ERROR] Position missing required Position.Id - cannot process snapshot.", null);
+                    json = string.Empty;
+                    positionTradeId = null;
+                    return false;
+                }
+
+                positionTradeId = positionId;
 
                 payload["id"] = positionTradeId;
-                payload["base_id"] = positionId ?? positionTradeId;
-                payload["qt_position_id"] = positionId;
+                payload["base_id"] = positionId;  // REQUIRED: Only use PositionId as base_id
+                payload["qt_position_id"] = positionId;  // Always include for audit trail
 
                 AddInstrument(payload, position.Symbol);
                 AddAccount(payload, position.Account);
@@ -168,15 +184,19 @@ namespace Quantower.MultiStrat.Infrastructure
                 };
 
                 var resolvedPositionId = SafeString(position.Id);
-                var closureEnvelopeId = resolvedPositionId ?? Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
 
-                payload["id"] = closureEnvelopeId;
-                payload["base_id"] = resolvedPositionId ?? closureEnvelopeId;
-
-                if (!string.IsNullOrWhiteSpace(resolvedPositionId))
+                // CRITICAL: base_id MUST be Quantower Position.Id for proper correlation
+                if (string.IsNullOrWhiteSpace(resolvedPositionId))
                 {
-                    payload["qt_position_id"] = resolvedPositionId;
+                    ReportError($"[QT][ERROR] Position missing required Position.Id - cannot process closure.", null);
+                    json = string.Empty;
+                    positionId = null;
+                    return false;
                 }
+
+                payload["id"] = resolvedPositionId;
+                payload["base_id"] = resolvedPositionId;  // REQUIRED: Only use PositionId as base_id
+                payload["qt_position_id"] = resolvedPositionId;  // Always include for audit trail
 
                 positionId = resolvedPositionId;
 

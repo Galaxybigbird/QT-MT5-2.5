@@ -74,7 +74,10 @@ namespace Quantower.MultiStrat.Infrastructure
                 return Array.Empty<Position>();
             }
 
-            return positions.ToArray();
+            // CRITICAL FIX: Filter out historical/closed positions
+            // Quantower keeps position IDs in history/memory even after they're closed
+            // Only return positions with Quantity > 0 (active positions)
+            return positions.Where(p => p != null && Math.Abs(p.Quantity) > 0.0).ToArray();
         }
 
         public void Dispose()

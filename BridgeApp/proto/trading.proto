@@ -32,8 +32,8 @@ message LogAck {
 
 // Core trade message
 message Trade {
-  string id = 1;
-  string base_id = 2;
+  string id = 1;                      // Unique message identifier (may be synthetic for split trades)
+  string base_id = 2;                 // REQUIRED: Quantower Position.Id - the authoritative correlation key for all hedges
   int64 timestamp = 3;
   string action = 4;              // "buy", "sell", "CLOSE_HEDGE", etc.
   double quantity = 5;
@@ -60,9 +60,9 @@ message Trade {
   double elastic_current_profit = 21;    // forwarded for elastic events
   int32 elastic_profit_level = 22;       // forwarded for elastic events
 
-  // Quantower identifiers (optional during transition)
-  string qt_trade_id = 23;        // Quantower Trade.Id (authoritative unique identifier)
-  string qt_position_id = 24;     // Quantower Position.Id (aggregate exposure grouping)
+  // Quantower identifiers (for debugging and audit trail)
+  string qt_trade_id = 23;        // Quantower Trade.Id (individual fill identifier)
+  string qt_position_id = 24;     // Quantower Position.Id (MUST match base_id for Quantower trades)
   string strategy_tag = 25;       // Quantower strategy/portfolio tag for hedging context
   string origin_platform = 26;    // source platform identifier (e.g., "quantower", "mt5")
 }
@@ -70,7 +70,7 @@ message Trade {
 // Hedge closure notification
 message HedgeCloseNotification {
   string event_type = 1;
-  string base_id = 2;
+  string base_id = 2;                 // Quantower Position.Id - correlation key for hedge closure
   string nt_instrument_symbol = 3;
   string nt_account_name = 4;
   double closed_hedge_quantity = 5;
@@ -86,7 +86,7 @@ message HedgeCloseNotification {
 message ElasticHedgeUpdate {
   string event_type = 1;
   string action = 2;
-  string base_id = 3;
+  string base_id = 3;                 // Quantower Position.Id - correlation key for elastic updates
   double current_profit = 4;
   int32 profit_level = 5;
   string timestamp = 6;
@@ -96,7 +96,7 @@ message ElasticHedgeUpdate {
 // Trailing stop update
 message TrailingStopUpdate {
   string event_type = 1;
-  string base_id = 2;
+  string base_id = 2;                 // Quantower Position.Id - correlation key for trailing stop updates
   double new_stop_price = 3;
   string trailing_type = 4;
   double current_price = 5;

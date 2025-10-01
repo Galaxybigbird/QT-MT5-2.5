@@ -32,8 +32,8 @@ message LogAck {
 
 // Core trade message
 message Trade {
-  string id = 1;
-  string base_id = 2;
+  string id = 1;                      // Unique message identifier (may be synthetic for split trades)
+  string base_id = 2;                 // REQUIRED: Quantower Position.Id - the authoritative correlation key for all hedges
   int64 timestamp = 3;
   string action = 4;              // "buy", "sell", "CLOSE_HEDGE", etc.
   double quantity = 5;
@@ -63,7 +63,7 @@ message Trade {
 // Hedge closure notification
 message HedgeCloseNotification {
   string event_type = 1;
-  string base_id = 2;
+  string base_id = 2;                 // Quantower Position.Id - correlation key for hedge closure
   string nt_instrument_symbol = 3;
   string nt_account_name = 4;
   double closed_hedge_quantity = 5;
@@ -77,7 +77,7 @@ message HedgeCloseNotification {
 message ElasticHedgeUpdate {
   string event_type = 1;
   string action = 2;
-  string base_id = 3;
+  string base_id = 3;                 // Quantower Position.Id - correlation key for elastic updates
   double current_profit = 4;
   int32 profit_level = 5;
   string timestamp = 6;
@@ -87,7 +87,7 @@ message ElasticHedgeUpdate {
 // Trailing stop update
 message TrailingStopUpdate {
   string event_type = 1;
-  string base_id = 2;
+  string base_id = 2;                 // Quantower Position.Id - correlation key for trailing stop updates
   double new_stop_price = 3;
   string trailing_type = 4;
   double current_price = 5;

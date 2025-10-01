@@ -283,7 +283,7 @@ bool _ULogValidateJson(const string json)
    return !inString && braceDepth == 0 && StringGetCharacter(json, 0) == '{' && StringGetCharacter(json, len - 1) == '}';
 }
 
-string _ULogBuildLogJson(const ULogEvent event)
+string _ULogBuildLogJson(const ULogEvent &event)
 {
    bool first = true;
    string json = "{";
@@ -330,7 +330,7 @@ int ULogFlush()
    {
       ULogEvent event = ULOG_BUFFER[i];
       string json = _ULogBuildLogJson(event);
-      if(json == \"\")
+      if(json == "")
       {
          Print("ULogFlush: Skipping malformed log event level=", event.level, ", msg=", event.message);
          continue;

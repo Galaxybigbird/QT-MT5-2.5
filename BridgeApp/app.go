@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"reflect"
 	"strconv"
@@ -42,14 +41,15 @@ type App struct {
 	eaLastPing  time.Time  // Timestamp of the last successful ping from Hedgebot
 
 	// MT5 ticket to BaseID mapping
+	// CRITICAL: BaseID is always Quantower Position.Id - the authoritative correlation key
 	mt5TicketMux       sync.RWMutex
-	mt5TicketToBaseId  map[uint64]string          // MT5 ticket -> BaseID
-	baseIdToTickets    map[string][]uint64        // BaseID -> all MT5 tickets for this base
-	pendingCloseByBase map[string][]pendingTicket // BaseID -> tickets actively being closed
+	mt5TicketToBaseId  map[uint64]string          // MT5 ticket -> BaseID (Quantower Position.Id)
+	baseIdToTickets    map[string][]uint64        // BaseID (Quantower Position.Id) -> all MT5 hedge tickets
+	pendingCloseByBase map[string][]pendingTicket // BaseID (Quantower Position.Id) -> tickets actively being closed
 
 	// Metadata to aid resolution when BaseID mismatches occur
-	baseIdToInstrument map[string]string // BaseID -> instrument symbol
-	baseIdToAccount    map[string]string // BaseID -> account name
+	baseIdToInstrument map[string]string // BaseID (Quantower Position.Id) -> instrument symbol
+	baseIdToAccount    map[string]string // BaseID (Quantower Position.Id) -> account name
 	// Track client-initiated close requests by MT5 ticket to tag subsequent MT5 close results as acks
 	clientCloseMux         sync.Mutex
 	clientInitiatedTickets map[uint64]time.Time // ticket -> time marked
@@ -1230,14 +1230,9 @@ func (a *App) HandleCloseHedgeRequest(request interface{}) error {
 		a.recordInstrumentAccount(baseID, inst, acct)
 	}
 
-	qtyRaw := getQuantityFromRequest(request)
-	if qtyRaw <= 0 {
-		qtyRaw = 1
-	}
-	qty := int(math.Ceil(qtyRaw))
-	if qty < 1 {
-		qty = 1
-	}
+	// CRITICAL FIX: Since we removed trade splitting, each QT position = 1 MT5 hedge
+	// Always close exactly 1 ticket per close request, regardless of quantity
+	qty := 1
 
 	providedTicket := getMT5TicketFromRequest(request)
 	if providedTicket != 0 {
@@ -1254,6 +1249,8 @@ func (a *App) HandleCloseHedgeRequest(request interface{}) error {
 		maxTicketWait = 2 * time.Second
 		pollInterval  = 50 * time.Millisecond
 	)
+
+	log.Printf("gRPC: Closing 1 MT5 ticket for BaseID %s (1 QT position = 1 MT5 hedge)", baseID)
 
 	allocated := make([]uint64, 0, qty)
 	for i := 0; i < qty; i++ {
@@ -1278,7 +1275,7 @@ func (a *App) HandleCloseHedgeRequest(request interface{}) error {
 				log.Printf("gRPC: No tracked MT5 tickets remain for BaseID %s; treating close request as idempotent", baseID)
 				return nil
 			}
-			return fmt.Errorf("no MT5 tickets available for base_id %s", baseID)
+			return fmt.Errorf("no MT5 tickets available for base_id %s (requested %d, got %d)", baseID, qty, len(allocated))
 		}
 		allocated = append(allocated, ticket)
 	}
