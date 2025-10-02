@@ -19,8 +19,9 @@ namespace Quantower.MultiStrat.Infrastructure
         };
 
         /// <summary>
-        /// Computes a composite baseId for a position using Position.Id + OpenTime.Ticks.
-        /// This ensures unique baseIds even when Quantower reuses Position.Id across different positions.
+        /// Returns the Position.Id as the baseId.
+        /// Quantower does NOT reuse Position.Id, so we use it directly without concatenating OpenTime.
+        /// This ensures the baseId remains stable across the position's lifecycle (open, update, close).
         /// </summary>
         public static string ComputeBaseId(Position position)
         {
@@ -35,11 +36,9 @@ namespace Quantower.MultiStrat.Infrastructure
                 return string.Empty;
             }
 
-            var openTimeTicks = position.OpenTime != default
-                ? position.OpenTime.Ticks
-                : DateTime.UtcNow.Ticks;
-
-            return $"{positionId}_{openTimeTicks}";
+            // CRITICAL: Use Position.Id alone as baseId (no OpenTime concatenation)
+            // This matches the proto specification and ensures stable correlation
+            return positionId;
         }
 
         private static void ReportError(string message, Exception ex)
@@ -75,6 +74,7 @@ namespace Quantower.MultiStrat.Infrastructure
                 var orderId = SafeString(trade.OrderId);
 
                 // CRITICAL: base_id MUST be Quantower Position.Id for proper correlation
+                // Do NOT concatenate OpenTime or any other field - Position.Id is stable and unique
                 if (string.IsNullOrWhiteSpace(positionId))
                 {
                     ReportError($"[QT][ERROR] Trade missing required PositionId - cannot process. TradeId: {qtTradeId ?? "unknown"}, OrderId: {orderId ?? "unknown"}", null);
@@ -86,7 +86,7 @@ namespace Quantower.MultiStrat.Infrastructure
                 tradeId = qtTradeId ?? positionId ?? orderId ?? Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
 
                 payload["id"] = tradeId;
-                payload["base_id"] = positionId;  // REQUIRED: Only use PositionId as base_id
+                payload["base_id"] = positionId;  // CRITICAL: Use Position.Id alone (no OpenTime concatenation)
 
                 if (!string.IsNullOrWhiteSpace(qtTradeId))
                 {
@@ -146,8 +146,8 @@ namespace Quantower.MultiStrat.Infrastructure
 
                 var positionId = SafeString(position.Id);
 
-                // CRITICAL: base_id MUST use composite baseId (Position.Id + OpenTime.Ticks)
-                // to ensure uniqueness when Quantower reuses Position.Id across different positions
+                // CRITICAL: Use Position.Id alone as baseId (no OpenTime concatenation)
+                // Quantower does NOT reuse Position.Id, so it's stable across the position's lifecycle
                 if (string.IsNullOrWhiteSpace(positionId))
                 {
                     ReportError($"[QT][ERROR] Position missing required Position.Id - cannot process snapshot.", null);
@@ -156,21 +156,21 @@ namespace Quantower.MultiStrat.Infrastructure
                     return false;
                 }
 
-                // Compute composite baseId for uniqueness
+                // Use Position.Id directly as baseId
                 var baseId = ComputeBaseId(position);
                 if (string.IsNullOrWhiteSpace(baseId))
                 {
-                    ReportError($"[QT][ERROR] Failed to compute baseId for position - cannot process snapshot.", null);
+                    ReportError($"[QT][ERROR] Position.Id is null or empty - cannot process snapshot.", null);
                     json = string.Empty;
                     positionTradeId = null;
                     return false;
                 }
 
-                positionTradeId = baseId;  // Use composite baseId as the trade ID
+                positionTradeId = baseId;  // Use Position.Id as the trade ID
 
                 payload["id"] = positionTradeId;
-                payload["base_id"] = baseId;  // CRITICAL: Use composite baseId for uniqueness
-                payload["qt_position_id"] = positionId;  // Always include original Position.Id for audit trail
+                payload["base_id"] = baseId;  // CRITICAL: Use Position.Id alone (stable across lifecycle)
+                payload["qt_position_id"] = positionId;  // Always include for audit trail
 
                 AddInstrument(payload, position.Symbol);
                 AddAccount(payload, position.Account);
@@ -220,9 +220,8 @@ namespace Quantower.MultiStrat.Infrastructure
 
                 var resolvedPositionId = SafeString(position.Id);
 
-                // CRITICAL FIX: Use the knownBaseId if provided (tracked from position open event)
-                // Quantower changes OpenTime.Ticks on close events, so we can't recompute the baseId
-                // If knownBaseId is not provided, fall back to computing it (for backward compatibility)
+                // CRITICAL: Use Position.Id alone as baseId (no OpenTime concatenation)
+                // The knownBaseId parameter is now redundant since Position.Id is stable
                 if (string.IsNullOrWhiteSpace(resolvedPositionId))
                 {
                     ReportError($"[QT][ERROR] Position missing required Position.Id - cannot process closure.", null);
@@ -231,19 +230,20 @@ namespace Quantower.MultiStrat.Infrastructure
                     return false;
                 }
 
+                // Use Position.Id directly as baseId (stable across lifecycle)
                 string baseId;
                 if (!string.IsNullOrWhiteSpace(knownBaseId))
                 {
-                    // Use the tracked baseId from when the position was opened
+                    // Use the tracked baseId if provided (for backward compatibility)
                     baseId = knownBaseId;
                 }
                 else
                 {
-                    // Fall back to computing baseId (may cause mismatch if OpenTime.Ticks changed)
+                    // Use Position.Id directly
                     baseId = ComputeBaseId(position);
                     if (string.IsNullOrWhiteSpace(baseId))
                     {
-                        ReportError($"[QT][ERROR] Failed to compute baseId for position closure.", null);
+                        ReportError($"[QT][ERROR] Position.Id is null or empty - cannot process closure.", null);
                         json = string.Empty;
                         positionId = null;
                         return false;
@@ -251,8 +251,8 @@ namespace Quantower.MultiStrat.Infrastructure
                 }
 
                 payload["id"] = baseId;
-                payload["base_id"] = baseId;  // CRITICAL: Use the ORIGINAL baseId from position open
-                payload["qt_position_id"] = resolvedPositionId;  // Always include original Position.Id for audit trail
+                payload["base_id"] = baseId;  // CRITICAL: Use Position.Id alone (stable across lifecycle)
+                payload["qt_position_id"] = resolvedPositionId;  // Always include for audit trail
 
                 positionId = baseId;
 

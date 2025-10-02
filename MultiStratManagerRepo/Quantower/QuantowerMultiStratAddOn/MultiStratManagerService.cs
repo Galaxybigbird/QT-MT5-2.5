@@ -1984,40 +1984,33 @@ namespace Quantower.MultiStrat
 
         private string GetBaseId(Position position)
         {
-            // CRITICAL FIX: Quantower DOES reuse Position IDs across different positions!
-            // We must create a unique baseId using Position.Id + OpenTime.Ticks.
+            // CRITICAL: Use Position.Id alone as baseId (no OpenTime concatenation)
+            // Quantower does NOT reuse Position.Id, so it's stable across the position's lifecycle.
             //
             // This MUST match the logic in QuantowerTradeMapper.ComputeBaseId() to ensure
             // that the baseId used when sending positions to the bridge matches the baseId
             // used for tracking and elastic/trailing updates.
             //
-            // OpenTime.Ticks provides 100-nanosecond precision, which is sufficient to
-            // distinguish between positions opened at different times, even if they have
-            // the same Position.Id (due to Quantower's ID reuse).
-            //
-            // Example scenarios:
-            //   - Trade 1: "abc123" at 10:00:00.1234567 → baseId = "abc123_637759360001234567"
-            //   - Trade 2: "abc123" at 10:00:05.7654321 → baseId = "abc123_637759360057654321" ← Different!
-            //   - Trade 3: "abc123" at 10:05:00.0000000 → baseId = "abc123_637759363000000000" ← Different!
-            //
-            // This ensures each position gets its own MT5 hedge, achieving 1:1 mapping.
+            // The Position.Id remains constant from open to close, ensuring proper 1:1 correlation
+            // between Quantower positions and MT5 hedge trades.
 
             var positionId = position.Id;
-            var openTimeTicks = position.OpenTime != default
-                ? position.OpenTime.Ticks
-                : DateTime.UtcNow.Ticks;
 
             if (!string.IsNullOrWhiteSpace(positionId))
             {
-                // Use position.Id + OpenTime.Ticks to create a unique baseId
+                // Use Position.Id directly as baseId (stable across lifecycle)
                 // This matches QuantowerTradeMapper.ComputeBaseId() logic
-                return $"{positionId}_{openTimeTicks}";
+                return positionId;
             }
 
-            // Fallback: generate a unique ID based on account, symbol, and time
+            // Fallback: If Position.Id is null (should never happen), log error
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Error,
+                $"Position.Id is null for position on {position.Symbol?.Name} - this should never happen!");
+
+            // Generate a fallback ID (but this indicates a serious problem)
             var accountId = GetAccountId(position.Account) ?? "account";
             var symbolName = position.Symbol?.Name ?? "symbol";
-            return $"{accountId}:{symbolName}:{openTimeTicks}";
+            return $"{accountId}:{symbolName}:{DateTime.UtcNow.Ticks}";
         }
 
         private string? TryResolveTrackedBaseId(Position position)

@@ -16,9 +16,7 @@ namespace Quantower.MultiStrat
         private static readonly TimeSpan TradeSubmitTimeout = TimeSpan.FromSeconds(10);
 
         private readonly ConcurrentDictionary<string, byte> _pendingTrades = new();
-        private readonly ConcurrentDictionary<string, DateTime> _recentClosures = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, DateTime> _recentPositionSubmissions = new(StringComparer.OrdinalIgnoreCase);
-        private readonly ConcurrentDictionary<string, string> _positionIdToBaseId = new(StringComparer.OrdinalIgnoreCase);
         private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
         private readonly object _healthSync = new();
 
@@ -427,24 +425,6 @@ namespace Quantower.MultiStrat
 
         private void OnQuantowerTrade(Trade trade)
         {
-            var positionId = trade?.PositionId;
-
-            // CRITICAL FIX (Issue #1 & #4): Check if this position was recently closed
-            // When a position is closed in Quantower, it generates a closing Trade event
-            // We don't want to send this as a new trade to MT5, as it would reopen the position
-            if (!string.IsNullOrWhiteSpace(positionId) &&
-                _recentClosures.TryGetValue(positionId, out var closureTime))
-            {
-                if ((DateTime.UtcNow - closureTime).TotalSeconds < 2)
-                {
-                    EmitLog(BridgeLogLevel.Debug, $"Skipping trade {trade?.Id} - position {positionId} was recently closed (cooldown active)");
-                    _recentClosures.TryRemove(positionId, out _);
-                    return;
-                }
-                // Cooldown expired, remove from dictionary
-                _recentClosures.TryRemove(positionId, out _);
-            }
-
             if (!QuantowerTradeMapper.TryBuildTradeEnvelope(trade, out var payload, out var tradeId))
             {
                 EmitLog(BridgeLogLevel.Warn, "Unable to translate Quantower trade event into bridge payload", trade?.Id, trade?.PositionId);
@@ -485,29 +465,11 @@ namespace Quantower.MultiStrat
             var positionDetails = $"Position.Id={position?.Id}, Symbol={position?.Symbol?.Name}, Qty={position?.Quantity:F2}";
             EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] OnQuantowerPositionClosed called: {positionDetails}");
 
-            // CRITICAL FIX (Issue #1 & #4): Mark this position as recently closed
-            // This prevents the closing trade from being sent as a new trade to MT5
             var positionId = position?.Id;
-            if (!string.IsNullOrWhiteSpace(positionId))
-            {
-                _recentClosures[positionId] = DateTime.UtcNow;
-                EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Marked position {positionId} as recently closed (cooldown active for 2 seconds)");
-            }
 
-            // CRITICAL FIX: Look up the ORIGINAL baseId that was used when the position was opened
-            // Quantower changes OpenTime.Ticks on close events, so we can't recompute the baseId
-            string? knownBaseId = null;
-            if (!string.IsNullOrWhiteSpace(positionId) && _positionIdToBaseId.TryGetValue(positionId, out var trackedBaseId))
-            {
-                knownBaseId = trackedBaseId;
-                EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Found tracked baseId for position {positionId}: {knownBaseId}");
-            }
-            else
-            {
-                EmitLog(BridgeLogLevel.Warn, $"[CORE EVENT] No tracked baseId found for position {positionId} - will compute from current position data (may cause mismatch!)");
-            }
-
-            if (!QuantowerTradeMapper.TryBuildPositionClosure(position, knownBaseId, out var payload, out var closureId))
+            // Build position closure message using Position.Id as baseId
+            // No need to track baseId separately since Position.Id is stable
+            if (!QuantowerTradeMapper.TryBuildPositionClosure(position, positionId, out var payload, out var closureId))
             {
                 EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] Unable to map Quantower position closure to bridge notification", closureId, closureId);
                 return;
@@ -515,13 +477,6 @@ namespace Quantower.MultiStrat
 
             EmitLog(BridgeLogLevel.Info, $"[CORE EVENT] Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge", closureId, closureId);
             ObserveAsyncOperation(BridgeGrpcClient.SubmitCloseHedgeAsync(payload), "SubmitCloseHedge", closureId ?? "n/a");
-
-            // Clean up the baseId mapping after closing
-            if (!string.IsNullOrWhiteSpace(positionId))
-            {
-                _positionIdToBaseId.TryRemove(positionId, out _);
-                EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Removed baseId mapping for position {positionId}");
-            }
 
             try
             {
@@ -535,26 +490,11 @@ namespace Quantower.MultiStrat
 
         private void OnQuantowerPositionAdded(Position position)
         {
-            // CRITICAL FIX: Prevent spurious position additions during close operations
-            // When a position is being closed, Quantower sometimes fires a PositionAdded event
-            // for the same Position.Id. We need to filter these out to prevent opening new MT5 hedges.
             var rawPositionId = position?.Id;
-            if (!string.IsNullOrWhiteSpace(rawPositionId) &&
-                _recentClosures.TryGetValue(rawPositionId, out var closureTime))
-            {
-                var elapsed = DateTime.UtcNow - closureTime;
-                if (elapsed.TotalSeconds < 2.0)
-                {
-                    EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Skipping position added event for {rawPositionId} - position was recently closed {elapsed.TotalMilliseconds:F0}ms ago (cooldown active)", rawPositionId, rawPositionId);
-                    return;
-                }
-                // Cooldown expired, remove from dictionary
-                _recentClosures.TryRemove(rawPositionId, out _);
-            }
 
             if (QuantowerTradeMapper.TryBuildPositionSnapshot(position, out var tradePayload, out var positionTradeId))
             {
-                // CRITICAL FIX: Prevent duplicate position submissions
+                // Prevent duplicate position submissions
                 // Quantower fires PositionAdded event multiple times in rapid succession
                 // Check if we've already submitted this position recently (within 1 second)
                 if (!string.IsNullOrWhiteSpace(positionTradeId))
@@ -580,14 +520,6 @@ namespace Quantower.MultiStrat
                         {
                             _recentPositionSubmissions.TryRemove(kvp.Key, out _);
                         }
-                    }
-
-                    // CRITICAL FIX: Track the baseId for this position so we can use it when closing
-                    // Quantower changes OpenTime.Ticks on close events, so we need to remember the original baseId
-                    if (!string.IsNullOrWhiteSpace(rawPositionId))
-                    {
-                        _positionIdToBaseId[rawPositionId] = positionTradeId;
-                        EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Tracked baseId mapping: {rawPositionId} -> {positionTradeId}");
                     }
                 }
 
