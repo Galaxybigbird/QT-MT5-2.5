@@ -76,8 +76,13 @@ namespace Quantower.MultiStrat.Infrastructure
 
             // CRITICAL FIX: Filter out historical/closed positions
             // Quantower keeps position IDs in history/memory even after they're closed
-            // Only return positions with Quantity > 0 (active positions)
-            return positions.Where(p => p != null && Math.Abs(p.Quantity) > 0.0).ToArray();
+            // Only return positions with non-zero quantity (active positions)
+            // Use double.Epsilon to filter out effectively zero quantities
+            var activePositions = positions.Where(p => p != null && Math.Abs(p.Quantity) > double.Epsilon).ToArray();
+
+            LogInfo($"SnapshotPositions: Found {activePositions.Length} active positions (filtered from {positions.Count()} total)");
+
+            return activePositions;
         }
 
         public void Dispose()
@@ -180,6 +185,11 @@ namespace Quantower.MultiStrat.Infrastructure
             {
                 throw new ObjectDisposedException(nameof(QuantowerEventBridge));
             }
+        }
+
+        private static void LogInfo(string message)
+        {
+            BridgeGrpcClient.LogInfo(LogComponent, message);
         }
 
         private static void LogWarn(string message)

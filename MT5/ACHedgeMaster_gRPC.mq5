@@ -1,5 +1,5 @@
 #property link      ""
-#property version   "3.60"
+#property version   "3.61"
 #property strict
 #property description "gRPC Hedge Receiver EA for Go bridge server with Asymmetrical Compounding"
 
@@ -4336,14 +4336,14 @@ bool OpenNewHedgeOrder(string hedgeOrigin, string tradeId, string nt_instrument_
 
     /*----------------------------------------------------------------
      2.  Stop-loss distance (ATR-based)
+         CRITICAL FIX: Disable automatic stop loss for hedge positions
+         to maintain 1:1 correlation with Quantower positions.
+         Hedge positions should only close when QT positions close.
     ----------------------------------------------------------------*/
-    double slDist = GetStopLossDistance();
-    if(slDist <= 0)
-    {
-        Print("ERROR – SL distance not available, aborting order.");
-        return false;
-    }
-    double slPoints = slDist / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+    // DISABLED: double slDist = GetStopLossDistance();
+    // Set slDist to 0 to disable automatic stop loss
+    double slDist = 0.0;
+    double slPoints = 0.0;
 
     /*----------------------------------------------------------------
      3.  Determine NT quantity (from group) and calculate volume
@@ -4444,21 +4444,16 @@ bool OpenNewHedgeOrder(string hedgeOrigin, string tradeId, string nt_instrument_
 
     /*----------------------------------------------------------------
      5.  SL / TP
+         CRITICAL FIX: Set SL and TP to 0 to disable automatic stop loss
+         and take profit for hedge positions. Hedge positions should only
+         close when Quantower positions close (1:1 correlation).
     ----------------------------------------------------------------*/
-    double slPrice = (request.type == ORDER_TYPE_BUY)
-                     ? request.price - slDist
-                     : request.price + slDist;
+    // DISABLED: Automatic stop loss and take profit
+    double slPrice = 0.0;  // No automatic stop loss
+    double tpPrice = 0.0;  // No automatic take profit
 
-    double tpPrice = 0.0;
-    if(UseACRiskManagement)
-    {
-        double rr       = currentReward / currentRisk;     // e.g. 3 : 1
-        double tpPoints = slPoints * rr;
-        double tpDist   = tpPoints * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-        tpPrice = (request.type == ORDER_TYPE_BUY)
-                  ? request.price + tpDist
-                  : request.price - tpDist;
-    }
+    // Note: UseACRiskManagement TP logic is disabled for hedge positions
+    // to maintain 1:1 correlation with Quantower positions
 
     /*----------------------------------------------------------------
      6.  Send via CTrade

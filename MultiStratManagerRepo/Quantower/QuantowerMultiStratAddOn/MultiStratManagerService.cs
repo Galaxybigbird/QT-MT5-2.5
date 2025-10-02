@@ -35,9 +35,8 @@ namespace Quantower.MultiStrat
         private readonly object _riskLock = new();
         private readonly object _settingsSaveLock = new();
         private readonly ConcurrentDictionary<string, bool> _processingPositions = new();
-        private readonly ConcurrentDictionary<string, DateTime> _closedPositionCooldowns = new();
         private readonly ConcurrentDictionary<string, string> _baseIdToPositionId = new(StringComparer.OrdinalIgnoreCase);
-        private const int COOLDOWN_SECONDS = 5;
+        private readonly ConcurrentDictionary<string, Order> _stopLossOrders = new(StringComparer.OrdinalIgnoreCase);
         private int _disposed; // 0 = active, 1 = disposed
         private Timer? _riskTimer;
         private bool _coreEventsAttached;
@@ -1232,20 +1231,11 @@ namespace Quantower.MultiStrat
 
             var baseId = GetBaseId(position);
 
-            // CRITICAL FIX 1: Check if position was recently closed (cooldown period)
-            if (_closedPositionCooldowns.TryGetValue(baseId, out var closedTime))
-            {
-                var elapsed = DateTime.UtcNow - closedTime;
-                if (elapsed.TotalSeconds < COOLDOWN_SECONDS)
-                {
-                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Position {baseId} was closed {elapsed.TotalSeconds:F1}s ago - ignoring reopen (cooldown)");
-                    return;
-                }
-                // Cooldown expired, remove from dictionary
-                _closedPositionCooldowns.TryRemove(baseId, out _);
-            }
+            // Log position details for debugging
+            var positionDetails = $"baseId={baseId}, Position.Id={position.Id}, Symbol={position.Symbol?.Name}, Qty={position.Quantity:F2}";
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"HandlePositionAdded called: {positionDetails}");
 
-            // CRITICAL FIX 2: Prevent concurrent processing of the same position
+            // Prevent concurrent processing of the same position
             // Try to add to processing set - if already processing, skip
             if (!_processingPositions.TryAdd(baseId, true))
             {
@@ -1257,15 +1247,16 @@ namespace Quantower.MultiStrat
             {
                 if (!IsAccountEnabled(position))
                 {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Position {baseId} account not enabled - skipping");
                     StopTracking(baseId);
                     _trailingService.RemoveTracker(baseId);
                     return;
                 }
 
-                // CRITICAL FIX 3: Deduplicate position additions
+                // Deduplicate position additions
                 // Positions can be added multiple times:
-                // 1. From SnapshotPositions() at startup
-                // 2. From Core.PositionAdded event
+                // 1. From SnapshotPositions() at startup (via TryPublishPositionSnapshotAsync)
+                // 2. From Core.PositionAdded event (via OnQuantowerPositionAdded)
                 // 3. From RefreshAccountPositions() when account is enabled
                 // Check if we're already tracking this position to avoid duplicates
                 lock (_trackingLock)
@@ -1277,7 +1268,7 @@ namespace Quantower.MultiStrat
                     }
                 }
 
-                // CRITICAL FIX (Issue #2): Maintain baseId → Position.Id mapping
+                // Maintain baseId → Position.Id mapping
                 // This allows us to find Quantower positions when MT5 sends closure notifications
                 if (!string.IsNullOrWhiteSpace(baseId) && !string.IsNullOrWhiteSpace(position.Id))
                 {
@@ -1285,6 +1276,7 @@ namespace Quantower.MultiStrat
                     EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Mapped baseId {baseId} -> Position.Id {position.Id}");
                 }
 
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Starting tracking for position {baseId}");
                 _trailingService.RegisterPosition(baseId, position);
                 SendElasticAndTrailing(position, baseId);
                 StartTracking(position, baseId);
@@ -1303,31 +1295,45 @@ namespace Quantower.MultiStrat
                 return;
             }
 
+            // Log position details for debugging
+            var positionDetails = $"Position.Id={position.Id}, Symbol={position.Symbol?.Name}, Qty={position.Quantity:F2}";
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"HandlePositionRemoved called: {positionDetails}");
+
             var existingBaseId = TryResolveTrackedBaseId(position);
             if (!string.IsNullOrWhiteSpace(existingBaseId))
             {
-                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Quantower position removed ({existingBaseId}) - stopping tracking");
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Quantower position removed ({existingBaseId}) - stopping tracking and cleaning up mappings");
 
-                // Add to cooldown dictionary to prevent immediate reopening
-                _closedPositionCooldowns[existingBaseId] = DateTime.UtcNow;
-
-                // CRITICAL FIX (Issue #2): Remove baseId → Position.Id mapping
+                // Remove baseId → Position.Id mapping
                 _baseIdToPositionId.TryRemove(existingBaseId, out _);
 
+                // Remove stop loss order tracking
+                if (_stopLossOrders.TryRemove(existingBaseId, out _))
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"🗑️ Removed stop loss order tracking for {existingBaseId}");
+                }
+
+                // Stop tracking and remove from trailing service
                 StopTracking(existingBaseId);
+                _trailingService.RemoveTracker(existingBaseId);
                 return;
             }
 
             var baseId = GetBaseId(position);
-            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Quantower position removed ({baseId}) - stopping tracking");
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Quantower position removed ({baseId}) - stopping tracking and cleaning up mappings");
 
-            // Add to cooldown dictionary to prevent immediate reopening
-            _closedPositionCooldowns[baseId] = DateTime.UtcNow;
-
-            // CRITICAL FIX (Issue #2): Remove baseId → Position.Id mapping
+            // Remove baseId → Position.Id mapping
             _baseIdToPositionId.TryRemove(baseId, out _);
 
+            // Remove stop loss order tracking
+            if (_stopLossOrders.TryRemove(baseId, out _))
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"🗑️ Removed stop loss order tracking for {baseId}");
+            }
+
+            // Stop tracking and remove from trailing service
             StopTracking(baseId);
+            _trailingService.RemoveTracker(baseId);
         }
 
         private void SendElasticAndTrailing(Position position, string? cachedBaseId = null)
@@ -1356,20 +1362,24 @@ namespace Quantower.MultiStrat
                     {
                         EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"🎯 Updating Quantower stop loss for {baseId} - newStop={newStopPrice:F2}");
 
-                        // CRITICAL FIX: Create or modify the Quantower position's stop loss!
-                        if (position.StopLoss != null)
+                        // CRITICAL FIX: Track stop loss orders ourselves and modify them instead of creating new ones
+                        // Quantower doesn't automatically link stop loss orders to positions via position.StopLoss
+                        // So we maintain our own dictionary of stop loss orders keyed by baseId
+
+                        if (_stopLossOrders.TryGetValue(baseId, out var existingOrder))
                         {
-                            // Stop loss order exists - modify it
+                            // Stop loss order exists in our tracking - modify it
                             try
                             {
-                                var result = Core.Instance.ModifyOrder(position.StopLoss, price: newStopPrice);
+                                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"📝 Modifying existing stop loss order for {baseId} to {newStopPrice:F2}");
+                                var result = Core.Instance.ModifyOrder(existingOrder, price: newStopPrice);
                                 if (result.Status == TradingOperationResultStatus.Success)
                                 {
-                                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"✅ Successfully updated Quantower stop loss to {newStopPrice:F2}");
+                                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"✅ Successfully modified Quantower stop loss to {newStopPrice:F2}");
                                 }
                                 else
                                 {
-                                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"❌ Failed to update Quantower stop loss: {result.Message}");
+                                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"❌ Failed to modify Quantower stop loss: {result.Message}");
                                 }
                             }
                             catch (Exception modifyEx)
@@ -1379,7 +1389,7 @@ namespace Quantower.MultiStrat
                         }
                         else
                         {
-                            // Stop loss order doesn't exist - create it using PlaceOrder
+                            // Stop loss order doesn't exist in our tracking - create it using PlaceOrder
                             EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"📝 Creating new stop loss order for {baseId} at {newStopPrice:F2}");
 
                             try
@@ -1395,13 +1405,29 @@ namespace Quantower.MultiStrat
                                     Side = stopSide,
                                     OrderTypeId = OrderType.Stop,
                                     TriggerPrice = newStopPrice,
-                                    Quantity = position.Quantity,
+                                    Quantity = Math.Abs(position.Quantity),
                                     TimeInForce = TimeInForce.GTC
                                 });
 
                                 if (result.Status == TradingOperationResultStatus.Success)
                                 {
                                     EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"✅ Successfully created Quantower stop loss at {newStopPrice:F2}");
+
+                                    // Store the order in our tracking dictionary so we can modify it next time
+                                    // The order should now be linked to the position via position.StopLoss
+                                    // Wait a moment for Quantower to link the order to the position
+                                    System.Threading.Thread.Sleep(100);
+
+                                    // Try to get the stop loss order from the position
+                                    if (position.StopLoss != null)
+                                    {
+                                        _stopLossOrders[baseId] = position.StopLoss;
+                                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"📌 Stored stop loss order for {baseId} in tracking dictionary");
+                                    }
+                                    else
+                                    {
+                                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"⚠️ Stop loss order created but not yet linked to position {baseId}");
+                                    }
                                 }
                                 else
                                 {
@@ -1958,18 +1984,40 @@ namespace Quantower.MultiStrat
 
         private string GetBaseId(Position position)
         {
-            if (!string.IsNullOrWhiteSpace(position.Id))
+            // CRITICAL FIX: Quantower DOES reuse Position IDs across different positions!
+            // We must create a unique baseId using Position.Id + OpenTime.Ticks.
+            //
+            // This MUST match the logic in QuantowerTradeMapper.ComputeBaseId() to ensure
+            // that the baseId used when sending positions to the bridge matches the baseId
+            // used for tracking and elastic/trailing updates.
+            //
+            // OpenTime.Ticks provides 100-nanosecond precision, which is sufficient to
+            // distinguish between positions opened at different times, even if they have
+            // the same Position.Id (due to Quantower's ID reuse).
+            //
+            // Example scenarios:
+            //   - Trade 1: "abc123" at 10:00:00.1234567 → baseId = "abc123_637759360001234567"
+            //   - Trade 2: "abc123" at 10:00:05.7654321 → baseId = "abc123_637759360057654321" ← Different!
+            //   - Trade 3: "abc123" at 10:05:00.0000000 → baseId = "abc123_637759363000000000" ← Different!
+            //
+            // This ensures each position gets its own MT5 hedge, achieving 1:1 mapping.
+
+            var positionId = position.Id;
+            var openTimeTicks = position.OpenTime != default
+                ? position.OpenTime.Ticks
+                : DateTime.UtcNow.Ticks;
+
+            if (!string.IsNullOrWhiteSpace(positionId))
             {
-                return position.Id;
+                // Use position.Id + OpenTime.Ticks to create a unique baseId
+                // This matches QuantowerTradeMapper.ComputeBaseId() logic
+                return $"{positionId}_{openTimeTicks}";
             }
 
-            // Fallback: generate a unique ID based on account, symbol, and open time
+            // Fallback: generate a unique ID based on account, symbol, and time
             var accountId = GetAccountId(position.Account) ?? "account";
             var symbolName = position.Symbol?.Name ?? "symbol";
-            var seed = position.OpenTime != default
-                ? position.OpenTime.Ticks
-                : unchecked((long)(uint)RuntimeHelpers.GetHashCode(position));
-            return $"{accountId}:{symbolName}:{seed}";
+            return $"{accountId}:{symbolName}:{openTimeTicks}";
         }
 
         private string? TryResolveTrackedBaseId(Position position)

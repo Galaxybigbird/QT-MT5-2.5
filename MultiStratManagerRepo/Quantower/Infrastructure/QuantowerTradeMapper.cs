@@ -18,6 +18,30 @@ namespace Quantower.MultiStrat.Infrastructure
             WriteIndented = false
         };
 
+        /// <summary>
+        /// Computes a composite baseId for a position using Position.Id + OpenTime.Ticks.
+        /// This ensures unique baseIds even when Quantower reuses Position.Id across different positions.
+        /// </summary>
+        public static string ComputeBaseId(Position position)
+        {
+            if (position == null)
+            {
+                return string.Empty;
+            }
+
+            var positionId = SafeString(position.Id);
+            if (string.IsNullOrWhiteSpace(positionId))
+            {
+                return string.Empty;
+            }
+
+            var openTimeTicks = position.OpenTime != default
+                ? position.OpenTime.Ticks
+                : DateTime.UtcNow.Ticks;
+
+            return $"{positionId}_{openTimeTicks}";
+        }
+
         private static void ReportError(string message, Exception ex)
         {
             if (LogError != null)
@@ -122,7 +146,8 @@ namespace Quantower.MultiStrat.Infrastructure
 
                 var positionId = SafeString(position.Id);
 
-                // CRITICAL: base_id MUST be Quantower Position.Id for proper correlation
+                // CRITICAL: base_id MUST use composite baseId (Position.Id + OpenTime.Ticks)
+                // to ensure uniqueness when Quantower reuses Position.Id across different positions
                 if (string.IsNullOrWhiteSpace(positionId))
                 {
                     ReportError($"[QT][ERROR] Position missing required Position.Id - cannot process snapshot.", null);
@@ -131,11 +156,21 @@ namespace Quantower.MultiStrat.Infrastructure
                     return false;
                 }
 
-                positionTradeId = positionId;
+                // Compute composite baseId for uniqueness
+                var baseId = ComputeBaseId(position);
+                if (string.IsNullOrWhiteSpace(baseId))
+                {
+                    ReportError($"[QT][ERROR] Failed to compute baseId for position - cannot process snapshot.", null);
+                    json = string.Empty;
+                    positionTradeId = null;
+                    return false;
+                }
+
+                positionTradeId = baseId;  // Use composite baseId as the trade ID
 
                 payload["id"] = positionTradeId;
-                payload["base_id"] = positionId;  // REQUIRED: Only use PositionId as base_id
-                payload["qt_position_id"] = positionId;  // Always include for audit trail
+                payload["base_id"] = baseId;  // CRITICAL: Use composite baseId for uniqueness
+                payload["qt_position_id"] = positionId;  // Always include original Position.Id for audit trail
 
                 AddInstrument(payload, position.Symbol);
                 AddAccount(payload, position.Account);
@@ -185,7 +220,8 @@ namespace Quantower.MultiStrat.Infrastructure
 
                 var resolvedPositionId = SafeString(position.Id);
 
-                // CRITICAL: base_id MUST be Quantower Position.Id for proper correlation
+                // CRITICAL: base_id MUST use composite baseId (Position.Id + OpenTime.Ticks)
+                // to match the baseId used when the position was opened
                 if (string.IsNullOrWhiteSpace(resolvedPositionId))
                 {
                     ReportError($"[QT][ERROR] Position missing required Position.Id - cannot process closure.", null);
@@ -194,11 +230,21 @@ namespace Quantower.MultiStrat.Infrastructure
                     return false;
                 }
 
-                payload["id"] = resolvedPositionId;
-                payload["base_id"] = resolvedPositionId;  // REQUIRED: Only use PositionId as base_id
-                payload["qt_position_id"] = resolvedPositionId;  // Always include for audit trail
+                // Compute composite baseId to match the opening event
+                var baseId = ComputeBaseId(position);
+                if (string.IsNullOrWhiteSpace(baseId))
+                {
+                    ReportError($"[QT][ERROR] Failed to compute baseId for position closure.", null);
+                    json = string.Empty;
+                    positionId = null;
+                    return false;
+                }
 
-                positionId = resolvedPositionId;
+                payload["id"] = baseId;
+                payload["base_id"] = baseId;  // CRITICAL: Use composite baseId to match opening
+                payload["qt_position_id"] = resolvedPositionId;  // Always include original Position.Id for audit trail
+
+                positionId = baseId;
 
                 AddStrategyTag(payload, position.Comment, position.AdditionalInfo);
                 AddClosureInstrumentAndAccount(payload, position.Symbol, position.Account);

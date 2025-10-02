@@ -471,7 +471,7 @@ namespace Quantower.MultiStrat
         {
             if (QuantowerTradeMapper.TryBuildPositionSnapshot(position, out var tradePayload, out var positionTradeId))
             {
-                EmitLog(BridgeLogLevel.Info, $"Streaming existing position as trade snapshot ({positionTradeId ?? "n/a"})", positionTradeId, positionTradeId);
+                EmitLog(BridgeLogLevel.Info, $"[SNAPSHOT] Streaming existing position as trade snapshot ({positionTradeId ?? "n/a"}) - Symbol={position.Symbol?.Name}, Qty={position.Quantity:F2}", positionTradeId, positionTradeId);
                 await DispatchWithLoggingAsync(() => BridgeGrpcClient.SubmitTradeAsync(tradePayload), "SubmitTradeSnapshot", positionTradeId ?? "n/a").ConfigureAwait(false);
             }
 
@@ -480,22 +480,26 @@ namespace Quantower.MultiStrat
 
         private void OnQuantowerPositionClosed(Position position)
         {
+            // Log position details for debugging
+            var positionDetails = $"Position.Id={position?.Id}, Symbol={position?.Symbol?.Name}, Qty={position?.Quantity:F2}";
+            EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] OnQuantowerPositionClosed called: {positionDetails}");
+
             // CRITICAL FIX (Issue #1 & #4): Mark this position as recently closed
             // This prevents the closing trade from being sent as a new trade to MT5
             var positionId = position?.Id;
             if (!string.IsNullOrWhiteSpace(positionId))
             {
                 _recentClosures[positionId] = DateTime.UtcNow;
-                EmitLog(BridgeLogLevel.Debug, $"Marked position {positionId} as recently closed (cooldown active for 2 seconds)");
+                EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Marked position {positionId} as recently closed (cooldown active for 2 seconds)");
             }
 
             if (!QuantowerTradeMapper.TryBuildPositionClosure(position, out var payload, out var closureId))
             {
-                EmitLog(BridgeLogLevel.Warn, "Unable to map Quantower position closure to bridge notification", closureId, closureId);
+                EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] Unable to map Quantower position closure to bridge notification", closureId, closureId);
                 return;
             }
 
-            EmitLog(BridgeLogLevel.Info, $"Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge", closureId, closureId);
+            EmitLog(BridgeLogLevel.Info, $"[CORE EVENT] Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge", closureId, closureId);
             ObserveAsyncOperation(BridgeGrpcClient.SubmitCloseHedgeAsync(payload), "SubmitCloseHedge", closureId ?? "n/a");
 
             try
@@ -504,12 +508,29 @@ namespace Quantower.MultiStrat
             }
             catch (Exception ex)
             {
-                EmitLog(BridgeLogLevel.Warn, "PositionRemoved listener threw", position.Id, ex.Message);
+                EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] PositionRemoved listener threw", position.Id, ex.Message);
             }
         }
 
         private void OnQuantowerPositionAdded(Position position)
         {
+            // CRITICAL FIX: Prevent spurious position additions during close operations
+            // When a position is being closed, Quantower sometimes fires a PositionAdded event
+            // for the same Position.Id. We need to filter these out to prevent opening new MT5 hedges.
+            var rawPositionId = position?.Id;
+            if (!string.IsNullOrWhiteSpace(rawPositionId) &&
+                _recentClosures.TryGetValue(rawPositionId, out var closureTime))
+            {
+                var elapsed = DateTime.UtcNow - closureTime;
+                if (elapsed.TotalSeconds < 2.0)
+                {
+                    EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Skipping position added event for {rawPositionId} - position was recently closed {elapsed.TotalMilliseconds:F0}ms ago (cooldown active)", rawPositionId, rawPositionId);
+                    return;
+                }
+                // Cooldown expired, remove from dictionary
+                _recentClosures.TryRemove(rawPositionId, out _);
+            }
+
             if (QuantowerTradeMapper.TryBuildPositionSnapshot(position, out var tradePayload, out var positionTradeId))
             {
                 // CRITICAL FIX: Prevent duplicate position submissions
@@ -522,7 +543,7 @@ namespace Quantower.MultiStrat
                         var elapsed = DateTime.UtcNow - lastSubmitTime;
                         if (elapsed.TotalSeconds < 1.0)
                         {
-                            EmitLog(BridgeLogLevel.Debug, $"Position {positionTradeId} was submitted {elapsed.TotalMilliseconds:F0}ms ago - skipping duplicate", positionTradeId, positionTradeId);
+                            EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Position {positionTradeId} was submitted {elapsed.TotalMilliseconds:F0}ms ago - skipping duplicate", positionTradeId, positionTradeId);
                             return;
                         }
                     }
@@ -541,7 +562,7 @@ namespace Quantower.MultiStrat
                     }
                 }
 
-                EmitLog(BridgeLogLevel.Info, $"Quantower position added ({positionTradeId ?? "n/a"}) -> notifying bridge", positionTradeId, positionTradeId);
+                EmitLog(BridgeLogLevel.Info, $"[CORE EVENT] Quantower position added ({positionTradeId ?? "n/a"}) - Symbol={position.Symbol?.Name}, Qty={position.Quantity:F2} -> notifying bridge", positionTradeId, positionTradeId);
                 ObserveAsyncOperation(BridgeGrpcClient.SubmitTradeAsync(tradePayload), "SubmitTradeSnapshot", positionTradeId ?? "n/a");
             }
 
@@ -551,7 +572,7 @@ namespace Quantower.MultiStrat
             }
             catch (Exception ex)
             {
-                EmitLog(BridgeLogLevel.Warn, "PositionAdded listener threw", position.Id, ex.Message);
+                EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] PositionAdded listener threw", position.Id, ex.Message);
             }
         }
 
