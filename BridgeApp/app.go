@@ -1230,9 +1230,13 @@ func (a *App) HandleCloseHedgeRequest(request interface{}) error {
 		a.recordInstrumentAccount(baseID, inst, acct)
 	}
 
-	// CRITICAL FIX: Since we removed trade splitting, each QT position = 1 MT5 hedge
-	// Always close exactly 1 ticket per close request, regardless of quantity
-	qty := 1
+	// CRITICAL: Read closed_hedge_quantity from request to close the correct number of hedges
+	// This supports n QT trades = n MT5 hedges (each contract gets its own hedge)
+	closedQty := getQuantityFromRequest(request)
+	qty := int(closedQty)
+	if qty < 1 {
+		qty = 1 // Safety fallback
+	}
 
 	providedTicket := getMT5TicketFromRequest(request)
 	if providedTicket != 0 {
@@ -1250,7 +1254,7 @@ func (a *App) HandleCloseHedgeRequest(request interface{}) error {
 		pollInterval  = 50 * time.Millisecond
 	)
 
-	log.Printf("gRPC: Closing 1 MT5 ticket for BaseID %s (1 QT position = 1 MT5 hedge)", baseID)
+	log.Printf("gRPC: Closing %d MT5 ticket(s) for BaseID %s (n QT trades = n MT5 hedges)", qty, baseID)
 
 	allocated := make([]uint64, 0, qty)
 	for i := 0; i < qty; i++ {

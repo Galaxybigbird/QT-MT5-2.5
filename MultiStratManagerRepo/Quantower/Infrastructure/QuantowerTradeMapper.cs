@@ -199,7 +199,7 @@ namespace Quantower.MultiStrat.Infrastructure
             return false;
         }
 
-        public static bool TryBuildPositionClosure(Position position, string? knownBaseId, out string json, out string? positionId)
+        public static bool TryBuildPositionClosure(Position position, string? knownBaseId, int? closedContractCount, out string json, out string? positionId)
         {
             json = string.Empty;
             positionId = null;
@@ -258,9 +258,22 @@ namespace Quantower.MultiStrat.Infrastructure
 
                 AddStrategyTag(payload, position.Comment, position.AdditionalInfo);
                 AddClosureInstrumentAndAccount(payload, position.Symbol, position.Account);
-                var normalizedQuantity = Math.Abs(position.Quantity);
-                payload["closed_hedge_quantity"] = normalizedQuantity;
-                payload["closed_hedge_action"] = ResolveAction(position.Side, normalizedQuantity);
+
+                // CRITICAL: Use closedContractCount if provided (for n trades = n hedges)
+                // This tells the bridge how many MT5 hedges to close
+                double closedQuantity;
+                if (closedContractCount.HasValue && closedContractCount.Value > 0)
+                {
+                    closedQuantity = closedContractCount.Value;
+                }
+                else
+                {
+                    // Fallback to position quantity for backward compatibility
+                    closedQuantity = Math.Abs(position.Quantity);
+                }
+
+                payload["closed_hedge_quantity"] = closedQuantity;
+                payload["closed_hedge_action"] = ResolveAction(position.Side, closedQuantity);
 
                 var closeTime = GetDateTimeValue(position, "CloseTime", "ExecutionTime", "Time", "DateTime", "Timestamp")
                                  ?? DateTime.UtcNow;

@@ -37,6 +37,8 @@ namespace Quantower.MultiStrat
         private readonly ConcurrentDictionary<string, bool> _processingPositions = new();
         private readonly ConcurrentDictionary<string, string> _baseIdToPositionId = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, Order> _stopLossOrders = new(StringComparer.OrdinalIgnoreCase);
+        // Track initial position quantities for proper hedge closure (n trades = n hedges)
+        private readonly ConcurrentDictionary<string, int> _baseIdToInitialQuantity = new(StringComparer.OrdinalIgnoreCase);
         private int _disposed; // 0 = active, 1 = disposed
         private Timer? _riskTimer;
         private bool _coreEventsAttached;
@@ -58,6 +60,8 @@ namespace Quantower.MultiStrat
             _bridgeService.PositionAdded += HandlePositionAdded;
             _bridgeService.PositionRemoved += HandlePositionRemoved;
             _bridgeService.StreamEnvelopeReceived += OnBridgeStreamEnvelopeReceived;
+            // Wire up callback for getting tracked quantities (n trades = n hedges)
+            _bridgeService.GetTrackedQuantity = GetTrackedInitialQuantity;
             _accountsView = new ReadOnlyObservableCollection<AccountSubscription>(_accounts);
             LoadSettings();
             StartRiskTimer();
@@ -1276,6 +1280,12 @@ namespace Quantower.MultiStrat
                     EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Mapped baseId {baseId} -> Position.Id {position.Id}");
                 }
 
+                // Track initial position quantity for proper hedge closure (n trades = n hedges)
+                // Store the absolute quantity (number of contracts) when position is first opened
+                var initialQuantity = (int)Math.Abs(position.Quantity);
+                _baseIdToInitialQuantity[baseId] = initialQuantity;
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Stored initial quantity {initialQuantity} for baseId {baseId}");
+
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Starting tracking for position {baseId}");
                 _trailingService.RegisterPosition(baseId, position);
                 SendElasticAndTrailing(position, baseId);
@@ -1306,6 +1316,9 @@ namespace Quantower.MultiStrat
 
                 // Remove baseId → Position.Id mapping
                 _baseIdToPositionId.TryRemove(existingBaseId, out _);
+
+                // Remove initial quantity tracking
+                _baseIdToInitialQuantity.TryRemove(existingBaseId, out _);
 
                 // Remove stop loss order tracking
                 if (_stopLossOrders.TryRemove(existingBaseId, out _))
@@ -1523,6 +1536,9 @@ namespace Quantower.MultiStrat
                     // ignore disposal errors
                 }
             }
+
+            // Clean up quantity tracking
+            _baseIdToInitialQuantity.TryRemove(baseId, out _);
 
             _trailingService.RemoveTracker(baseId);
         }
@@ -2055,6 +2071,26 @@ namespace Quantower.MultiStrat
             {
                 throw new ObjectDisposedException(nameof(MultiStratManagerService));
             }
+        }
+
+        /// <summary>
+        /// Gets the tracked initial quantity for a position by its baseId.
+        /// Returns null if no quantity was tracked for this baseId.
+        /// This is used to determine how many MT5 hedges to close (n trades = n hedges).
+        /// </summary>
+        public int? GetTrackedInitialQuantity(string baseId)
+        {
+            if (string.IsNullOrWhiteSpace(baseId))
+            {
+                return null;
+            }
+
+            if (_baseIdToInitialQuantity.TryGetValue(baseId, out var quantity))
+            {
+                return quantity;
+            }
+
+            return null;
         }
     }
 }

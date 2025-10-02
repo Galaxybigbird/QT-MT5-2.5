@@ -39,6 +39,12 @@ namespace Quantower.MultiStrat
         public event Action<BridgeGrpcClient.StreamingState, string?>? StreamingStateChanged;
         public event Action<BridgeStreamEnvelope>? StreamEnvelopeReceived;
 
+        /// <summary>
+        /// Callback to get the tracked initial quantity for a position.
+        /// Used to determine how many MT5 hedges to close (n trades = n hedges).
+        /// </summary>
+        public Func<string, int?>? GetTrackedQuantity { get; set; }
+
         public bool IsRunning => _isRunning;
 
         public bool IsOnline => _isRunning && _streamHealthy;
@@ -467,15 +473,26 @@ namespace Quantower.MultiStrat
 
             var positionId = position?.Id;
 
+            // Get the tracked initial quantity for proper hedge closure (n trades = n hedges)
+            int? closedContractCount = null;
+            if (!string.IsNullOrWhiteSpace(positionId) && GetTrackedQuantity != null)
+            {
+                closedContractCount = GetTrackedQuantity(positionId);
+                if (closedContractCount.HasValue)
+                {
+                    EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Retrieved tracked quantity {closedContractCount.Value} for position {positionId}");
+                }
+            }
+
             // Build position closure message using Position.Id as baseId
-            // No need to track baseId separately since Position.Id is stable
-            if (!QuantowerTradeMapper.TryBuildPositionClosure(position, positionId, out var payload, out var closureId))
+            // Pass the tracked quantity so the bridge knows how many hedges to close
+            if (!QuantowerTradeMapper.TryBuildPositionClosure(position, positionId, closedContractCount, out var payload, out var closureId))
             {
                 EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] Unable to map Quantower position closure to bridge notification", closureId, closureId);
                 return;
             }
 
-            EmitLog(BridgeLogLevel.Info, $"[CORE EVENT] Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge", closureId, closureId);
+            EmitLog(BridgeLogLevel.Info, $"[CORE EVENT] Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge (closing {closedContractCount?.ToString() ?? "unknown"} hedge(s))", closureId, closureId);
             ObserveAsyncOperation(BridgeGrpcClient.SubmitCloseHedgeAsync(payload), "SubmitCloseHedge", closureId ?? "n/a");
 
             try

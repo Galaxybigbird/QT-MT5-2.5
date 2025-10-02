@@ -220,21 +220,52 @@ func (s *Server) SubmitTrade(ctx context.Context, req *trading.Trade) (*trading.
 	}, nil
 }
 
-// enqueueTradeWithSplit handles trade enqueueing without splitting.
-// CRITICAL FIX: Do NOT split multi-quantity trades - each QT position should create exactly 1 MT5 hedge
-// regardless of quantity. This ensures 1 QT trade = 1 MT5 hedge for proper correlation.
+// enqueueTradeWithSplit handles trade enqueueing WITH splitting for multi-contract trades.
+// CRITICAL: Split multi-quantity trades so each QT contract creates exactly 1 MT5 hedge.
+// This ensures n QT trades = n MT5 hedges for proper 1:1 correlation.
 func (s *Server) enqueueTradeWithSplit(req *trading.Trade) error {
 	// Convert to internal once as a base template
 	base := convertProtoToInternalTrade(req)
 
-	// REMOVED SPLITTING LOGIC: Each trade is sent to MT5 as-is with its original quantity
-	// This ensures 1 QT position = 1 MT5 hedge, making closing logic straightforward
-
-	// Default path: no split
-	if err := s.app.AddToTradeQueue(base); err != nil {
-		return err
+	// Check if we need to split based on quantity
+	quantity := int(req.Quantity)
+	if quantity <= 1 {
+		// Single contract - no splitting needed
+		if err := s.app.AddToTradeQueue(base); err != nil {
+			return err
+		}
+		s.app.AddToTradeHistory(base)
+		return nil
 	}
-	s.app.AddToTradeHistory(base)
+
+	// Multi-contract trade - split into individual hedges
+	log.Printf("gRPC: Splitting trade %s (base_id=%s) into %d individual hedges", req.Id, req.BaseId, quantity)
+
+	for i := 1; i <= quantity; i++ {
+		// Create a copy for this contract
+		split := *base
+
+		// Generate unique ID for this split trade
+		split.ID = fmt.Sprintf("%s-%d", base.ID, i)
+
+		// Each split trade has quantity=1
+		split.Quantity = 1.0
+
+		// Track the total quantity and which contract this is
+		split.TotalQuantity = quantity
+		split.ContractNum = i
+
+		// Enqueue this split trade
+		if err := s.app.AddToTradeQueue(&split); err != nil {
+			log.Printf("gRPC: Failed to enqueue split trade %d/%d for %s: %v", i, quantity, req.Id, err)
+			return fmt.Errorf("failed to enqueue split trade %d/%d: %w", i, quantity, err)
+		}
+
+		s.app.AddToTradeHistory(&split)
+		log.Printf("gRPC: Enqueued split trade %s (contract %d/%d) for base_id=%s", split.ID, i, quantity, req.BaseId)
+	}
+
+	log.Printf("gRPC: Successfully split and enqueued %d hedges for trade %s", quantity, req.Id)
 	return nil
 }
 
