@@ -1385,9 +1385,10 @@ namespace Quantower.MultiStrat
                         if (_baseIdToInitialQuantity.TryGetValue(baseId, out var trackedQty) && trackedQty != newQuantity)
                         {
                             // Quantity changed - this is a NEW position with same ID (Quantower reused the ID)
-                            // Update the tracked quantity and allow reprocessing
-                            _baseIdToInitialQuantity[baseId] = newQuantity;
-                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Position {baseId} quantity changed from {trackedQty} to {newQuantity} - updating tracked quantity and reprocessing");
+                            // Update ONLY the current quantity, NOT the initial quantity
+                            // Initial quantity should remain unchanged for proper hedge closure
+                            _baseIdToCurrentQuantity[baseId] = newQuantity;
+                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Position {baseId} quantity changed from {trackedQty} to {newQuantity} - updating current quantity and reprocessing");
                             // Remove from tracking states to allow reprocessing
                             _trackingStates.Remove(baseId);
                         }

@@ -22,52 +22,13 @@ Do you want to start monitoring logs now? (y/n): y
 Monitoring plugin logs (press Ctrl+C to stop)...
 Writing to: C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt
 
-[19:14:57] MultiStratPlugin static ctor loaded.
-[19:14:57] GetInfo() called
-[19:14:57] GetInfo() returning plugin info: Name=MultiStratQuantower, Title=Multi-Strat Bridge, Template=layout.html
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\chrome_elf.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\d3dcompiler_47.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\dxcompiler.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\dxil.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\Ijwhost.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\libcef.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\msvcp140.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\Ijwhost.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\libcef.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\msvcp140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcamp140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vccorlib140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcomp140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140_1.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vk_swiftshader.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vulkan-1.dll' is invalid.
-[19:14:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\msvcp140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcamp140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vccorlib140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcomp140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140_1.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vk_swiftshader.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vulkan-1.dll' is invalid.
-[19:15:03] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
-[19:15:03] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcamp140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vccorlib140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcomp140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140_1.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vk_swiftshader.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vulkan-1.dll' is invalid.
-[19:15:03] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
-[19:15:03] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
-[19:15:07] FirstChanceException: System.NullReferenceException: Object reference not set to an instance of an object.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140_1.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vk_swiftshader.dll' is invalid.
-[19:14:59] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vulkan-1.dll' is invalid.
-[19:15:03] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
-[19:15:03] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
-[19:15:07] FirstChanceException: System.NullReferenceException: Object reference not set to an instance of an object.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\Ijwhost.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\libcef.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\msvcp140.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcamp140.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vccorlib140.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcomp140.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140.dll' is invalid.
 Add-Content : The process cannot access the file 
 'C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt' because it is being  
 used by another process.
@@ -80,179 +41,125 @@ ng.ps1:86 char:21
     + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Co  
    mmands.AddContentCommand
 
-[19:15:07] FirstChanceException: Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: 'System.Dynamic.ExpandoObject' does not contain a definition for 'left'
-[19:15:07] FirstChanceException: Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: 'System.Dynamic.ExpandoObject' does not contain a definition for 'top'
-[19:15:07] FirstChanceException: Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: 'System.Dynamic.ExpandoObject' does not contain a definition for 'width'
-[19:15:07] FirstChanceException: Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: 'System.Dynamic.ExpandoObject' does not contain a definition for 'height'
-[19:15:12] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[]}
-[19:15:12] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[]}
-[19:15:12] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[]}
-[19:15:12] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[]}
-[19:15:12] [02:15:12] Info: Bridge connection established
-[19:15:12] [02:15:12] Info: Connected to 127.0.0.1:50051
-[19:15:12] [02:15:12] Info: Auto-connect connected to 127.0.0.1:50051
-[19:15:12] [02:15:12] Info: Connected to 127.0.0.1:50051
-[19:15:12] UI status callback: connected=False, reconnecting=False, stream_state=disconnected, busy=True, label=Connecting...
-[19:15:12] UI status callback: connected=True, reconnecting=False, stream_state=connected, busy=False, label=Connected to 127.0.0.1:50051
-[19:15:12] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[]}
-[19:15:12] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[]}
-[19:15:12] [02:15:12] Info: Bridge connection established
-[19:15:12] [02:15:12] Info: Connected to 127.0.0.1:50051
-[19:15:12] [02:15:12] Info: Auto-connect connected to 127.0.0.1:50051
-[19:15:12] [02:15:12] Info: Connected to 127.0.0.1:50051
-[19:15:12] UI status callback: connected=False, reconnecting=False, stream_state=disconnected, busy=True, label=Connecting...
-[19:15:12] UI status callback: connected=True, reconnecting=False, stream_state=connected, busy=False, label=Connected to 127.0.0.1:50051
-[19:15:20] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true}]}
-[19:15:20] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
-[19:15:12] [02:15:12] Info: Auto-connect connected to 127.0.0.1:50051
-[19:15:12] [02:15:12] Info: Connected to 127.0.0.1:50051
-[19:15:12] UI status callback: connected=False, reconnecting=False, stream_state=disconnected, busy=True, label=Connecting...
-[19:15:12] UI status callback: connected=True, reconnecting=False, stream_state=connected, busy=False, label=Connected to 127.0.0.1:50051
-[19:15:20] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true}]}
-[19:15:20] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
-[19:16:15] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request..
-[19:16:15] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request..
-[19:16:15] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request..
-[19:16:15] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request..
-[19:16:18] [02:16:18] Info: [CORE EVENT] Quantower position added (aea18ba1c7ce4100ba36fbf84489edeb) - Symbol=NQZ5, Qty=1.00 -> notifying bridge
-[19:16:18] [02:16:18] Debug: HandlePositionAdded called: baseId=aea18ba1c7ce4100ba36fbf84489edeb, Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=1.00
-[19:16:18] [02:16:18] Debug: Mapped baseId aea18ba1c7ce4100ba36fbf84489edeb -> Position.Id aea18ba1c7ce4100ba36fbf84489edeb
-[19:16:18] [02:16:18] Debug: Stored initial quantity 1 for baseId aea18ba1c7ce4100ba36fbf84489edeb
-[19:16:18] [02:16:18] Info: Starting tracking for position aea18ba1c7ce4100ba36fbf84489edeb
-[19:16:18] [02:16:18] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
-[19:16:18] [02:16:18] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:18] [02:16:18] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
-[19:16:18] [02:16:18] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:18] [02:16:18] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:21] [02:16:21] Info: [CORE EVENT] Quantower position closed (aea18ba1c7ce4100ba36fbf84489edeb) -> notifying bridge (closing 1 hedge(s))
-[19:16:21] [02:16:21] Debug: HandlePositionRemoved called: Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=1.00
-[19:16:21] [02:16:21] Info: Quantower position removed (aea18ba1c7ce4100ba36fbf84489edeb) - stopping tracking and cleaning up mappings
-[19:16:21] [02:16:21] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:21] [02:16:21] Debug: Bridge stream payload received: {"id":"mt5close_result_1759371381492250600","base_id":"aea18ba1c7ce4100ba36fbf84489edeb","timestamp":1759371381,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"NT_CLOSE_ACK","measurement_pips":0,"raw_measurement":0,"instrument":"NQZ5","instrument_name":"NQZ5","account_name":"Account 1 (USD)","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"success","nt_session_trades":0,"mt5_ticket":55279651,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
-[19:16:21] [02:16:21] Info: MT5 close notification for aea18ba1c7ce4100ba36fbf84489edeb: tradeResult='success' indicates FULL close
-[19:16:21] [02:16:21] Warn: MT5 full closure notification for aea18ba1c7ce4100ba36fbf84489edeb but no matching Quantower position found
-[19:16:21] [02:16:21] Debug: Bridge stream payload received: {"id":"mt5close_1759371381492758100","base_id":"aea18ba1c7ce4100ba36fbf84489edeb","timestamp":1759371381,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
-[19:16:21] [02:16:21] Info: MT5 close notification for aea18ba1c7ce4100ba36fbf84489edeb: tradeResult='MT5_position_closed' indicates FULL close
-[19:16:21] [02:16:21] Warn: MT5 full closure notification for aea18ba1c7ce4100ba36fbf84489edeb but no matching Quantower position found
-[19:16:25] [02:16:25] Debug: Mapped baseId aea18ba1c7ce4100ba36fbf84489edeb -> Position.Id aea18ba1c7ce4100ba36fbf84489edeb
-[19:16:25] [02:16:25] Debug: Stored initial quantity 1 for baseId aea18ba1c7ce4100ba36fbf84489edeb
-[19:16:25] [02:16:25] Info: Starting tracking for position aea18ba1c7ce4100ba36fbf84489edeb
-[19:16:25] [02:16:25] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
-[19:16:25] [02:16:25] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:25] [02:16:25] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
-[19:16:25] [02:16:25] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:25] [02:16:25] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:25] [02:16:25] Debug: [CORE EVENT] Position aea18ba1c7ce4100ba36fbf84489edeb was submitted 618ms ago - skipping duplicate
-[19:16:25] [02:16:25] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:25] [02:16:25] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:25] [02:16:25] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
-[19:16:25] [02:16:25] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:25] [02:16:25] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:25] [02:16:25] Debug: [CORE EVENT] Position aea18ba1c7ce4100ba36fbf84489edeb was submitted 618ms ago - skipping duplicate
-[19:16:25] [02:16:25] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:27] [02:16:27] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: triggerUnits=-10.00, threshold=100.00, profit=$-10.00, triggerType=Dollars, triggered=False
-[19:16:27] [02:16:27] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (-10.00 < 100.00), skipping
-[19:16:27] [02:16:27] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=-10.00, threshold=100.00, profit=$-10.00, triggerType=Dollars       
-[19:16:27] [02:16:27] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (-10.00 < 100.00), skipping
-[19:16:25] [02:16:25] Debug: [CORE EVENT] Position aea18ba1c7ce4100ba36fbf84489edeb was submitted 618ms ago - skipping duplicate
-[19:16:25] [02:16:25] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:27] [02:16:27] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: triggerUnits=-10.00, threshold=100.00, profit=$-10.00, triggerType=Dollars, triggered=False
-[19:16:27] [02:16:27] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (-10.00 < 100.00), skipping
-[19:16:27] [02:16:27] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=-10.00, threshold=100.00, profit=$-10.00, triggerType=Dollars       
-[19:16:27] [02:16:27] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (-10.00 < 100.00), skipping
-[19:16:29] [02:16:29] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: triggerUnits=-20.00, threshold=100.00, profit=$-20.00, triggerType=Dollars, triggered=False
-[19:16:29] [02:16:29] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (-20.00 < 100.00), skipping
-[19:16:29] [02:16:29] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=-20.00, threshold=100.00, profit=$-20.00, triggerType=Dollars       
-[19:16:29] [02:16:29] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (-20.00 < 100.00), skipping
-[19:16:33] [02:16:33] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
-[19:16:33] [02:16:33] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:33] [02:16:33] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
-[19:16:33] [02:16:33] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:33] [02:16:33] Debug: [CORE EVENT] OnQuantowerPositionClosed called: Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=1.00
-[19:16:33] [02:16:33] Debug: [CORE EVENT] Retrieved tracked quantity 1 for position aea18ba1c7ce4100ba36fbf84489edeb
-[19:16:33] [02:16:33] Info: [CORE EVENT] Quantower position closed (aea18ba1c7ce4100ba36fbf84489edeb) -> notifying bridge (closing 1 hedge(s))
-[19:16:33] [02:16:33] Debug: HandlePositionRemoved called: Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=1.00
-[19:16:33] [02:16:33] Info: Quantower position removed (aea18ba1c7ce4100ba36fbf84489edeb) - stopping tracking and cleaning up mappings
-[19:16:33] [02:16:33] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:33] [02:16:33] Info: [CORE EVENT] Quantower position closed (aea18ba1c7ce4100ba36fbf84489edeb) -> notifying bridge (closing 1 hedge(s))
-[19:16:33] [02:16:33] Debug: HandlePositionRemoved called: Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=1.00
-[19:16:33] [02:16:33] Info: Quantower position removed (aea18ba1c7ce4100ba36fbf84489edeb) - stopping tracking and cleaning up mappings
-[19:16:33] [02:16:33] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:33] [02:16:33] Debug: Bridge stream payload received: {"id":"mt5close_result_1759371393275718300","base_id":"aea18ba1c7ce4100ba36fbf84489edeb","timestamp":1759371393,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"NT_CLOSE_ACK","measurement_pips":0,"raw_measurement":0,"instrument":"NQZ5","instrument_name":"NQZ5","account_name":"Account 1 (USD)","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"success","nt_session_trades":0,"mt5_ticket":55279686,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
-[19:16:33] [02:16:33] Info: MT5 close notification for aea18ba1c7ce4100ba36fbf84489edeb: tradeResult='success' indicates FULL close
-[19:16:33] [02:16:33] Warn: MT5 full closure notification for aea18ba1c7ce4100ba36fbf84489edeb but no matching Quantower position found
-[19:16:33] [02:16:33] Debug: Bridge stream payload received: {"id":"mt5close_1759371393276507500","base_id":"aea18ba1c7ce4100ba36fbf84489edeb","timestamp":1759371393,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
-[19:16:33] [02:16:33] Info: MT5 close notification for aea18ba1c7ce4100ba36fbf84489edeb: tradeResult='MT5_position_closed' indicates FULL close
-[19:16:33] [02:16:33] Warn: MT5 full closure notification for aea18ba1c7ce4100ba36fbf84489edeb but no matching Quantower position found
-[19:16:39] [02:16:39] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:39] [02:16:39] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
-[19:16:39] [02:16:39] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:39] [02:16:39] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:40] [02:16:40] Debug: [CORE EVENT] Position aea18ba1c7ce4100ba36fbf84489edeb was submitted 618ms ago - skipping duplicate
-[19:16:40] [02:16:40] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:41] [02:16:41] Info: [CORE EVENT] Quantower position added (aea18ba1c7ce4100ba36fbf84489edeb) - Symbol=NQZ5, Qty=3.00 -> notifying bridge
-Add-Content : The process cannot access the file 
-'C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt' because it is being  
-used by another process.
-At C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\scripts\monitor-plugin-loadi 
-ng.ps1:86 char:21
-+                     Add-Content -Path $LogFile -Value $line
-+                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : WriteError: (C:\Documents\De...v2.5QT\logs.txt:  
-   String) [Add-Content], IOException
-    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Co  
-   mmands.AddContentCommand
-
-[19:16:41] [02:16:41] Debug: HandlePositionAdded called: baseId=aea18ba1c7ce4100ba36fbf84489edeb, Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=3.00
-[19:16:41] [02:16:41] Debug: Position aea18ba1c7ce4100ba36fbf84489edeb already being tracked - skipping duplicate add
-[19:16:41] [02:16:41] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:40] [02:16:40] Debug: [CORE EVENT] Position aea18ba1c7ce4100ba36fbf84489edeb was submitted 618ms ago - skipping duplicate
-[19:16:40] [02:16:40] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:41] [02:16:41] Info: [CORE EVENT] Quantower position added (aea18ba1c7ce4100ba36fbf84489edeb) - Symbol=NQZ5, Qty=3.00 -> notifying bridge
-[19:16:41] [02:16:41] Debug: HandlePositionAdded called: baseId=aea18ba1c7ce4100ba36fbf84489edeb, Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=3.00
-[19:16:41] [02:16:41] Debug: Position aea18ba1c7ce4100ba36fbf84489edeb already being tracked - skipping duplicate add
-[19:16:41] [02:16:41] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:41] [02:16:41] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: triggerUnits=35.00, threshold=100.00, profit=$35.00, triggerType=Dollars, triggered=False
-[19:16:41] [02:16:41] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (35.00 < 100.00), skipping
-[19:16:41] [02:16:41] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=35.00, threshold=100.00, profit=$35.00, triggerType=Dollars
-[19:16:41] [02:16:41] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (35.00 < 100.00), skipping
-[19:16:43] [02:16:43] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: triggerUnits=-25.00, threshold=100.00, profit=$-25.00, triggerType=Dollars, triggered=False
-[19:16:43] [02:16:43] Debug: [Elastic] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (-25.00 < 100.00), skipping
-[19:16:43] [02:16:43] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activationUnits=-25.00, threshold=100.00, profit=$-25.00, triggerType=Dollars       
-[19:16:43] [02:16:43] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (-25.00 < 100.00), skipping
-[19:16:44] [02:16:44] Info: [CORE EVENT] Quantower position added (aea18ba1c7ce4100ba36fbf84489edeb) - Symbol=NQZ5, Qty=2.00 -> notifying bridge
-[19:16:44] [02:16:44] Debug: HandlePositionAdded called: baseId=aea18ba1c7ce4100ba36fbf84489edeb, Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=2.00
-[19:16:44] [02:16:44] Debug: Position aea18ba1c7ce4100ba36fbf84489edeb already being tracked - skipping duplicate add
-[19:16:44] [02:16:44] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:45] [02:16:45] Debug: [CORE EVENT] Position aea18ba1c7ce4100ba36fbf84489edeb was submitted 622ms ago - skipping duplicate
-[19:16:45] [02:16:45] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:45] [02:16:45] Debug: [Trailing] aea18ba1c7ce4100ba36fbf84489edeb: activation threshold not met (0.00 < 100.00), skipping
-[19:16:46] [02:16:46] Debug: [CORE EVENT] OnQuantowerPositionClosed called: Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=1.00
-[19:16:46] [02:16:46] Debug: [CORE EVENT] Retrieved tracked quantity 1 for position aea18ba1c7ce4100ba36fbf84489edeb
-[19:16:46] [02:16:46] Info: [CORE EVENT] Quantower position closed (aea18ba1c7ce4100ba36fbf84489edeb) -> notifying bridge (closing 1 hedge(s))
-[19:16:46] [02:16:46] Debug: HandlePositionRemoved called: Position.Id=aea18ba1c7ce4100ba36fbf84489edeb, Symbol=NQZ5, Qty=1.00
-[19:16:46] [02:16:46] Info: Quantower position removed (aea18ba1c7ce4100ba36fbf84489edeb) - stopping tracking and cleaning up mappings
-[19:16:46] [02:16:46] Warn: Unable to translate Quantower trade event into bridge payload
-[19:16:46] [02:16:46] Debug: Bridge stream payload received: {"id":"mt5close_result_1759371406247679300","base_id":"aea18ba1c7ce4100ba36fbf84489edeb","timestamp":1759371406,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"NT_CLOSE_ACK","measurement_pips":0,"raw_measurement":0,"instrument":"NQZ5","instrument_name":"NQZ5","account_name":"Account 1 (USD)","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"success","nt_session_trades":0,"mt5_ticket":55279805,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
-[19:16:46] [02:16:46] Info: MT5 close notification for aea18ba1c7ce4100ba36fbf84489edeb: tradeResult='success' indicates FULL close
-[19:16:46] [02:16:46] Warn: MT5 full closure notification for aea18ba1c7ce4100ba36fbf84489edeb but no matching Quantower position found
-[19:16:57] PushStatus payload: {"connected":false,"bridge_running":true,"stream_state":"Disconnected","address":"127.0.0.1:50051","status_text":"Reconnecting to 127.0.0.1:50051","busy":false,"reconnecting":true,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
-[19:16:57] PushStatus payload: {"connected":false,"bridge_running":true,"stream_state":"Disconnected","address":"127.0.0.1:50051","status_text":"Reconnecting to 127.0.0.1:50051","busy":false,"reconnecting":true,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
-[19:16:57] PushStatus payload: {"connected":false,"bridge_running":true,"stream_state":"Disconnected","address":"127.0.0.1:50051","status_text":"Reconnecting to 127.0.0.1:50051","busy":false,"reconnecting":true,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
-[19:16:57] UI status callback: connected=False, reconnecting=True, stream_state=disconnected, busy=False, label=Reconnecting to 127.0.0.1:50051
-[19:16:57] PushStatus payload: {"connected":false,"bridge_running":true,"stream_state":"Disconnected","address":"127.0.0.1:50051","status_text":"Awaiting trading stream on 127.0.0.1:50051","busy":false,"reconnecting":true,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
-[19:16:57] PushStatus payload: {"connected":false,"bridge_running":true,"stream_state":"Disconnected","address":"127.0.0.1:50051","status_text":"Awaiting trading stream on 127.0.0.1:50051","busy":false,"reconnecting":true,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
-[19:16:57] PushStatus payload: {"connected":false,"bridge_running":true,"stream_state":"Disconnected","address":"127.0.0.1:50051","status_text":"Awaiting trading stream on 127.0.0.1:50051","busy":false,"reconnecting":true,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
-[19:16:57] [02:16:57] Warn: Bridge connection lost
-[19:16:57] [02:16:57] Info: Awaiting trading stream on 127.0.0.1:50051
-[19:16:57] UI status callback: connected=False, reconnecting=True, stream_state=disconnected, busy=False, label=Awaiting trading stream on 127.0.0.1:50051    
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140_1.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vk_swiftshader.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vulkan-1.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\msvcp140.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcamp140.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vccorlib140.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcomp140.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140_1.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vk_swiftshader.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vulkan-1.dll' is invalid.
+[19:41:01] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
+[19:41:01] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vcruntime140_1.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vk_swiftshader.dll' is invalid.
+[19:40:58] FirstChanceException: System.BadImageFormatException: Bad IL format. The format of the file 'C:\Quantower\TradingPlatform\v1.144.12\bin\Native\Windows\vulkan-1.dll' is invalid.
+[19:41:01] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
+[19:41:01] FirstChanceException: System.InvalidCastException: Unable to cast object of type 'System.String' to type 'TradingPlatform.BusinessLayer.ISessionsContainer'.
+[19:41:04] FirstChanceException: System.NullReferenceException: Object reference not set to an instance of an object.
+[19:41:04] FirstChanceException: Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: 'System.Dynamic.ExpandoObject' does not contain a definition for 'left'
+[19:41:04] FirstChanceException: Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: 'System.Dynamic.ExpandoObject' does not contain a definition for 'top'
+[19:41:04] FirstChanceException: Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: 'System.Dynamic.ExpandoObject' does not contain a definition for 'width'
+[19:41:04] FirstChanceException: Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: 'System.Dynamic.ExpandoObject' does not contain a definition for 'height'
+[19:41:32] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
+[19:41:32] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
+[19:41:32] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
+[19:41:32] PushStatus payload: {"connected":true,"bridge_running":true,"stream_state":"Connected","address":"127.0.0.1:50051","status_text":"Connected to 127.0.0.1:50051","busy":false,"reconnecting":false,"accounts":[{"id":"8316","name":"PXG50800954127","enabled":true},{"id":"Account 1 (USD)","name":"Account 1 (USD)","enabled":true}]}
+[19:41:32] [02:41:32] Info: Bridge connection established
+[19:41:32] UI status callback: connected=False, reconnecting=False, stream_state=disconnected, busy=True, label=Connecting...
+[19:41:32] [02:41:32] Info: Connected to 127.0.0.1:50051
+[19:41:32] [02:41:32] Info: Auto-connect connected to 127.0.0.1:50051
+[19:41:32] [02:41:32] Info: Connected to 127.0.0.1:50051
+[19:41:32] UI status callback: connected=True, reconnecting=False, stream_state=connected, busy=False, label=Connected to 127.0.0.1:50051
+[19:41:32] [02:41:32] Info: Bridge connection established
+[19:41:32] UI status callback: connected=False, reconnecting=False, stream_state=disconnected, busy=True, label=Connecting...
+[19:41:32] [02:41:32] Info: Connected to 127.0.0.1:50051
+[19:41:32] [02:41:32] Info: Auto-connect connected to 127.0.0.1:50051
+[19:41:32] [02:41:32] Info: Connected to 127.0.0.1:50051
+[19:41:32] UI status callback: connected=True, reconnecting=False, stream_state=connected, busy=False, label=Connected to 127.0.0.1:50051
+[19:42:14] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request..
+[19:42:14] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request..
+[19:42:14] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request..
+[19:42:14] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request..
+[19:42:46] [02:42:46] Info: [CORE EVENT] Quantower position added (4424a89c96a34aa8a50a882f91aeadc7) - Symbol=NQZ5, Qty=1.00 -> notifying bridge
+[19:42:46] [02:42:46] Debug: HandlePositionAdded called: baseId=4424a89c96a34aa8a50a882f91aeadc7, Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:42:46] [02:42:46] Debug: Mapped baseId 4424a89c96a34aa8a50a882f91aeadc7 -> Position.Id 4424a89c96a34aa8a50a882f91aeadc7
+[19:42:46] [02:42:46] Debug: Stored initial quantity 1, current quantity 1, side Sell for baseId 4424a89c96a34aa8a50a882f91aeadc7
+[19:42:46] [02:42:46] Info: Starting tracking for position 4424a89c96a34aa8a50a882f91aeadc7
+[19:42:46] [02:42:46] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
+[19:42:46] [02:42:46] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:42:46] [02:42:46] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
+[19:42:46] [02:42:46] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:42:46] [02:42:46] Warn: Unable to translate Quantower trade event into bridge payload
+[19:42:49] [02:42:49] Info: [CORE EVENT] Quantower position closed (4424a89c96a34aa8a50a882f91aeadc7) -> notifying bridge (closing 1 hedge(s))
+[19:42:49] [02:42:49] Debug: HandlePositionRemoved called: Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:42:49] [02:42:49] Info: Quantower position removed (4424a89c96a34aa8a50a882f91aeadc7) - stopping tracking and cleaning up mappings
+[19:42:49] [02:42:49] Warn: Unable to translate Quantower trade event into bridge payload
+[19:42:49] [02:42:49] Debug: Bridge stream payload received: {"id":"mt5close_result_1759372969461901000","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759372969,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"NT_CLOSE_ACK","measurement_pips":0,"raw_measurement":0,"instrument":"NQZ5","instrument_name":"NQZ5","account_name":"Account 1 (USD)","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"success","nt_session_trades":0,"mt5_ticket":55288442,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:42:49] [02:42:49] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='success' indicates FULL close
+[19:42:49] [02:42:49] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:42:49] [02:42:49] Debug: Bridge stream payload received: {"id":"mt5close_1759372969462410500","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759372969,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:42:49] [02:42:49] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='MT5_position_closed' indicates FULL close
+[19:42:49] [02:42:49] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:42:54] [02:42:54] Debug: Mapped baseId 4424a89c96a34aa8a50a882f91aeadc7 -> Position.Id 4424a89c96a34aa8a50a882f91aeadc7
+[19:42:54] [02:42:54] Debug: Stored initial quantity 1, current quantity 1, side Sell for baseId 4424a89c96a34aa8a50a882f91aeadc7
+[19:42:54] [02:42:54] Info: Starting tracking for position 4424a89c96a34aa8a50a882f91aeadc7
+[19:42:54] [02:42:54] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
+[19:42:54] [02:42:54] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:42:54] [02:42:54] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
+[19:42:54] [02:42:54] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:42:54] [02:42:54] Warn: Unable to translate Quantower trade event into bridge payload
+[19:42:54] [02:42:54] Debug: [CORE EVENT] Position 4424a89c96a34aa8a50a882f91aeadc7 was submitted 618ms ago - skipping duplicate
+[19:42:54] [02:42:54] Warn: Unable to translate Quantower trade event into bridge payload
+[19:42:54] [02:42:54] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:42:54] [02:42:54] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
+[19:42:54] [02:42:54] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:42:54] [02:42:54] Warn: Unable to translate Quantower trade event into bridge payload
+[19:42:54] [02:42:54] Debug: [CORE EVENT] Position 4424a89c96a34aa8a50a882f91aeadc7 was submitted 618ms ago - skipping duplicate
+[19:42:54] [02:42:54] Warn: Unable to translate Quantower trade event into bridge payload
+[19:42:56] [02:42:56] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars, triggered=False
+[19:42:56] [02:42:56] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:42:56] [02:42:56] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars
+[19:42:56] [02:42:56] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:42:56] [02:42:56] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars
+[19:42:56] [02:42:56] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:42:58] [02:42:58] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars, triggered=False
+[19:42:58] [02:42:58] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:42:58] [02:42:58] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars
+[19:42:58] [02:42:58] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:43:00] [02:43:00] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars, triggered=False
+[19:43:00] [02:43:00] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:43:00] [02:43:00] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars
+[19:43:00] [02:43:00] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:42:58] [02:42:58] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars
+[19:42:58] [02:42:58] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:43:00] [02:43:00] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars, triggered=False
+[19:43:00] [02:43:00] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:43:00] [02:43:00] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars
+[19:43:00] [02:43:00] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:43:02] [02:43:02] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars, triggered=False
+[19:43:02] [02:43:02] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
+[19:43:02] [02:43:02] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars
+[19:43:02] [02:43:02] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
+[19:43:00] [02:43:00] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=-5.00, threshold=100.00, profit=$-5.00, triggerType=Dollars
+[19:43:00] [02:43:00] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-5.00 < 100.00), skipping
+[19:43:02] [02:43:02] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars, triggered=False
+[19:43:02] [02:43:02] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
+[19:43:02] [02:43:02] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars
+[19:43:02] [02:43:02] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
+[19:43:04] [02:43:04] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars, triggered=False
+[19:43:04] [02:43:04] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
+[19:43:04] [02:43:04] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars
+[19:43:04] [02:43:04] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
+[19:43:02] [02:43:02] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars
+[19:43:02] [02:43:02] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
+[19:43:04] [02:43:04] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars, triggered=False
+[19:43:04] [02:43:04] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
+[19:43:04] [02:43:04] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars
+[19:43:04] [02:43:04] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
 Add-Content : The process cannot access the file
 'C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt' because it is being  
 used by another process.
@@ -265,7 +172,218 @@ ng.ps1:86 char:21
     + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Co  
    mmands.AddContentCommand
 
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
-[19:16:59] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Unavailable", Detail="Error connecting to subchannel.", DebugException="System.Net.Sockets.SocketException: No connection could be made because the target machine actively refused it.")
+[19:43:06] [02:43:06] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=25.00, threshold=100.00, profit=$25.00, triggerType=Dollars, triggered=False
+[19:43:06] [02:43:06] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (25.00 < 100.00), skipping
+[19:43:06] [02:43:06] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=25.00, threshold=100.00, profit=$25.00, triggerType=Dollars
+[19:43:06] [02:43:06] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (25.00 < 100.00), skipping
+[19:43:04] [02:43:04] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=5.00, threshold=100.00, profit=$5.00, triggerType=Dollars
+[19:43:04] [02:43:04] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (5.00 < 100.00), skipping
+[19:43:06] [02:43:06] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=25.00, threshold=100.00, profit=$25.00, triggerType=Dollars, triggered=False
+[19:43:06] [02:43:06] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (25.00 < 100.00), skipping
+[19:43:06] [02:43:06] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=25.00, threshold=100.00, profit=$25.00, triggerType=Dollars
+[19:43:06] [02:43:06] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (25.00 < 100.00), skipping
+Add-Content : The process cannot access the file
+'C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt' because it is being  
+used by another process.
+At C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\scripts\monitor-plugin-loadi 
+ng.ps1:86 char:21
++                     Add-Content -Path $LogFile -Value $line
++                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Documents\De...v2.5QT\logs.txt:  
+   String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Co  
+   mmands.AddContentCommand
+
+[19:43:08] [02:43:08] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=45.00, threshold=100.00, profit=$45.00, triggerType=Dollars, triggered=False
+Add-Content : The process cannot access the file 
+'C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt' because it is being  
+used by another process.
+At C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\scripts\monitor-plugin-loadi 
+ng.ps1:86 char:21
++                     Add-Content -Path $LogFile -Value $line
++                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Documents\De...v2.5QT\logs.txt:  
+   String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Co  
+   mmands.AddContentCommand
+
+[19:43:08] [02:43:08] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (45.00 < 100.00), skipping
+[19:43:08] [02:43:08] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=45.00, threshold=100.00, profit=$45.00, triggerType=Dollars
+[19:43:08] [02:43:08] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (45.00 < 100.00), skipping
+[19:43:06] [02:43:06] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=25.00, threshold=100.00, profit=$25.00, triggerType=Dollars
+[19:43:06] [02:43:06] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (25.00 < 100.00), skipping
+[19:43:08] [02:43:08] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=45.00, threshold=100.00, profit=$45.00, triggerType=Dollars, triggered=False
+[19:43:08] [02:43:08] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (45.00 < 100.00), skipping
+[19:43:08] [02:43:08] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=45.00, threshold=100.00, profit=$45.00, triggerType=Dollars
+[19:43:08] [02:43:08] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (45.00 < 100.00), skipping
+[19:43:10] [02:43:10] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=85.00, threshold=100.00, profit=$85.00, triggerType=Dollars, triggered=False
+[19:43:10] [02:43:10] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (85.00 < 100.00), skipping
+[19:43:10] [02:43:10] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=85.00, threshold=100.00, profit=$85.00, triggerType=Dollars
+[19:43:10] [02:43:10] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (85.00 < 100.00), skipping
+[19:43:08] [02:43:08] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=45.00, threshold=100.00, profit=$45.00, triggerType=Dollars
+[19:43:08] [02:43:08] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (45.00 < 100.00), skipping
+[19:43:10] [02:43:10] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=85.00, threshold=100.00, profit=$85.00, triggerType=Dollars, triggered=False
+[19:43:10] [02:43:10] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (85.00 < 100.00), skipping
+[19:43:10] [02:43:10] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=85.00, threshold=100.00, profit=$85.00, triggerType=Dollars
+[19:43:10] [02:43:10] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (85.00 < 100.00), skipping
+Add-Content : The process cannot access the file
+'C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt' because it is being  
+used by another process.
+At C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\scripts\monitor-plugin-loadi 
+ng.ps1:86 char:21
++                     Add-Content -Path $LogFile -Value $line
++                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Documents\De...v2.5QT\logs.txt:  
+   String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Co  
+   mmands.AddContentCommand
+
+[19:43:12] [02:43:12] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=55.00, threshold=100.00, profit=$55.00, triggerType=Dollars, triggered=False
+[19:43:12] [02:43:12] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (55.00 < 100.00), skipping
+[19:43:12] [02:43:12] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=55.00, threshold=100.00, profit=$55.00, triggerType=Dollars
+[19:43:12] [02:43:12] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (55.00 < 100.00), skipping
+[19:43:14] [02:43:14] Debug: HandlePositionAdded called: baseId=4424a89c96a34aa8a50a882f91aeadc7, Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:43:14] [02:43:14] Debug: Position 4424a89c96a34aa8a50a882f91aeadc7 already being tracked with same quantity 1 - skipping duplicate add
+[19:43:14] [02:43:14] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:14] FirstChanceException: System.InvalidOperationException: Collection was modified; enumeration operation may not execute.
+[19:43:15] [02:43:15] Debug: [CORE EVENT] OnQuantowerPositionClosed called: Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:43:15] [02:43:15] Debug: [CORE EVENT] Retrieved tracked quantity 1 for position 4424a89c96a34aa8a50a882f91aeadc7
+[19:43:15] [02:43:15] Info: [CORE EVENT] Quantower position closed (4424a89c96a34aa8a50a882f91aeadc7) -> notifying bridge (closing 1 hedge(s))
+[19:43:15] [02:43:15] Debug: HandlePositionRemoved called: Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:43:15] [02:43:15] Info: Quantower position removed (4424a89c96a34aa8a50a882f91aeadc7) - stopping tracking and cleaning up mappings
+[19:43:15] [02:43:15] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:14] FirstChanceException: System.InvalidOperationException: Collection was modified; enumeration operation may not execute.
+[19:43:15] [02:43:15] Debug: [CORE EVENT] OnQuantowerPositionClosed called: Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:43:15] [02:43:15] Debug: [CORE EVENT] Retrieved tracked quantity 1 for position 4424a89c96a34aa8a50a882f91aeadc7
+[19:43:15] [02:43:15] Info: [CORE EVENT] Quantower position closed (4424a89c96a34aa8a50a882f91aeadc7) -> notifying bridge (closing 1 hedge(s))
+[19:43:15] [02:43:15] Debug: HandlePositionRemoved called: Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:43:15] [02:43:15] Info: Quantower position removed (4424a89c96a34aa8a50a882f91aeadc7) - stopping tracking and cleaning up mappings
+[19:43:15] [02:43:15] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:20] [02:43:20] Debug: Bridge stream payload received: {"id":"mt5close_1759373000639101800","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373000,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:20] [02:43:20] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='MT5_position_closed' indicates FULL close
+[19:43:20] [02:43:20] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:22] [02:43:22] Info: [CORE EVENT] Quantower position added (4424a89c96a34aa8a50a882f91aeadc7) - Symbol=NQZ5, Qty=2.00 -> notifying bridge
+[19:43:22] [02:43:22] Debug: HandlePositionAdded called: baseId=4424a89c96a34aa8a50a882f91aeadc7, Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=2.00
+[19:43:22] [02:43:22] Debug: Mapped baseId 4424a89c96a34aa8a50a882f91aeadc7 -> Position.Id 4424a89c96a34aa8a50a882f91aeadc7
+[19:43:22] [02:43:22] Debug: Stored initial quantity 2, current quantity 2, side Sell for baseId 4424a89c96a34aa8a50a882f91aeadc7
+[19:43:22] [02:43:22] Info: Starting tracking for position 4424a89c96a34aa8a50a882f91aeadc7
+[19:43:22] [02:43:22] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
+[19:43:22] [02:43:22] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:43:22] [02:43:22] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
+[19:43:22] [02:43:22] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:43:22] [02:43:22] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:22] [02:43:22] Info: Starting tracking for position 4424a89c96a34aa8a50a882f91aeadc7
+[19:43:22] [02:43:22] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
+[19:43:22] [02:43:22] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:43:22] [02:43:22] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
+[19:43:22] [02:43:22] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:43:22] [02:43:22] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:24] [02:43:24] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=-30.00, threshold=100.00, profit=$-30.00, triggerType=Dollars, triggered=False
+[19:43:24] [02:43:24] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-30.00 < 100.00), skipping
+[19:43:24] [02:43:24] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=-30.00, threshold=100.00, profit=$-30.00, triggerType=Dollars       
+[19:43:24] [02:43:24] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (-30.00 < 100.00), skipping
+[19:43:27] [02:43:27] Info: [CORE EVENT] Quantower position closed (4424a89c96a34aa8a50a882f91aeadc7) -> notifying bridge (closing 1 hedge(s))
+[19:43:27] [02:43:27] Debug: HandlePositionRemoved called: Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:43:27] [02:43:27] Info: Quantower position removed (4424a89c96a34aa8a50a882f91aeadc7) - stopping tracking and cleaning up mappings
+[19:43:27] [02:43:27] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:27] [02:43:27] Debug: Bridge stream payload received: {"id":"mt5close_result_1759373007409630600","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373007,"action":"MT5_CLOSE_NOTIFICATION","quantity":0,"price":0,"total_quantity":0,"contract_num":1,"order_type":"NT_CLOSE_ACK","measurement_pips":0,"raw_measurement":0,"instrument":"NQZ5","instrument_name":"NQZ5","account_name":"Account 1 (USD)","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"success","nt_session_trades":0,"mt5_ticket":55288611,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:27] [02:43:27] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='success' indicates FULL close
+[19:43:27] [02:43:27] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:27] [02:43:27] Debug: Bridge stream payload received: {"id":"mt5close_1759373007410134600","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373007,"action":"MT5_CLOSE_NOTIFICATION","quantity":0,"price":0,"total_quantity":0,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"already_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:27] [02:43:27] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='already_closed' indicates FULL close
+[19:43:27] [02:43:27] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:27] [02:43:27] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:31] [02:43:31] Debug: Bridge stream payload received: {"id":"mt5close_1759373011041034200","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373011,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:31] [02:43:31] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='MT5_position_closed' indicates FULL close
+[19:43:31] [02:43:31] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:31] [02:43:31] Debug: Bridge stream payload received: {"id":"mt5close_1759373011452104900","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373011,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:31] [02:43:31] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='MT5_position_closed' indicates FULL close
+[19:43:31] [02:43:31] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:31] [02:43:31] Debug: Bridge stream payload received: {"id":"mt5close_1759373011900201500","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373011,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:31] [02:43:31] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='MT5_position_closed' indicates FULL close
+[19:43:31] [02:43:31] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:33] [02:43:33] Info: [CORE EVENT] Quantower position added (4424a89c96a34aa8a50a882f91aeadc7) - Symbol=NQZ5, Qty=1.00 -> notifying bridge
+[19:43:33] [02:43:33] Debug: HandlePositionAdded called: baseId=4424a89c96a34aa8a50a882f91aeadc7, Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:43:33] [02:43:33] Debug: Mapped baseId 4424a89c96a34aa8a50a882f91aeadc7 -> Position.Id 4424a89c96a34aa8a50a882f91aeadc7
+[19:43:33] [02:43:33] Debug: Stored initial quantity 1, current quantity 1, side Sell for baseId 4424a89c96a34aa8a50a882f91aeadc7
+[19:43:33] [02:43:33] Info: Starting tracking for position 4424a89c96a34aa8a50a882f91aeadc7
+[19:43:33] [02:43:33] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
+[19:43:33] [02:43:33] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:43:33] [02:43:33] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
+[19:43:33] [02:43:33] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:43:33] [02:43:33] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:34] [02:43:34] Debug: [CORE EVENT] Position 4424a89c96a34aa8a50a882f91aeadc7 was submitted 619ms ago - skipping duplicate
+[19:43:34] [02:43:34] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:34] [02:43:34] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
+[19:43:34] [02:43:34] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:43:34] [02:43:34] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
+[19:43:34] [02:43:34] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+Add-Content : The process cannot access the file
+'C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt' because it is being  
+used by another process.
+At C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\scripts\monitor-plugin-loadi 
+ng.ps1:86 char:21
++                     Add-Content -Path $LogFile -Value $line
++                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Documents\De...v2.5QT\logs.txt:  
+   String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Co  
+   mmands.AddContentCommand
+
+[19:43:35] [02:43:35] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: triggerUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars, triggered=False
+[19:43:35] [02:43:35] Debug: [Elastic] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:43:35] [02:43:35] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activationUnits=0.00, threshold=100.00, profit=$0.00, triggerType=Dollars
+[19:43:35] [02:43:35] Debug: [Trailing] 4424a89c96a34aa8a50a882f91aeadc7: activation threshold not met (0.00 < 100.00), skipping
+[19:43:38] [02:43:38] Info: [CORE EVENT] Quantower position closed (4424a89c96a34aa8a50a882f91aeadc7) -> notifying bridge (closing 1 hedge(s))
+[19:43:38] [02:43:38] Debug: HandlePositionRemoved called: Position.Id=4424a89c96a34aa8a50a882f91aeadc7, Symbol=NQZ5, Qty=1.00
+[19:43:38] [02:43:38] Info: Quantower position removed (4424a89c96a34aa8a50a882f91aeadc7) - stopping tracking and cleaning up mappings
+[19:43:38] [02:43:38] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:38] [02:43:38] Debug: Bridge stream payload received: {"id":"mt5close_result_1759373018502459000","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373018,"action":"MT5_CLOSE_NOTIFICATION","quantity":0,"price":0,"total_quantity":0,"contract_num":1,"order_type":"NT_CLOSE_ACK","measurement_pips":0,"raw_measurement":0,"instrument":"NQZ5","instrument_name":"NQZ5","account_name":"Account 1 (USD)","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"success","nt_session_trades":0,"mt5_ticket":55288633,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:38] [02:43:38] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='success' indicates FULL close
+[19:43:38] [02:43:38] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:38] [02:43:38] Debug: Bridge stream payload received: {"id":"mt5close_1759373018502969500","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373018,"action":"MT5_CLOSE_NOTIFICATION","quantity":0,"price":0,"total_quantity":0,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"already_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:38] [02:43:38] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='already_closed' indicates FULL close
+[19:43:38] [02:43:38] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:38] [02:43:38] Warn: Unable to translate Quantower trade event into bridge payload
+[19:43:38] [02:43:38] Debug: Bridge stream payload received: {"id":"mt5close_result_1759373018502459000","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373018,"action":"MT5_CLOSE_NOTIFICATION","quantity":0,"price":0,"total_quantity":0,"contract_num":1,"order_type":"NT_CLOSE_ACK","measurement_pips":0,"raw_measurement":0,"instrument":"NQZ5","instrument_name":"NQZ5","account_name":"Account 1 (USD)","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"success","nt_session_trades":0,"mt5_ticket":55288633,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:38] [02:43:38] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='success' indicates FULL close
+[19:43:38] [02:43:38] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:38] [02:43:38] Debug: Bridge stream payload received: {"id":"mt5close_1759373018502969500","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373018,"action":"MT5_CLOSE_NOTIFICATION","quantity":0,"price":0,"total_quantity":0,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"already_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:38] [02:43:38] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='already_closed' indicates FULL close
+Add-Content : The process cannot access the file 
+'C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\logs.txt' because it is being  
+used by another process.
+At C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT\scripts\monitor-plugin-loadi 
+ng.ps1:86 char:21
++                     Add-Content -Path $LogFile -Value $line
++                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Documents\De...v2.5QT\logs.txt:  
+   String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Co  
+   mmands.AddContentCommand
+
+[19:43:38] [02:43:38] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:40] [02:43:40] Debug: Bridge stream payload received: {"id":"mt5close_1759373020995292700","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373020,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:40] [02:43:40] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='MT5_position_closed' indicates FULL close
+[19:43:40] [02:43:40] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:38] [02:43:38] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='success' indicates FULL close
+[19:43:38] [02:43:38] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:38] [02:43:38] Debug: Bridge stream payload received: {"id":"mt5close_1759373018502969500","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373018,"action":"MT5_CLOSE_NOTIFICATION","quantity":0,"price":0,"total_quantity":0,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"already_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:38] [02:43:38] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='already_closed' indicates FULL close
+[19:43:38] [02:43:38] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:40] [02:43:40] Debug: Bridge stream payload received: {"id":"mt5close_1759373020995292700","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373020,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:40] [02:43:40] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='MT5_position_closed' indicates FULL close
+[19:43:40] [02:43:40] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:45] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Cancelled", Detail="Call canceled by the client.", DebugException="System.OperationCanceledException: The operation was canceled.")
+[19:43:45] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Cancelled", Detail="Call canceled by the client.", DebugException="System.OperationCanceledException: The operation was canceled.")
+[19:43:38] [02:43:38] Debug: Bridge stream payload received: {"id":"mt5close_1759373018502969500","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373018,"action":"MT5_CLOSE_NOTIFICATION","quantity":0,"price":0,"total_quantity":0,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"already_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:38] [02:43:38] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='already_closed' indicates FULL close
+[19:43:38] [02:43:38] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:40] [02:43:40] Debug: Bridge stream payload received: {"id":"mt5close_1759373020995292700","base_id":"4424a89c96a34aa8a50a882f91aeadc7","timestamp":1759373020,"action":"MT5_CLOSE_NOTIFICATION","quantity":2.2,"price":0,"total_quantity":2,"contract_num":1,"order_type":"MT5_CLOSE","measurement_pips":0,"raw_measurement":0,"instrument":"NAS100.s","instrument_name":"NAS100.s","account_name":"MT5_Account","nt_balance":0,"nt_daily_pnl":0,"nt_trade_result":"MT5_position_closed","nt_session_trades":0,"mt5_ticket":0,"nt_points_per_1k_loss":0,"qt_trade_id":"","qt_position_id":"","strategy_tag":"","origin_platform":""}
+[19:43:40] [02:43:40] Info: MT5 close notification for 4424a89c96a34aa8a50a882f91aeadc7: tradeResult='MT5_position_closed' indicates FULL close
+[19:43:40] [02:43:40] Warn: MT5 full closure notification for 4424a89c96a34aa8a50a882f91aeadc7 but no matching Quantower position found
+[19:43:45] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Cancelled", Detail="Call canceled by the client.", DebugException="System.OperationCanceledException: The operation was canceled.")
+[19:43:45] FirstChanceException: Grpc.Core.RpcException: Status(StatusCode="Cancelled", Detail="Call canceled by the client.", DebugException="System.OperationCanceledException: The operation was canceled.")
+[19:43:53] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: An existing connection was forcibly closed by the remote host..
+[19:43:53] FirstChanceException: System.IO.IOException: Unable to read data from the transport connection: An existing connection was forcibly closed by the remote host..
 PS C:\Documents\Dev\OfficialFuturesHedgebotv2.5QT> 
