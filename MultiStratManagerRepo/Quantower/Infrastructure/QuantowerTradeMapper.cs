@@ -351,9 +351,13 @@ namespace Quantower.MultiStrat.Infrastructure
 
         private static void AddActionQuantityPrice(IDictionary<string, object?> payload, Side side, double quantity, double price)
         {
-            payload["quantity"] = Math.Abs(quantity);
+            var absQuantity = Math.Abs(quantity);
+            payload["quantity"] = absQuantity;
             payload["action"] = ResolveAction(side, quantity);
             payload["price"] = price;
+
+            // DEBUG: Log the quantity being set
+            System.Diagnostics.Debug.WriteLine($"[QT][MAPPER] AddActionQuantityPrice: raw quantity={quantity}, abs quantity={absQuantity}, side={side}");
         }
 
         private static void AddTimestamp(IDictionary<string, object?> payload, DateTime timestamp)

@@ -16,7 +16,6 @@ namespace Quantower.MultiStrat
         private static readonly TimeSpan TradeSubmitTimeout = TimeSpan.FromSeconds(10);
 
         private readonly ConcurrentDictionary<string, byte> _pendingTrades = new();
-        private readonly ConcurrentDictionary<string, DateTime> _recentPositionSubmissions = new(StringComparer.OrdinalIgnoreCase);
         private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
         private readonly object _healthSync = new();
 
@@ -511,34 +510,9 @@ namespace Quantower.MultiStrat
 
             if (QuantowerTradeMapper.TryBuildPositionSnapshot(position, out var tradePayload, out var positionTradeId))
             {
-                // Prevent duplicate position submissions
-                // Quantower fires PositionAdded event multiple times in rapid succession
-                // Check if we've already submitted this position recently (within 1 second)
-                if (!string.IsNullOrWhiteSpace(positionTradeId))
-                {
-                    if (_recentPositionSubmissions.TryGetValue(positionTradeId, out var lastSubmitTime))
-                    {
-                        var elapsed = DateTime.UtcNow - lastSubmitTime;
-                        if (elapsed.TotalSeconds < 1.0)
-                        {
-                            EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Position {positionTradeId} was submitted {elapsed.TotalMilliseconds:F0}ms ago - skipping duplicate", positionTradeId, positionTradeId);
-                            return;
-                        }
-                    }
-
-                    // Record this submission
-                    _recentPositionSubmissions[positionTradeId] = DateTime.UtcNow;
-
-                    // Clean up old entries (older than 5 seconds)
-                    var cutoff = DateTime.UtcNow.AddSeconds(-5);
-                    foreach (var kvp in _recentPositionSubmissions)
-                    {
-                        if (kvp.Value < cutoff)
-                        {
-                            _recentPositionSubmissions.TryRemove(kvp.Key, out _);
-                        }
-                    }
-                }
+                // REMOVED: Deduplication logic that was preventing multi-contract positions from being sent
+                // The manager service (HandlePositionAdded) already has proper deduplication logic
+                // that checks quantity changes and prevents true duplicates
 
                 EmitLog(BridgeLogLevel.Info, $"[CORE EVENT] Quantower position added ({positionTradeId ?? "n/a"}) - Symbol={position.Symbol?.Name}, Qty={position.Quantity:F2} -> notifying bridge", positionTradeId, positionTradeId);
                 ObserveAsyncOperation(BridgeGrpcClient.SubmitTradeAsync(tradePayload), "SubmitTradeSnapshot", positionTradeId ?? "n/a");
