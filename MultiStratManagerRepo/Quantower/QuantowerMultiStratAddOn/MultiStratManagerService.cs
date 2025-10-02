@@ -39,6 +39,10 @@ namespace Quantower.MultiStrat
         private readonly ConcurrentDictionary<string, Order> _stopLossOrders = new(StringComparer.OrdinalIgnoreCase);
         // Track initial position quantities for proper hedge closure (n trades = n hedges)
         private readonly ConcurrentDictionary<string, int> _baseIdToInitialQuantity = new(StringComparer.OrdinalIgnoreCase);
+        // Track current position quantities for partial closure detection
+        private readonly ConcurrentDictionary<string, int> _baseIdToCurrentQuantity = new(StringComparer.OrdinalIgnoreCase);
+        // Track position side (Buy/Sell) to detect closing trades
+        private readonly ConcurrentDictionary<string, Side> _baseIdToSide = new(StringComparer.OrdinalIgnoreCase);
         private int _disposed; // 0 = active, 1 = disposed
         private Timer? _riskTimer;
         private bool _coreEventsAttached;
@@ -1024,6 +1028,18 @@ namespace Quantower.MultiStrat
                 return;
             }
 
+            // CRITICAL: Detect partial closures
+            // Quantower fires TradeAdded for both opening and closing trades
+            // We need to detect closing trades and handle them separately
+            var baseId = trade.PositionId;
+            if (!string.IsNullOrWhiteSpace(baseId) && IsClosingTrade(trade, baseId))
+            {
+                HandlePartialClosure(trade, baseId);
+                // Still record for trailing/SLTP services
+                _trailingService.RecordTrade(trade);
+                return;
+            }
+
             _trailingService.RecordTrade(trade);
 
             if (_sltpService.Enabled)
@@ -1036,6 +1052,102 @@ namespace Quantower.MultiStrat
                 {
                     EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"SLTP handler error: {ex.Message}");
                 }
+            }
+        }
+
+        private bool IsClosingTrade(Trade trade, string baseId)
+        {
+            // A trade is a closing trade if:
+            // 1. We're tracking this position
+            // 2. The trade side is OPPOSITE to the position side
+            // 3. The position quantity is decreasing
+
+            if (!_baseIdToSide.TryGetValue(baseId, out var positionSide))
+            {
+                // Not tracking this position - treat as opening trade
+                return false;
+            }
+
+            if (!_baseIdToCurrentQuantity.TryGetValue(baseId, out var currentQty))
+            {
+                // No current quantity tracked - treat as opening trade
+                return false;
+            }
+
+            // Check if trade side is opposite to position side
+            bool isOpposite = (positionSide == Side.Buy && trade.Side == Side.Sell) ||
+                              (positionSide == Side.Sell && trade.Side == Side.Buy);
+
+            if (!isOpposite)
+            {
+                // Same side - this is adding to the position
+                return false;
+            }
+
+            // Opposite side trade - this is a closing trade
+            return true;
+        }
+
+        private void HandlePartialClosure(Trade trade, string baseId)
+        {
+            var tradeQty = (int)Math.Abs(trade.Quantity);
+
+            if (!_baseIdToCurrentQuantity.TryGetValue(baseId, out var currentQty))
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Partial closure detected for {baseId} but no current quantity tracked - skipping");
+                return;
+            }
+
+            var newQty = currentQty - tradeQty;
+            if (newQty < 0)
+            {
+                newQty = 0;
+            }
+
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Partial closure detected: {baseId} closing {tradeQty} contract(s), {currentQty} → {newQty}");
+
+            // Update current quantity
+            if (newQty > 0)
+            {
+                _baseIdToCurrentQuantity[baseId] = newQty;
+            }
+            else
+            {
+                // Position fully closed via trades
+                _baseIdToCurrentQuantity.TryRemove(baseId, out _);
+            }
+
+            // Send partial close request to bridge
+            // The bridge will close the specified number of hedges
+            SendPartialCloseRequest(baseId, tradeQty);
+        }
+
+        private void SendPartialCloseRequest(string baseId, int closedQuantity)
+        {
+            try
+            {
+                // Find the position to get details
+                var position = FindPositionByBaseId(baseId);
+                if (position == null)
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Cannot send partial close for {baseId} - position not found");
+                    return;
+                }
+
+                // Build closure message with the specific quantity
+                if (!Infrastructure.QuantowerTradeMapper.TryBuildPositionClosure(position, baseId, closedQuantity, out var json, out var positionId))
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to build partial closure message for {baseId}");
+                    return;
+                }
+
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Sending partial close request: {baseId} closing {closedQuantity} hedge(s)");
+                // Use the bridge service's method to submit the close request
+                _ = _bridgeService.NotifyHedgeCloseAsync(json, baseId);
+            }
+            catch (Exception ex)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"Error sending partial close request for {baseId}: {ex.Message}");
             }
         }
 
@@ -1299,7 +1411,9 @@ namespace Quantower.MultiStrat
                 // Track initial position quantity for proper hedge closure (n trades = n hedges)
                 // Store the absolute quantity (number of contracts) when position is first opened
                 _baseIdToInitialQuantity[baseId] = newQuantity;
-                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Stored initial quantity {newQuantity} for baseId {baseId}");
+                _baseIdToCurrentQuantity[baseId] = newQuantity;
+                _baseIdToSide[baseId] = position.Side;
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Stored initial quantity {newQuantity}, current quantity {newQuantity}, side {position.Side} for baseId {baseId}");
 
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Starting tracking for position {baseId}");
                 _trailingService.RegisterPosition(baseId, position);
@@ -1332,8 +1446,10 @@ namespace Quantower.MultiStrat
                 // Remove baseId → Position.Id mapping
                 _baseIdToPositionId.TryRemove(existingBaseId, out _);
 
-                // Remove initial quantity tracking
+                // Remove quantity tracking (initial and current)
                 _baseIdToInitialQuantity.TryRemove(existingBaseId, out _);
+                _baseIdToCurrentQuantity.TryRemove(existingBaseId, out _);
+                _baseIdToSide.TryRemove(existingBaseId, out _);
 
                 // Remove stop loss order tracking
                 if (_stopLossOrders.TryRemove(existingBaseId, out _))
@@ -1352,6 +1468,11 @@ namespace Quantower.MultiStrat
 
             // Remove baseId → Position.Id mapping
             _baseIdToPositionId.TryRemove(baseId, out _);
+
+            // Remove quantity tracking (initial and current)
+            _baseIdToInitialQuantity.TryRemove(baseId, out _);
+            _baseIdToCurrentQuantity.TryRemove(baseId, out _);
+            _baseIdToSide.TryRemove(baseId, out _);
 
             // Remove stop loss order tracking
             if (_stopLossOrders.TryRemove(baseId, out _))
@@ -1552,8 +1673,10 @@ namespace Quantower.MultiStrat
                 }
             }
 
-            // Clean up quantity tracking
+            // Clean up quantity tracking (initial and current)
             _baseIdToInitialQuantity.TryRemove(baseId, out _);
+            _baseIdToCurrentQuantity.TryRemove(baseId, out _);
+            _baseIdToSide.TryRemove(baseId, out _);
 
             _trailingService.RemoveTracker(baseId);
         }
