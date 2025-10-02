@@ -1262,13 +1262,29 @@ namespace Quantower.MultiStrat
                 // 1. From SnapshotPositions() at startup (via TryPublishPositionSnapshotAsync)
                 // 2. From Core.PositionAdded event (via OnQuantowerPositionAdded)
                 // 3. From RefreshAccountPositions() when account is enabled
-                // Check if we're already tracking this position to avoid duplicates
+                // CRITICAL: Quantower can reuse Position.Id for different positions (e.g., after closing and reopening)
+                // Check if we're already tracking this position, and if so, check if quantity changed
+                var newQuantity = (int)Math.Abs(position.Quantity);
                 lock (_trackingLock)
                 {
                     if (_trackingStates.ContainsKey(baseId))
                     {
-                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Position {baseId} already being tracked - skipping duplicate add");
-                        return;
+                        // Position already tracked - check if quantity changed
+                        if (_baseIdToInitialQuantity.TryGetValue(baseId, out var trackedQty) && trackedQty != newQuantity)
+                        {
+                            // Quantity changed - this is a NEW position with same ID (Quantower reused the ID)
+                            // Update the tracked quantity and allow reprocessing
+                            _baseIdToInitialQuantity[baseId] = newQuantity;
+                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Position {baseId} quantity changed from {trackedQty} to {newQuantity} - updating tracked quantity and reprocessing");
+                            // Remove from tracking states to allow reprocessing
+                            _trackingStates.Remove(baseId);
+                        }
+                        else
+                        {
+                            // Same quantity - this is a duplicate event, skip it
+                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Position {baseId} already being tracked with same quantity {newQuantity} - skipping duplicate add");
+                            return;
+                        }
                     }
                 }
 
@@ -1282,9 +1298,8 @@ namespace Quantower.MultiStrat
 
                 // Track initial position quantity for proper hedge closure (n trades = n hedges)
                 // Store the absolute quantity (number of contracts) when position is first opened
-                var initialQuantity = (int)Math.Abs(position.Quantity);
-                _baseIdToInitialQuantity[baseId] = initialQuantity;
-                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Stored initial quantity {initialQuantity} for baseId {baseId}");
+                _baseIdToInitialQuantity[baseId] = newQuantity;
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Stored initial quantity {newQuantity} for baseId {baseId}");
 
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Starting tracking for position {baseId}");
                 _trailingService.RegisterPosition(baseId, position);
