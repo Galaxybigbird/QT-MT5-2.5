@@ -199,7 +199,7 @@ namespace Quantower.MultiStrat.Infrastructure
             return false;
         }
 
-        public static bool TryBuildPositionClosure(Position position, out string json, out string? positionId)
+        public static bool TryBuildPositionClosure(Position position, string? knownBaseId, out string json, out string? positionId)
         {
             json = string.Empty;
             positionId = null;
@@ -220,8 +220,9 @@ namespace Quantower.MultiStrat.Infrastructure
 
                 var resolvedPositionId = SafeString(position.Id);
 
-                // CRITICAL: base_id MUST use composite baseId (Position.Id + OpenTime.Ticks)
-                // to match the baseId used when the position was opened
+                // CRITICAL FIX: Use the knownBaseId if provided (tracked from position open event)
+                // Quantower changes OpenTime.Ticks on close events, so we can't recompute the baseId
+                // If knownBaseId is not provided, fall back to computing it (for backward compatibility)
                 if (string.IsNullOrWhiteSpace(resolvedPositionId))
                 {
                     ReportError($"[QT][ERROR] Position missing required Position.Id - cannot process closure.", null);
@@ -230,18 +231,27 @@ namespace Quantower.MultiStrat.Infrastructure
                     return false;
                 }
 
-                // Compute composite baseId to match the opening event
-                var baseId = ComputeBaseId(position);
-                if (string.IsNullOrWhiteSpace(baseId))
+                string baseId;
+                if (!string.IsNullOrWhiteSpace(knownBaseId))
                 {
-                    ReportError($"[QT][ERROR] Failed to compute baseId for position closure.", null);
-                    json = string.Empty;
-                    positionId = null;
-                    return false;
+                    // Use the tracked baseId from when the position was opened
+                    baseId = knownBaseId;
+                }
+                else
+                {
+                    // Fall back to computing baseId (may cause mismatch if OpenTime.Ticks changed)
+                    baseId = ComputeBaseId(position);
+                    if (string.IsNullOrWhiteSpace(baseId))
+                    {
+                        ReportError($"[QT][ERROR] Failed to compute baseId for position closure.", null);
+                        json = string.Empty;
+                        positionId = null;
+                        return false;
+                    }
                 }
 
                 payload["id"] = baseId;
-                payload["base_id"] = baseId;  // CRITICAL: Use composite baseId to match opening
+                payload["base_id"] = baseId;  // CRITICAL: Use the ORIGINAL baseId from position open
                 payload["qt_position_id"] = resolvedPositionId;  // Always include original Position.Id for audit trail
 
                 positionId = baseId;

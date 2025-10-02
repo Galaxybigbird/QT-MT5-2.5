@@ -1,0 +1,3 @@
+{"timestamp_ns":1759299239740926800,"source":"bridge","level":"INFO","component":"bridge","message":"gRPC server starting on port 50051","schema_version":"1.0"}
+{"timestamp_ns":1759299239843875600,"source":"bridge","level":"INFO","component":"bridge","message":"gRPC server verified listening on port 50051","schema_version":"1.0"}
+{"timestamp_ns":1759299239843875600,"source":"bridge","level":"INFO","component":"bridge","message":"gRPC server started successfully on port 50051","schema_version":"1.0"}

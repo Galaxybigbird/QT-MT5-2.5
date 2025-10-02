@@ -18,6 +18,7 @@ namespace Quantower.MultiStrat
         private readonly ConcurrentDictionary<string, byte> _pendingTrades = new();
         private readonly ConcurrentDictionary<string, DateTime> _recentClosures = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, DateTime> _recentPositionSubmissions = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, string> _positionIdToBaseId = new(StringComparer.OrdinalIgnoreCase);
         private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
         private readonly object _healthSync = new();
 
@@ -493,7 +494,20 @@ namespace Quantower.MultiStrat
                 EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Marked position {positionId} as recently closed (cooldown active for 2 seconds)");
             }
 
-            if (!QuantowerTradeMapper.TryBuildPositionClosure(position, out var payload, out var closureId))
+            // CRITICAL FIX: Look up the ORIGINAL baseId that was used when the position was opened
+            // Quantower changes OpenTime.Ticks on close events, so we can't recompute the baseId
+            string? knownBaseId = null;
+            if (!string.IsNullOrWhiteSpace(positionId) && _positionIdToBaseId.TryGetValue(positionId, out var trackedBaseId))
+            {
+                knownBaseId = trackedBaseId;
+                EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Found tracked baseId for position {positionId}: {knownBaseId}");
+            }
+            else
+            {
+                EmitLog(BridgeLogLevel.Warn, $"[CORE EVENT] No tracked baseId found for position {positionId} - will compute from current position data (may cause mismatch!)");
+            }
+
+            if (!QuantowerTradeMapper.TryBuildPositionClosure(position, knownBaseId, out var payload, out var closureId))
             {
                 EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] Unable to map Quantower position closure to bridge notification", closureId, closureId);
                 return;
@@ -501,6 +515,13 @@ namespace Quantower.MultiStrat
 
             EmitLog(BridgeLogLevel.Info, $"[CORE EVENT] Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge", closureId, closureId);
             ObserveAsyncOperation(BridgeGrpcClient.SubmitCloseHedgeAsync(payload), "SubmitCloseHedge", closureId ?? "n/a");
+
+            // Clean up the baseId mapping after closing
+            if (!string.IsNullOrWhiteSpace(positionId))
+            {
+                _positionIdToBaseId.TryRemove(positionId, out _);
+                EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Removed baseId mapping for position {positionId}");
+            }
 
             try
             {
@@ -559,6 +580,14 @@ namespace Quantower.MultiStrat
                         {
                             _recentPositionSubmissions.TryRemove(kvp.Key, out _);
                         }
+                    }
+
+                    // CRITICAL FIX: Track the baseId for this position so we can use it when closing
+                    // Quantower changes OpenTime.Ticks on close events, so we need to remember the original baseId
+                    if (!string.IsNullOrWhiteSpace(rawPositionId))
+                    {
+                        _positionIdToBaseId[rawPositionId] = positionTradeId;
+                        EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Tracked baseId mapping: {rawPositionId} -> {positionTradeId}");
                     }
                 }
 
