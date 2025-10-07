@@ -584,10 +584,36 @@ MT5_GRPC_API int __stdcall GrpcNotifyHedgeClose(const wchar_t* notification_json
         notification.set_closed_hedge_action(notification_data.value("closed_hedge_action", ""));
         notification.set_timestamp(notification_data.value("timestamp", ""));
         notification.set_closure_reason(notification_data.value("closure_reason", ""));
-        
+
+        auto ticket_it = notification_data.find("mt5_ticket");
+        if (ticket_it != notification_data.end()) {
+            uint64_t ticket_value = 0;
+
+            if (ticket_it->is_number_unsigned()) {
+                ticket_value = ticket_it->get<uint64_t>();
+            } else if (ticket_it->is_number_integer()) {
+                auto signed_val = ticket_it->get<long long>();
+                if (signed_val >= 0) {
+                    ticket_value = static_cast<uint64_t>(signed_val);
+                }
+            } else if (ticket_it->is_number_float()) {
+                ticket_value = static_cast<uint64_t>(ticket_it->get<double>());
+            } else if (ticket_it->is_string()) {
+                try {
+                    ticket_value = static_cast<uint64_t>(std::stoull(ticket_it->get<std::string>()));
+                } catch (const std::exception&) {
+                    ticket_value = 0;
+                }
+            }
+
+            if (ticket_value > 0) {
+                notification.set_mt5_ticket(ticket_value);
+            }
+        }
+
         GenericResponse response;
         Status status = g_client_state.trading_stub_->NotifyHedgeClose(&context, notification, &response);
-        
+
         return status.ok() && response.status() == "success" ? ERROR_SUCCESS : ERROR_CONNECTION_FAILED;
         
     } catch (const std::exception& e) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"regexp"
 	"strings"
@@ -55,6 +56,12 @@ type Server struct {
 	// currentMT5StreamID tracks the single active MT5 GetTrades stream. New connections supersede older ones.
 	currentMT5StreamID string
 	mt5StreamMux       sync.RWMutex
+
+	// mirroredHedgeQty tracks how many MT5 hedges have been opened for each Quantower base ID.
+	// nextContractIndex keeps the next contract number suffix to ensure stable, unique IDs per hedge.
+	hedgeStateMu      sync.Mutex
+	mirroredHedgeQty  map[string]int
+	nextContractIndex map[string]int
 }
 
 // AppInterface defines the interface that the App struct must implement for gRPC integration
@@ -86,6 +93,8 @@ func NewGRPCServer(app AppInterface) *Server {
 		lastHealthLog:         make(map[string]time.Time),
 		recentTradeIDs:        make(map[string]time.Time),
 		recentlyClosedTickets: make(map[uint64]time.Time),
+		mirroredHedgeQty:      make(map[string]int),
+		nextContractIndex:     make(map[string]int),
 	}
 }
 
@@ -224,49 +233,166 @@ func (s *Server) SubmitTrade(ctx context.Context, req *trading.Trade) (*trading.
 // CRITICAL: Split multi-quantity trades so each QT contract creates exactly 1 MT5 hedge.
 // This ensures n QT trades = n MT5 hedges for proper 1:1 correlation.
 func (s *Server) enqueueTradeWithSplit(req *trading.Trade) error {
-	// Convert to internal once as a base template
 	base := convertProtoToInternalTrade(req)
+	if base == nil {
+		return fmt.Errorf("unable to convert trade %s to internal representation", req.GetId())
+	}
 
-	// Check if we need to split based on quantity
-	quantity := int(req.Quantity)
-	if quantity <= 1 {
-		// Single contract - no splitting needed
-		if err := s.app.AddToTradeQueue(base); err != nil {
-			return err
-		}
-		s.app.AddToTradeHistory(base)
+	baseID := strings.TrimSpace(base.BaseID)
+	if baseID == "" {
+		baseID = strings.TrimSpace(base.ID)
+	}
+	if baseID == "" {
+		return fmt.Errorf("trade %s missing base_id and id", req.GetId())
+	}
+
+	rawQuantity := math.Abs(req.GetQuantity())
+	deltaContracts := int(math.Round(rawQuantity))
+	totalContracts := int(req.GetTotalQuantity())
+
+	if totalContracts <= 0 && deltaContracts <= 0 {
+		log.Printf("gRPC: Trade %s for base_id=%s reported zero quantity (total=0, delta=0) - no hedges enqueued", req.GetId(), baseID)
+		s.hedgeStateMu.Lock()
+		delete(s.mirroredHedgeQty, baseID)
+		delete(s.nextContractIndex, baseID)
+		s.hedgeStateMu.Unlock()
 		return nil
 	}
 
-	// Multi-contract trade - split into individual hedges
-	log.Printf("gRPC: Splitting trade %s (base_id=%s) into %d individual hedges", req.Id, req.BaseId, quantity)
+	s.hedgeStateMu.Lock()
+	defer s.hedgeStateMu.Unlock()
 
-	for i := 1; i <= quantity; i++ {
-		// Create a copy for this contract
+	current := s.mirroredHedgeQty[baseID]
+
+	var (
+		delta       int
+		targetTotal int
+	)
+
+	if totalContracts > 0 {
+		targetTotal = totalContracts
+		delta = targetTotal - current
+		if delta <= 0 {
+			if delta < 0 {
+				log.Printf("gRPC: Received lower target hedge count (%d -> %d) for base_id=%s - awaiting confirmed close notifications", current, targetTotal, baseID)
+				if targetTotal <= 0 {
+					delete(s.mirroredHedgeQty, baseID)
+					delete(s.nextContractIndex, baseID)
+				}
+			} else {
+				log.Printf("gRPC: Duplicate trade submission ignored for base_id=%s (tracked=%d, requested=%d)", baseID, current, targetTotal)
+			}
+			return nil
+		}
+	} else {
+		if deltaContracts <= 0 {
+			log.Printf("gRPC: Trade %s for base_id=%s reported zero delta quantity %.2f - no hedges enqueued", req.GetId(), baseID, rawQuantity)
+			return nil
+		}
+		delta = deltaContracts
+		targetTotal = current + delta
+	}
+
+	nextIndex := s.nextContractIndex[baseID]
+	if nextIndex <= 0 {
+		nextIndex = current + 1
+	}
+
+	for i := 0; i < delta; i++ {
 		split := *base
-
-		// Generate unique ID for this split trade
-		split.ID = fmt.Sprintf("%s-%d", base.ID, i)
-
-		// Each split trade has quantity=1
+		contractNum := nextIndex
+		nextIndex++
+		if contractNum == 1 {
+			split.ID = base.ID
+		} else {
+			split.ID = fmt.Sprintf("%s-%d", base.ID, contractNum)
+		}
 		split.Quantity = 1.0
+		split.TotalQuantity = targetTotal
+		split.ContractNum = contractNum
 
-		// Track the total quantity and which contract this is
-		split.TotalQuantity = quantity
-		split.ContractNum = i
-
-		// Enqueue this split trade
 		if err := s.app.AddToTradeQueue(&split); err != nil {
-			log.Printf("gRPC: Failed to enqueue split trade %d/%d for %s: %v", i, quantity, req.Id, err)
-			return fmt.Errorf("failed to enqueue split trade %d/%d: %w", i, quantity, err)
+			s.mirroredHedgeQty[baseID] = current + i
+			s.nextContractIndex[baseID] = contractNum
+			log.Printf("gRPC: Failed to enqueue split trade %d/%d for %s: %v", i+1, delta, req.GetId(), err)
+			return fmt.Errorf("failed to enqueue split trade %d/%d: %w", i+1, delta, err)
 		}
 
 		s.app.AddToTradeHistory(&split)
-		log.Printf("gRPC: Enqueued split trade %s (contract %d/%d) for base_id=%s", split.ID, i, quantity, req.BaseId)
+		log.Printf("gRPC: Enqueued split trade %s (contract %d/%d) for base_id=%s", split.ID, contractNum, targetTotal, baseID)
 	}
 
-	log.Printf("gRPC: Successfully split and enqueued %d hedges for trade %s", quantity, req.Id)
+	updated := current + delta
+	s.mirroredHedgeQty[baseID] = updated
+	s.nextContractIndex[baseID] = nextIndex
+	log.Printf("gRPC: Successfully mirrored %d new hedge(s) (tracked=%d) for trade %s", delta, updated, req.GetId())
 	return nil
+}
+
+func (s *Server) trackHedgeClosure(baseID string, closedQty float64, reason string) {
+	base := strings.TrimSpace(baseID)
+	if base == "" {
+		return
+	}
+
+	reasonLower := strings.ToLower(strings.TrimSpace(reason))
+	qtyAbs := math.Abs(closedQty)
+	if qtyAbs < 0.5 && strings.HasPrefix(reasonLower, "elastic_") {
+		// Ignore fractional elastic adjustments; underlying hedge remains open.
+		return
+	}
+
+	// Defer hedge accounting until MT5 confirms the close to avoid double-decrementing
+	if strings.HasPrefix(reasonLower, "qt_") {
+		log.Printf("gRPC: Ignoring client-initiated hedge close bookkeeping for base_id=%s (reason=%s, qty=%.4f)", base, reasonLower, closedQty)
+		return
+	}
+
+	qty := s.contractsFromQuantity(qtyAbs)
+	if qty <= 0 {
+		if qtyAbs < 0.49 {
+			return
+		}
+		qty = 1
+	}
+
+	s.hedgeStateMu.Lock()
+	defer s.hedgeStateMu.Unlock()
+
+	current := s.mirroredHedgeQty[base]
+	remaining := current - qty
+	log.Printf("gRPC: Hedge close bookkeeping for base_id=%s reason=%s qty=%d current=%d", base, reasonLower, qty, current)
+	if remaining <= 0 {
+		delete(s.mirroredHedgeQty, base)
+		delete(s.nextContractIndex, base)
+		log.Printf("gRPC: Hedge tracking reset for base_id=%s after closing %d contract(s) (reason=%s)", base, qty, reason)
+		return
+	}
+
+	s.mirroredHedgeQty[base] = remaining
+	s.nextContractIndex[base] = remaining + 1
+	log.Printf("gRPC: Tracked hedge count reduced to %d for base_id=%s after closing %d contract(s) (reason=%s)", remaining, base, qty, reason)
+}
+
+func (s *Server) contractsFromQuantity(qty float64) int {
+	hedgeSize := s.app.GetHedgeSize()
+	if hedgeSize > 0 {
+		contracts := qty / hedgeSize
+		if contracts >= 0.5 {
+			count := int(math.Round(contracts))
+			if count > 0 {
+				return count
+			}
+		}
+	}
+	if qty <= 0 {
+		return 0
+	}
+	count := int(math.Round(qty))
+	if count < 1 {
+		return 1
+	}
+	return count
 }
 
 // GetTrades handles streaming trade requests from MT5
@@ -627,6 +753,8 @@ func (s *Server) NotifyHedgeClose(ctx context.Context, req *trading.HedgeCloseNo
 			Message: "Failed to handle hedge close notification: " + err.Error(),
 		}, status.Error(codes.Internal, "Failed to process notification")
 	}
+
+	s.trackHedgeClosure(req.GetBaseId(), req.GetClosedHedgeQuantity(), req.GetClosureReason())
 
 	return &trading.GenericResponse{
 		Status:  "success",
@@ -1010,6 +1138,8 @@ func (s *Server) SubmitCloseHedge(ctx context.Context, req *trading.HedgeCloseNo
 			Message: "Failed to handle close hedge request: " + err.Error(),
 		}, status.Error(codes.Internal, "Failed to process close hedge request")
 	}
+
+	s.trackHedgeClosure(req.GetBaseId(), req.GetClosedHedgeQuantity(), req.GetClosureReason())
 
 	return &trading.GenericResponse{
 		Status:  "success",

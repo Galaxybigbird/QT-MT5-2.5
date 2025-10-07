@@ -43,6 +43,10 @@ namespace Quantower.MultiStrat
         /// Used to determine how many MT5 hedges to close (n trades = n hedges).
         /// </summary>
         public Func<string, int?>? GetTrackedQuantity { get; set; }
+        /// <summary>
+        /// Optional resolver to recover the baseId for Quantower trades whose PositionId is missing.
+        /// </summary>
+        public Func<Trade, string?>? ResolveBaseId { get; set; }
 
         public bool IsRunning => _isRunning;
 
@@ -156,6 +160,12 @@ namespace Quantower.MultiStrat
                 EmitLog(BridgeLogLevel.Error, "Cannot start bridge without gRPC address");
                 return false;
             }
+
+            QuantowerTradeMapper.LogError = (message, exception) =>
+            {
+                var details = exception?.Message;
+                EmitLog(BridgeLogLevel.Warn, string.IsNullOrWhiteSpace(details) ? message : $"{message} ({details})");
+            };
 
             EmitLog(BridgeLogLevel.Info, $"Connecting to {_grpcAddress}");
             BridgeGrpcClient.SubmitTradeTimeout = TradeSubmitTimeout;
@@ -430,18 +440,21 @@ namespace Quantower.MultiStrat
 
         private void OnQuantowerTrade(Trade trade)
         {
-            if (!QuantowerTradeMapper.TryBuildTradeEnvelope(trade, out var payload, out var tradeId))
-            {
-                EmitLog(BridgeLogLevel.Warn, "Unable to translate Quantower trade event into bridge payload", trade?.Id, trade?.PositionId);
-                return;
-            }
+            var overrideBaseId = ResolveBaseId?.Invoke(trade);
 
-            if (!string.IsNullOrWhiteSpace(tradeId))
+            if (QuantowerTradeMapper.TryBuildTradeEnvelope(trade, out var payload, out var tradeId, overrideBaseId))
             {
-                _pendingTrades.TryRemove(tradeId, out _);
-            }
+                if (!string.IsNullOrWhiteSpace(tradeId))
+                {
+                    _pendingTrades.TryRemove(tradeId, out _);
+                }
 
-            ObserveAsyncOperation(BridgeGrpcClient.SubmitTradeAsync(payload), "SubmitTrade", tradeId ?? "unknown");
+                ObserveAsyncOperation(BridgeGrpcClient.SubmitTradeAsync(payload), "SubmitTrade", tradeId ?? "unknown");
+            }
+            else
+            {
+                EmitLog(BridgeLogLevel.Debug, "Skipping SubmitTrade for non-open impact", trade?.Id, trade?.PositionId);
+            }
 
             try
             {
@@ -470,61 +483,23 @@ namespace Quantower.MultiStrat
             var positionDetails = $"Position.Id={position?.Id}, Symbol={position?.Symbol?.Name}, Qty={position?.Quantity:F2}";
             EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] OnQuantowerPositionClosed called: {positionDetails}");
 
-            var positionId = position?.Id;
-
-            // Get the tracked initial quantity for proper hedge closure (n trades = n hedges)
-            int? closedContractCount = null;
-            if (!string.IsNullOrWhiteSpace(positionId) && GetTrackedQuantity != null)
-            {
-                closedContractCount = GetTrackedQuantity(positionId);
-                if (closedContractCount.HasValue)
-                {
-                    EmitLog(BridgeLogLevel.Debug, $"[CORE EVENT] Retrieved tracked quantity {closedContractCount.Value} for position {positionId}");
-                }
-            }
-
-            // Build position closure message using Position.Id as baseId
-            // Pass the tracked quantity so the bridge knows how many hedges to close
-            if (!QuantowerTradeMapper.TryBuildPositionClosure(position, positionId, closedContractCount, out var payload, out var closureId))
-            {
-                EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] Unable to map Quantower position closure to bridge notification", closureId, closureId);
-                return;
-            }
-
-            EmitLog(BridgeLogLevel.Info, $"[CORE EVENT] Quantower position closed ({closureId ?? "n/a"}) -> notifying bridge (closing {closedContractCount?.ToString() ?? "unknown"} hedge(s))", closureId, closureId);
-            ObserveAsyncOperation(BridgeGrpcClient.SubmitCloseHedgeAsync(payload), "SubmitCloseHedge", closureId ?? "n/a");
-
-            try
-            {
-                PositionRemoved?.Invoke(position);
-            }
-            catch (Exception ex)
-            {
-                EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] PositionRemoved listener threw", position.Id, ex.Message);
-            }
+            RaisePositionRemoved(position);
         }
 
         private void OnQuantowerPositionAdded(Position position)
         {
             var rawPositionId = position?.Id;
 
-            if (QuantowerTradeMapper.TryBuildPositionSnapshot(position, out var tradePayload, out var positionTradeId))
-            {
-                // REMOVED: Deduplication logic that was preventing multi-contract positions from being sent
-                // The manager service (HandlePositionAdded) already has proper deduplication logic
-                // that checks quantity changes and prevents true duplicates
-
-                EmitLog(BridgeLogLevel.Info, $"[CORE EVENT] Quantower position added ({positionTradeId ?? "n/a"}) - Symbol={position.Symbol?.Name}, Qty={position.Quantity:F2} -> notifying bridge", positionTradeId, positionTradeId);
-                ObserveAsyncOperation(BridgeGrpcClient.SubmitTradeAsync(tradePayload), "SubmitTradeSnapshot", positionTradeId ?? "n/a");
-            }
-
+            // Live additions only notify the manager to update tracking. Initial snapshots enqueue
+            // synthetic trades via TryPublishPositionSnapshotAsync, avoiding duplicate hedge opens when
+            // real-time fills arrive.
             try
             {
                 PositionAdded?.Invoke(position);
             }
             catch (Exception ex)
             {
-                EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] PositionAdded listener threw", position.Id, ex.Message);
+                EmitLog(BridgeLogLevel.Warn, "[CORE EVENT] PositionAdded listener threw", rawPositionId, ex.Message);
             }
         }
 
@@ -541,6 +516,11 @@ namespace Quantower.MultiStrat
         public Task<bool> NotifyHedgeCloseAsync(string payload, string? baseId)
         {
             return DispatchWithLoggingAsync(() => BridgeGrpcClient.NotifyHedgeCloseAsync(payload), "NotifyHedgeClose", baseId ?? string.Empty);
+        }
+
+        public Task<bool> SubmitCloseHedgeAsync(string payload, string? baseId)
+        {
+            return DispatchWithLoggingAsync(() => BridgeGrpcClient.SubmitCloseHedgeAsync(payload), "SubmitCloseHedge", baseId ?? string.Empty);
         }
 
         private async Task<bool> DispatchWithLoggingAsync(Func<Task<bool>> operation, string operationName, string identifier)

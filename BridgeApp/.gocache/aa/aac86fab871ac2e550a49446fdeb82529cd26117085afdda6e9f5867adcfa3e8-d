@@ -1,0 +1,17 @@
+# test log
+getenv BRIDGE_GRPC_PORT
+getenv BRIDGE_GRPC_PORT
+getenv BRIDGE_GRPC_PORT
+getenv TMPDIR
+stat /tmp/bridgeapp-test-logs
+open /tmp/bridgeapp-test-logs
+getenv SENTRY_DSN
+getenv BRIDGE_LOG_DIR
+stat /tmp/bridgeapp-test-logs
+open /tmp/bridgeapp-test-logs/unified-20251002.jsonl
+open /tmp/bridgeapp-test-logs
+open /tmp/bridgeapp-test-logs/unified-20251002.jsonl
+open /tmp/bridgeapp-test-logs
+open /tmp/bridgeapp-test-logs/unified-20251002.jsonl
+open /tmp/bridgeapp-test-logs
+open /tmp/bridgeapp-test-logs/unified-20251002.jsonl

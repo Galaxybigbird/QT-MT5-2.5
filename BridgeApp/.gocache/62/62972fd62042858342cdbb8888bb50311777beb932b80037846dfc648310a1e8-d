@@ -1,0 +1,5 @@
+./app.go
+./main.go
+./app_close_request_test.go
+./app_elastic_extract_test.go
+./grpc_server_test.go

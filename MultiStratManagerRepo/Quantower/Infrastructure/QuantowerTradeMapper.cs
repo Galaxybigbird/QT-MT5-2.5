@@ -52,13 +52,64 @@ namespace Quantower.MultiStrat.Infrastructure
             Console.Error.WriteLine($"{message}\n{ex}");
         }
 
-        public static bool TryBuildTradeEnvelope(Trade trade, out string json, out string? tradeId)
+        private static string? ResolvePositionId(Trade trade)
+        {
+            if (trade == null)
+            {
+                return null;
+            }
+
+            var positionId = SafeString(trade.PositionId);
+            if (!string.IsNullOrWhiteSpace(positionId))
+            {
+                return positionId;
+            }
+
+            var positionObject = GetPropertyValue(trade, "Position");
+            if (positionObject is Position qtPosition)
+            {
+                var fallbackPositionId = SafeString(qtPosition.Id);
+                if (!string.IsNullOrWhiteSpace(fallbackPositionId))
+                {
+                    return fallbackPositionId;
+                }
+            }
+            else if (positionObject != null)
+            {
+                var fallbackObj = GetPropertyValue(positionObject, "Id") ?? GetPropertyValue(positionObject, "PositionId");
+                var fallbackPositionId = SafeString(fallbackObj?.ToString());
+                if (!string.IsNullOrWhiteSpace(fallbackPositionId))
+                {
+                    return fallbackPositionId;
+                }
+            }
+
+            if (trade.AdditionalInfo != null && trade.AdditionalInfo.TryGetItem("base_id", out var baseIdItem) && baseIdItem != null)
+            {
+                var additionalBaseId = SafeString(baseIdItem.Value as string ?? baseIdItem.Value?.ToString());
+                if (!string.IsNullOrWhiteSpace(additionalBaseId))
+                {
+                    return additionalBaseId;
+                }
+            }
+
+            return null;
+        }
+
+        public static bool TryBuildTradeEnvelope(Trade trade, out string json, out string? tradeId, string? overrideBaseId = null)
         {
             json = string.Empty;
             tradeId = null;
 
             if (trade == null)
             {
+                return false;
+            }
+
+            if (trade.PositionImpactType == PositionImpactType.Close)
+            {
+                // Closing fills are handled explicitly via SubmitCloseHedge.
+                // Skip building a normal trade payload to avoid reopening hedges.
                 return false;
             }
 
@@ -70,7 +121,7 @@ namespace Quantower.MultiStrat.Infrastructure
                 };
 
                 var qtTradeId = SafeString(trade.Id);
-                var positionId = SafeString(trade.PositionId);
+                var positionId = string.IsNullOrWhiteSpace(overrideBaseId) ? ResolvePositionId(trade) : overrideBaseId;
                 var orderId = SafeString(trade.OrderId);
 
                 // CRITICAL: base_id MUST be Quantower Position.Id for proper correlation
@@ -100,10 +151,17 @@ namespace Quantower.MultiStrat.Infrastructure
                     payload["order_id"] = orderId;
                 }
 
-                AddInstrument(payload, trade.Symbol);
-                AddAccount(payload, trade.Account);
-                AddActionQuantityPrice(payload, trade.Side, trade.Quantity, trade.Price);
-                AddTimestamp(payload, trade.DateTime);
+            AddInstrument(payload, trade.Symbol);
+            AddAccount(payload, trade.Account);
+			AddActionQuantityPrice(payload, trade.Side, trade.Quantity, trade.Price);
+
+			var resolvedTotalQuantity = ResolvePositionQuantity(trade);
+			if (resolvedTotalQuantity.HasValue && resolvedTotalQuantity.Value > 0)
+			{
+				payload["total_quantity"] = resolvedTotalQuantity.Value;
+			}
+
+			AddTimestamp(payload, trade.DateTime);
                 AddStrategyTag(payload, trade.Comment, trade.AdditionalInfo);
 
                 json = JsonSerializer.Serialize(payload, SerializerOptions);
@@ -174,7 +232,8 @@ namespace Quantower.MultiStrat.Infrastructure
 
                 AddInstrument(payload, position.Symbol);
                 AddAccount(payload, position.Account);
-                AddActionQuantityPrice(payload, position.Side, position.Quantity, position.OpenPrice);
+			AddActionQuantityPrice(payload, position.Side, position.Quantity, position.OpenPrice);
+			payload["total_quantity"] = Math.Abs(position.Quantity);
                 AddTimestamp(payload, position.OpenTime);
                 AddStrategyTag(payload, position.Comment, position.AdditionalInfo);
 
@@ -349,16 +408,131 @@ namespace Quantower.MultiStrat.Infrastructure
             }
         }
 
-        private static void AddActionQuantityPrice(IDictionary<string, object?> payload, Side side, double quantity, double price)
-        {
-            var absQuantity = Math.Abs(quantity);
-            payload["quantity"] = absQuantity;
-            payload["action"] = ResolveAction(side, quantity);
-            payload["price"] = price;
+		private static void AddActionQuantityPrice(IDictionary<string, object?> payload, Side side, double quantity, double price)
+		{
+			var absQuantity = Math.Abs(quantity);
+			payload["quantity"] = absQuantity;
+			payload["action"] = ResolveAction(side, quantity);
+			payload["price"] = price;
 
-            // DEBUG: Log the quantity being set
-            System.Diagnostics.Debug.WriteLine($"[QT][MAPPER] AddActionQuantityPrice: raw quantity={quantity}, abs quantity={absQuantity}, side={side}");
-        }
+			// DEBUG: Log the quantity being set
+			System.Diagnostics.Debug.WriteLine($"[QT][MAPPER] AddActionQuantityPrice: raw quantity={quantity}, abs quantity={absQuantity}, side={side}");
+		}
+
+		private static double? ResolvePositionQuantity(Trade trade)
+		{
+			if (trade == null)
+			{
+				return null;
+			}
+
+			var positionObject = GetPropertyValue(trade, "Position");
+			if (TryExtractQuantity(positionObject, out var quantity) && Math.Abs(quantity) > double.Epsilon)
+			{
+				return Math.Abs(quantity);
+			}
+
+			var propertyCandidates = new[] { "PositionQuantity", "TotalQuantity", "TotalQty", "Qty", "QuantityNet" };
+			foreach (var candidate in propertyCandidates)
+			{
+				var value = GetPropertyValue(trade, candidate);
+				if (TryConvertToDouble(value, out quantity) && Math.Abs(quantity) > double.Epsilon)
+				{
+					return Math.Abs(quantity);
+				}
+			}
+
+			if (trade.AdditionalInfo != null && trade.AdditionalInfo.TryGetItem("total_quantity", out var totalQtyItem) && totalQtyItem != null)
+			{
+				if (TryConvertToDouble(totalQtyItem.Value, out quantity) && Math.Abs(quantity) > double.Epsilon)
+				{
+					return Math.Abs(quantity);
+				}
+			}
+
+			return null;
+		}
+
+		private static bool TryExtractQuantity(object? candidate, out double quantity)
+		{
+			quantity = 0;
+			if (candidate == null)
+			{
+				return false;
+			}
+
+			if (TryConvertToDouble(candidate, out quantity) && Math.Abs(quantity) > double.Epsilon)
+			{
+				return true;
+			}
+
+			var quantityMembers = new[] { "Quantity", "Qty", "TotalQuantity", "NetQuantity", "Lots" };
+			foreach (var member in quantityMembers)
+			{
+				var value = GetPropertyValue(candidate, member);
+				if (TryConvertToDouble(value, out quantity) && Math.Abs(quantity) > double.Epsilon)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		private static bool TryConvertToDouble(object? value, out double result)
+		{
+			switch (value)
+			{
+				case null:
+					result = 0;
+					return false;
+				case double d:
+					result = d;
+					return true;
+				case float f:
+					result = f;
+					return true;
+				case decimal dec:
+					result = (double)dec;
+					return true;
+				case int i:
+					result = i;
+					return true;
+				case long l:
+					result = l;
+					return true;
+				case short s:
+					result = s;
+					return true;
+				case byte b:
+					result = b;
+					return true;
+				case string str when !string.IsNullOrWhiteSpace(str):
+					if (double.TryParse(str, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var parsed))
+					{
+						result = parsed;
+						return true;
+					}
+					break;
+				default:
+					try
+					{
+						if (value is IConvertible convertible)
+						{
+							result = convertible.ToDouble(CultureInfo.InvariantCulture);
+							return true;
+						}
+					}
+					catch
+					{
+						// Ignore conversion failures and fall through to default handling below.
+					}
+					break;
+			}
+
+			result = 0;
+			return false;
+		}
 
         private static void AddTimestamp(IDictionary<string, object?> payload, DateTime timestamp)
         {

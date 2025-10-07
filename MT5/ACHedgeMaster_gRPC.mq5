@@ -1,5 +1,5 @@
 #property link      ""
-#property version   "3.61"
+#property version   "3.64"
 #property strict
 #property description "gRPC Hedge Receiver EA for Go bridge server with Asymmetrical Compounding"
 
@@ -1608,6 +1608,79 @@ void ProcessTradeFromJson(const string& trade_json)
     CleanupOldOccurrences(900);
 }
 
+bool CloseHedgeTicketDirect(const string &baseId, ulong mt5Ticket)
+{
+    if(mt5Ticket == 0)
+        return false;
+
+    bool selected = false;
+    for(int attempt = 0; attempt < 8 && !selected; attempt++)
+    {
+        selected = PositionSelectByTicket(mt5Ticket);
+        if(!selected)
+            Sleep(150);
+    }
+
+    if(!selected)
+    {
+        { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_WARN: Ticket #", mt5Ticket,
+              " not found during direct close for base_id: ", baseId); Print(__log); ULogWarnPrint(__log); }
+        return false;
+    }
+
+    double volume = PositionGetDouble(POSITION_VOLUME);
+    { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_DEBUG: [CloseHedgeTicketDirect] Attempting direct close for ticket #",
+          mt5Ticket, ", volume ", volume, ", base_id: ", baseId); Print(__log); ULogInfoPrint(__log); }
+
+    if(trade.PositionClose(mt5Ticket))
+    {
+        { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE: Direct close succeeded for ticket #",
+              mt5Ticket, " (base_id: ", baseId, ")"); Print(__log); ULogInfoPrint(__log); }
+        SubmitTradeResult("success", mt5Ticket, volume, true, baseId);
+
+        if(g_map_position_id_to_base_id != NULL)
+        {
+            string _base = "";
+            g_map_position_id_to_base_id.TryGetValue(mt5Ticket, _base);
+            if(_base != "")
+                g_map_position_id_to_base_id.Remove(mt5Ticket);
+        }
+
+        HedgeGroup* group = FindHedgeGroupByBaseId(baseId);
+        if(group != NULL)
+        {
+            int ticketCount = ArraySize(group.hedgeTickets);
+            for(int ti = 0; ti < ticketCount; ti++)
+            {
+                if(group.hedgeTickets[ti] == mt5Ticket)
+                {
+                    for(int tj = ti; tj < ticketCount - 1; tj++)
+                        group.hedgeTickets[tj] = group.hedgeTickets[tj + 1];
+                    ArrayResize(group.hedgeTickets, ticketCount - 1);
+                    group.mt5HedgesClosedCount++;
+                    break;
+                }
+            }
+
+            if(ArraySize(group.hedgeTickets) == 0)
+            {
+                group.isMT5Closed = true;
+                Print("ACHM_REFACTOR: All hedges closed for base_id ", baseId, ". Group will be cleaned up.");
+                NotifyMT5PositionClosure(baseId, mt5Ticket, volume, "MT5_position_closed");
+                RemoveSeenTradeKeysForBaseId(baseId);
+            }
+        }
+
+        return true;
+    }
+
+    int closeError = GetLastError();
+    { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE: Direct close failed for ticket #",
+          mt5Ticket, " (base_id: ", baseId, ") - Error: ", closeError); Print(__log); ULogErrorPrint(__log); }
+    SubmitTradeResult("failed", mt5Ticket, volume, true, baseId);
+    return false;
+}
+
 void ProcessCloseHedgeAction(const string& baseId, const string& trade_json, ulong mt5Ticket = 0)
 {
     { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_DEBUG: [ProcessCloseHedgeAction] Processing CLOSE_HEDGE for base_id: ", baseId, ", mt5Ticket: ", mt5Ticket); Print(__log); ULogInfoPrint(__log); }
@@ -1616,70 +1689,55 @@ void ProcessCloseHedgeAction(const string& baseId, const string& trade_json, ulo
     int totalPositions = PositionsTotal();
     { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_DEBUG: [ProcessCloseHedgeAction] Total positions to search: ", totalPositions); Print(__log); ULogInfoPrint(__log); }
 
-    // If we have an MT5 ticket, try to close by ticket first (single specific position)
-    if(mt5Ticket > 0) {
-        bool selected = false;
-        for(int attempt = 0; attempt < 3 && !selected; attempt++) {
-            selected = PositionSelectByTicket(mt5Ticket);
-            if(!selected) Sleep(50);
-        }
-        if(selected) {
-            double volume = PositionGetDouble(POSITION_VOLUME);
-            { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_DEBUG: [ProcessCloseHedgeAction] Found position by ticket #", mt5Ticket, " with volume ", volume); Print(__log); ULogInfoPrint(__log); }
-            if(trade.PositionClose(mt5Ticket)) {
-                { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE: Successfully closed hedge position by ticket #", mt5Ticket, " for base_id: ", baseId); Print(__log); ULogInfoPrint(__log); }
-                SubmitTradeResult("success", mt5Ticket, volume, true, baseId);
+    // If we have an MT5 ticket, try direct close first
+    if(mt5Ticket > 0)
+    {
+        if(CloseHedgeTicketDirect(baseId, mt5Ticket))
+            return;
+        { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_WARN: Direct close path failed for ticket #", mt5Ticket,
+              " (base_id: ", baseId, ") - attempting fallback strategies"); Print(__log); ULogWarnPrint(__log); }
+    }
 
-                // Remove from position tracking map
-                if(g_map_position_id_to_base_id != NULL) {
-                    string _base = "";
-                    g_map_position_id_to_base_id.TryGetValue(mt5Ticket, _base);
-                    if(_base != "") { g_map_position_id_to_base_id.Remove(mt5Ticket); }
-                }
+    HedgeGroup* fallbackGroup = FindHedgeGroupByBaseId(baseId);
+    bool hasTrackedHedges = (fallbackGroup != NULL && ArraySize(fallbackGroup.hedgeTickets) > 0);
 
-                // Update HedgeGroup: remove ticket and check if all closed (REFACTORED - with pointers)
-                HedgeGroup* group = FindHedgeGroupByBaseId(baseId);
-                if(group != NULL) {
-                    // Remove this ticket from the hedgeTickets array
-                    int ticketCount = ArraySize(group.hedgeTickets);
-                    for(int ti = 0; ti < ticketCount; ti++) {
-                        if(group.hedgeTickets[ti] == mt5Ticket) {
-                            // Shift remaining tickets down
-                            for(int tj = ti; tj < ticketCount - 1; tj++) {
-                                group.hedgeTickets[tj] = group.hedgeTickets[tj + 1];
-                            }
-                            ArrayResize(group.hedgeTickets, ticketCount - 1);
-                            group.mt5HedgesClosedCount++;
-                            Print("ACHM_REFACTOR: Removed ticket ", mt5Ticket, " from group ", baseId,
-                                  ". Remaining hedges: ", ArraySize(group.hedgeTickets));
-                            break;
-                        }
-                    }
-
-                    // If all hedges closed, mark group as complete and send notification
-                    if(ArraySize(group.hedgeTickets) == 0) {
-                        group.isMT5Closed = true;
-                        Print("ACHM_REFACTOR: All hedges closed for base_id ", baseId, ". Group will be cleaned up.");
-                        NotifyMT5PositionClosure(baseId, mt5Ticket, volume, "MT5_position_closed");
-                        // CRITICAL FIX: Remove dedup keys to allow base_id reuse
-                        RemoveSeenTradeKeysForBaseId(baseId);
-                    }
-                }
-            } else {
-                int closeError = GetLastError();
-                { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE: Failed to close position by ticket #", mt5Ticket, " - Error: ", closeError); Print(__log); ULogErrorPrint(__log); }
-                SubmitTradeResult("failed", mt5Ticket, volume, true, baseId);
+    if(hasTrackedHedges)
+    {
+        bool closedViaTracking = false;
+        int safeguard = 0;
+        while(fallbackGroup != NULL && ArraySize(fallbackGroup.hedgeTickets) > 0 && safeguard < 8)
+        {
+            ulong trackedTicket = fallbackGroup.hedgeTickets[0];
+            if(trackedTicket == 0)
+            {
+                for(int shift = 0; shift < ArraySize(fallbackGroup.hedgeTickets) - 1; shift++)
+                    fallbackGroup.hedgeTickets[shift] = fallbackGroup.hedgeTickets[shift + 1];
+                ArrayResize(fallbackGroup.hedgeTickets, ArraySize(fallbackGroup.hedgeTickets) - 1);
+                continue;
             }
-            return; // With explicit ticket we don't attempt further matching
-        } else {
-            // Idempotent closure: If the ticket can't be selected, treat as already closed.
-            { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE: Ticket #", mt5Ticket, " not found on CLOSE_HEDGE — treating as already closed for base_id: ", baseId); Print(__log); ULogInfoPrint(__log); }
-            // Report success to bridge so downstream mapping/pruning completes cleanly.
-            SubmitTradeResult("success", mt5Ticket, 0.0, true, baseId);
-            // Also emit a hedge close notification with an explicit reason to aid correlation.
-            NotifyMT5PositionClosure(baseId, mt5Ticket, 0.0, "already_closed");
-            return; // Do not attempt broad closure to avoid accidental closes
+
+            if(!CloseHedgeTicketDirect(baseId, trackedTicket))
+                break;
+
+            closedViaTracking = true;
+            safeguard++;
+            fallbackGroup = FindHedgeGroupByBaseId(baseId);
         }
+
+        if(closedViaTracking)
+            return;
+    }
+
+    if(!hasTrackedHedges)
+    {
+        { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE: No tracked hedges for base_id: ", baseId,
+              " during CLOSE_HEDGE request. Treating as idempotent closure"); Print(__log); ULogInfoPrint(__log); }
+        if(mt5Ticket > 0)
+        {
+            SubmitTradeResult("success", mt5Ticket, 0.0, true, baseId);
+            NotifyMT5PositionClosure(baseId, mt5Ticket, 0.0, "already_closed");
+        }
+        return;
     }
 
     // Fallback to comment-based matching
@@ -1810,70 +1868,20 @@ void ProcessCloseHedgeAction(const string& baseId, const string& trade_json, ulo
         }
 
         if(commentMatches) {
-            hedgeFound = true;
-            // Optional cap by total_quantity
             if(capClosures > 0 && closedCount >= capClosures) {
                 { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_DEBUG: [ProcessCloseHedgeAction] Reached closure cap ", capClosures, " for base_id: ", baseId); Print(__log); ULogInfoPrint(__log); }
                 break;
             }
 
-            // Safety: match symbol to current chart symbol to avoid cross-symbol closes
             string sym = PositionGetString(POSITION_SYMBOL);
             if(sym != _Symbol) {
                 { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_DEBUG: [ProcessCloseHedgeAction] Skipping position #", positionTicket, " due to symbol mismatch: ", sym, " != ", _Symbol); Print(__log); ULogWarnPrint(__log); }
                 continue;
             }
 
-            double volume = PositionGetDouble(POSITION_VOLUME);
-            { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_DEBUG: [ProcessCloseHedgeAction] Attempting to close position #", positionTicket, " with volume ", volume); Print(__log); ULogInfoPrint(__log); }
-            if(trade.PositionClose(positionTicket)) {
-                { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE: Successfully closed hedge position #", positionTicket, " for base_id: ", baseId); Print(__log); ULogInfoPrint(__log); }
-                SubmitTradeResult("success", positionTicket, volume, true, baseId);
-
-                // Remove from position tracking map
-                if(g_map_position_id_to_base_id != NULL) {
-                    string _base = "";
-                    g_map_position_id_to_base_id.TryGetValue(positionTicket, _base);
-                    if(_base != "") { g_map_position_id_to_base_id.Remove(positionTicket); }
-                }
-
-                // Update HedgeGroup: remove ticket and check if all closed (REFACTORED - with pointers)
-                HedgeGroup* group = FindHedgeGroupByBaseId(baseId);
-                if(group != NULL) {
-                    // Remove this ticket from the hedgeTickets array
-                    int ticketCount = ArraySize(group.hedgeTickets);
-                    for(int ti = 0; ti < ticketCount; ti++) {
-                        if(group.hedgeTickets[ti] == positionTicket) {
-                            // Shift remaining tickets down
-                            for(int tj = ti; tj < ticketCount - 1; tj++) {
-                                group.hedgeTickets[tj] = group.hedgeTickets[tj + 1];
-                            }
-                            ArrayResize(group.hedgeTickets, ticketCount - 1);
-                            group.mt5HedgesClosedCount++;
-                            Print("ACHM_REFACTOR: Removed ticket ", positionTicket, " from group ", baseId,
-                                  ". Remaining hedges: ", ArraySize(group.hedgeTickets));
-                            break;
-                        }
-                    }
-
-                    // If all hedges closed, mark group as complete
-                    if(ArraySize(group.hedgeTickets) == 0) {
-                        group.isMT5Closed = true;
-                        Print("ACHM_REFACTOR: All hedges closed for base_id ", baseId, ". Group will be cleaned up.");
-                        // CRITICAL FIX: Remove dedup keys to allow base_id reuse
-                        RemoveSeenTradeKeysForBaseId(baseId);
-                    }
-                }
-
+            if(CloseHedgeTicketDirect(baseId, positionTicket)) {
+                hedgeFound = true;
                 closedCount++;
-                // Continue searching to close additional matching positions (multi-hedge case)
-                continue;
-            } else {
-                int closeError = GetLastError();
-                { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE: Failed to close hedge position #", positionTicket, " for base_id: ", baseId, " - Error: ", closeError); Print(__log); ULogErrorPrint(__log); }
-                { string __log=""; StringConcatenate(__log, "ACHM_CLOSURE_DEBUG: [ProcessCloseHedgeAction] Close failure details - Volume: ", volume, ", Symbol: ", _Symbol, ", Error: ", closeError); Print(__log); ULogErrorPrint(__log); }
-                SubmitTradeResult("failed", positionTicket, volume, true, baseId);
-                // Even on failure, attempt remaining matches
                 continue;
             }
         }

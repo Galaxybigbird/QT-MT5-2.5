@@ -9,7 +9,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
+using System.Reflection;
 using Quantower.Bridge.Client;
+using Quantower.MultiStrat.Infrastructure;
 using Quantower.MultiStrat.Indicators;
 using Quantower.MultiStrat.Persistence;
 using Quantower.MultiStrat.Services;
@@ -37,12 +39,23 @@ namespace Quantower.MultiStrat
         private readonly ConcurrentDictionary<string, bool> _processingPositions = new();
         private readonly ConcurrentDictionary<string, string> _baseIdToPositionId = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, Order> _stopLossOrders = new(StringComparer.OrdinalIgnoreCase);
+        // Track Quantower trade ids we've already applied to quantity bookkeeping to avoid double counting.
+        private readonly ConcurrentDictionary<string, byte> _processedTradeIds = new(StringComparer.OrdinalIgnoreCase);
         // Track initial position quantities for proper hedge closure (n trades = n hedges)
         private readonly ConcurrentDictionary<string, int> _baseIdToInitialQuantity = new(StringComparer.OrdinalIgnoreCase);
         // Track current position quantities for partial closure detection
         private readonly ConcurrentDictionary<string, int> _baseIdToCurrentQuantity = new(StringComparer.OrdinalIgnoreCase);
+        // Remember the last non-zero quantity we observed so late closure events can still determine
+        // how many hedges need to unwind even if Quantower has already flushed its trackers.
+        private readonly ConcurrentDictionary<string, int> _baseIdToLastKnownQuantity = new(StringComparer.OrdinalIgnoreCase);
         // Track position side (Buy/Sell) to detect closing trades
         private readonly ConcurrentDictionary<string, Side> _baseIdToSide = new(StringComparer.OrdinalIgnoreCase);
+        // Map Quantower trade identifiers to base ids for fallback correlation
+        private readonly ConcurrentDictionary<string, string> _tradeIdToBaseId = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, string> _orderIdToBaseId = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, int> _positionContractCounts = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, ConcurrentQueue<string>> _positionOpenContracts = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, byte> _pendingContractCloseAcks = new(StringComparer.OrdinalIgnoreCase);
         private int _disposed; // 0 = active, 1 = disposed
         private Timer? _riskTimer;
         private bool _coreEventsAttached;
@@ -66,6 +79,7 @@ namespace Quantower.MultiStrat
             _bridgeService.StreamEnvelopeReceived += OnBridgeStreamEnvelopeReceived;
             // Wire up callback for getting tracked quantities (n trades = n hedges)
             _bridgeService.GetTrackedQuantity = GetTrackedInitialQuantity;
+            _bridgeService.ResolveBaseId = ResolveBaseIdFromTrade;
             _accountsView = new ReadOnlyObservableCollection<AccountSubscription>(_accounts);
             LoadSettings();
             StartRiskTimer();
@@ -1028,31 +1042,546 @@ namespace Quantower.MultiStrat
                 return;
             }
 
-            // CRITICAL: Detect partial closures
-            // Quantower fires TradeAdded for both opening and closing trades
-            // We need to detect closing trades and handle them separately
-            var baseId = trade.PositionId;
-            if (!string.IsNullOrWhiteSpace(baseId) && IsClosingTrade(trade, baseId))
+            var baseId = ResolveBaseIdFromTrade(trade);
+            if (string.IsNullOrWhiteSpace(baseId))
             {
-                HandlePartialClosure(trade, baseId);
-                // Still record for trailing/SLTP services
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Trade {trade.Id} missing PositionId - skipping hedge synchronization");
                 _trailingService.RecordTrade(trade);
+                if (_sltpService.Enabled)
+                {
+                    TryHandleSltpTrade(trade);
+                }
                 return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(trade.Id))
+            {
+                _tradeIdToBaseId[trade.Id] = baseId;
+
+                if (!_processedTradeIds.TryAdd(trade.Id, 0))
+                {
+                    _trailingService.RecordTrade(trade);
+                    if (_sltpService.Enabled)
+                    {
+                        TryHandleSltpTrade(trade);
+                    }
+                    return;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(trade.OrderId))
+            {
+                _orderIdToBaseId[trade.OrderId] = baseId;
+            }
+
+            var contracts = GetContractsFromTrade(trade);
+            if (contracts <= 0)
+            {
+                contracts = 1;
+            }
+
+            switch (trade.PositionImpactType)
+            {
+                case PositionImpactType.Open:
+                    HandleOpeningTradeSimple(baseId, trade, contracts);
+                    break;
+                case PositionImpactType.Close:
+                    HandleClosingTradeSimple(baseId, trade, contracts);
+                    break;
+                default:
+                    if (IsClosingTrade(trade, baseId))
+                    {
+                        HandleClosingTradeSimple(baseId, trade, contracts);
+                    }
+                    else
+                    {
+                        HandleOpeningTradeSimple(baseId, trade, contracts);
+                    }
+                    break;
             }
 
             _trailingService.RecordTrade(trade);
 
             if (_sltpService.Enabled)
             {
-                try
+                TryHandleSltpTrade(trade);
+            }
+        }
+
+        private void TryHandleSltpTrade(Trade trade)
+        {
+            try
+            {
+                _sltpService.HandleTrade(trade);
+            }
+            catch (Exception ex)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"SLTP handler error: {ex.Message}");
+            }
+        }
+
+        private static string GenerateContractBaseId(string? tradeId, string positionId, int index, int totalContracts)
+        {
+            var token = !string.IsNullOrWhiteSpace(tradeId)
+                ? tradeId
+                : $"{positionId}-{Guid.NewGuid():N}";
+
+            if (totalContracts <= 1)
+            {
+                return token;
+            }
+
+            return $"{token}-{index + 1}";
+        }
+
+        private string? BuildOpenPayload(string positionId, string contractBaseId, Trade trade)
+        {
+            var instrument = GetInstrumentName(positionId, trade);
+            var accountName = GetAccountName(positionId, trade);
+
+            if (string.IsNullOrWhiteSpace(instrument) || string.IsNullOrWhiteSpace(accountName))
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn,
+                    $"Missing instrument/account for open payload {contractBaseId} (position {positionId})");
+            }
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["origin_platform"] = "quantower",
+                ["id"] = contractBaseId,
+                ["base_id"] = contractBaseId,
+                ["qt_trade_id"] = trade?.Id ?? string.Empty,
+                ["qt_position_id"] = positionId,
+                ["instrument"] = instrument,
+                ["instrument_name"] = instrument,
+                ["nt_instrument_symbol"] = instrument,
+                ["account_name"] = accountName,
+                ["nt_account_name"] = accountName,
+                ["quantity"] = 1d,
+                ["total_quantity"] = Math.Abs(trade?.Quantity ?? 1d),
+                ["action"] = trade?.Side == Side.Buy ? "buy" : "sell",
+                ["price"] = trade?.Price ?? 0d,
+                ["timestamp"] = (trade?.DateTime ?? DateTime.UtcNow).ToUniversalTime().ToString("o", CultureInfo.InvariantCulture)
+            };
+
+            if (!string.IsNullOrWhiteSpace(trade?.OrderId))
+            {
+                payload["order_id"] = trade.OrderId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(trade?.Comment))
+            {
+                payload["comment"] = trade.Comment;
+            }
+
+            return SimpleJson.SerializeObject(payload);
+        }
+
+        private void HandleOpeningTradeSimple(string baseId, Trade trade, int contracts)
+        {
+            _positionContractCounts.AddOrUpdate(baseId, contracts, (_, existing) => existing + contracts);
+            _baseIdToSide[baseId] = trade.Side;
+
+            var queue = _positionOpenContracts.GetOrAdd(baseId, _ => new ConcurrentQueue<string>());
+
+            for (var i = 0; i < contracts; i++)
+            {
+                var contractBaseId = GenerateContractBaseId(trade?.Id, baseId, i, contracts);
+                queue.Enqueue(contractBaseId);
+                _baseIdToPositionId[contractBaseId] = baseId;
+
+                var payload = BuildOpenPayload(baseId, contractBaseId, trade);
+                if (!string.IsNullOrWhiteSpace(payload))
                 {
-                    _sltpService.HandleTrade(trade);
-                }
-                catch (Exception ex)
-                {
-                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"SLTP handler error: {ex.Message}");
+                    _ = _bridgeService.SubmitTradeAsync(payload);
                 }
             }
+        }
+
+        private void HandleClosingTradeSimple(string baseId, Trade trade, int contracts)
+        {
+            var queue = _positionOpenContracts.GetOrAdd(baseId, _ => new ConcurrentQueue<string>());
+            var consumed = new List<string>(contracts);
+
+            for (var i = 0; i < contracts; i++)
+            {
+                if (queue.TryDequeue(out var contractBaseId))
+                {
+                    consumed.Add(contractBaseId);
+                }
+                else
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn,
+                        $"Quantower requested close of {contracts} hedge(s) for {baseId}, but only {consumed.Count} contract(s) remain tracked");
+                    break;
+                }
+            }
+
+            if (consumed.Count == 0)
+            {
+                var fallbackId = !string.IsNullOrWhiteSpace(trade?.Id)
+                    ? $"{trade.Id}-close-{Guid.NewGuid():N}"
+                    : $"{baseId}-close-{Guid.NewGuid():N}";
+
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn,
+                    $"No tracked contract base IDs remained for {baseId}; synthesizing fallback close id {fallbackId}");
+
+                consumed.Add(fallbackId);
+                _baseIdToPositionId[fallbackId] = baseId;
+            }
+
+            var remaining = _positionContractCounts.AddOrUpdate(
+                baseId,
+                _ => 0,
+                (_, current) =>
+                {
+                    var updated = current - consumed.Count;
+                    return updated < 0 ? 0 : updated;
+                });
+
+            foreach (var contractBaseId in consumed)
+            {
+                var payload = BuildClosePayload(baseId, contractBaseId, trade);
+                if (!string.IsNullOrWhiteSpace(payload))
+                {
+                    _pendingContractCloseAcks[contractBaseId] = 0;
+                    _ = _bridgeService.SubmitCloseHedgeAsync(payload, contractBaseId);
+                }
+            }
+
+            if (remaining <= 0 || trade.PositionImpactType == PositionImpactType.Close)
+            {
+                _positionContractCounts.TryRemove(baseId, out _);
+                _positionOpenContracts.TryRemove(baseId, out _);
+            }
+        }
+
+        private string ResolvePositionBaseId(string baseId)
+        {
+            if (string.IsNullOrWhiteSpace(baseId))
+            {
+                return baseId;
+            }
+
+            if (_baseIdToPositionId.TryGetValue(baseId, out var positionId) && !string.IsNullOrWhiteSpace(positionId))
+            {
+                return positionId;
+            }
+
+            return baseId;
+        }
+
+        private int ConsumeContractsFromQueue(string positionBaseId, string? contractBaseId, int requestedCount)
+        {
+            if (string.IsNullOrWhiteSpace(positionBaseId))
+            {
+                return 0;
+            }
+
+            if (!_positionOpenContracts.TryGetValue(positionBaseId, out var queue) || queue == null)
+            {
+                return 0;
+            }
+
+            var removed = 0;
+            var buffer = new List<string>();
+
+            lock (queue)
+            {
+                while (queue.TryDequeue(out var current))
+                {
+                    if (!string.IsNullOrWhiteSpace(contractBaseId))
+                    {
+                        if (string.Equals(current, contractBaseId, StringComparison.OrdinalIgnoreCase) && removed == 0)
+                        {
+                            removed++;
+                            continue;
+                        }
+                    }
+                    else if (removed < requestedCount)
+                    {
+                        removed++;
+                        continue;
+                    }
+
+                    buffer.Add(current);
+                }
+
+                foreach (var id in buffer)
+                {
+                    queue.Enqueue(id);
+                }
+            }
+
+            return removed;
+        }
+
+        private int SubtractContractCount(string positionBaseId, int amount)
+        {
+            if (string.IsNullOrWhiteSpace(positionBaseId) || amount <= 0)
+            {
+                return _positionContractCounts.TryGetValue(positionBaseId ?? string.Empty, out var existing) ? existing : 0;
+            }
+
+            return _positionContractCounts.AddOrUpdate(
+                positionBaseId,
+                _ => 0,
+                (_, current) =>
+                {
+                    var updated = current - amount;
+                    return updated < 0 ? 0 : updated;
+                });
+        }
+
+        private void RemovePendingCloseEntries(string positionBaseId)
+        {
+            if (string.IsNullOrWhiteSpace(positionBaseId))
+            {
+                return;
+            }
+
+            foreach (var pair in _pendingContractCloseAcks.ToArray())
+            {
+                if (string.Equals(pair.Key, positionBaseId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _pendingContractCloseAcks.TryRemove(pair.Key, out _);
+                    continue;
+                }
+
+                if (_baseIdToPositionId.TryGetValue(pair.Key, out var ownerBaseId) &&
+                    string.Equals(ownerBaseId, positionBaseId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _pendingContractCloseAcks.TryRemove(pair.Key, out _);
+                }
+            }
+        }
+
+        private void RemoveContractBaseMappings(string positionBaseId)
+        {
+            if (string.IsNullOrWhiteSpace(positionBaseId))
+            {
+                return;
+            }
+
+            foreach (var pair in _baseIdToPositionId.ToArray())
+            {
+                if (string.Equals(pair.Key, positionBaseId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _baseIdToPositionId.TryRemove(pair.Key, out _);
+                    continue;
+                }
+
+                if (string.Equals(pair.Value, positionBaseId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _baseIdToPositionId.TryRemove(pair.Key, out _);
+                }
+            }
+        }
+
+        private string? BuildClosePayload(string positionId, string contractBaseId, Trade trade)
+        {
+            var instrument = GetInstrumentName(positionId, trade);
+            var accountName = GetAccountName(positionId, trade);
+
+            if (string.IsNullOrWhiteSpace(instrument) || string.IsNullOrWhiteSpace(accountName))
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn,
+                    $"Missing instrument/account for close payload {contractBaseId} (position {positionId})");
+            }
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["event_type"] = "quantower_position_closed",
+                ["origin_platform"] = "quantower",
+                ["closure_reason"] = trade.PositionImpactType == PositionImpactType.Close ? "qt_position_removed" : "qt_partial_close",
+                ["id"] = contractBaseId,
+                ["base_id"] = contractBaseId,
+                ["qt_position_id"] = positionId,
+                ["instrument"] = instrument,
+                ["instrument_name"] = instrument,
+                ["nt_instrument_symbol"] = instrument,
+                ["account_name"] = accountName,
+                ["nt_account_name"] = accountName,
+                ["closed_hedge_quantity"] = 1d,
+                ["closed_hedge_action"] = ResolveCloseAction(trade, positionId),
+                ["timestamp"] = DateTime.UtcNow.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture),
+                ["mt5_ticket"] = 0,
+                ["qt_trade_id"] = trade?.Id ?? string.Empty
+            };
+
+            return SimpleJson.SerializeObject(payload);
+        }
+
+        private string? GetInstrumentName(string baseId, Trade trade)
+        {
+            var symbolName = trade?.Symbol?.Name ?? trade?.Symbol?.Id ?? trade?.Symbol?.Description;
+            if (!string.IsNullOrWhiteSpace(symbolName))
+            {
+                return symbolName;
+            }
+
+            var position = FindPositionByBaseId(baseId);
+            if (position?.Symbol != null)
+            {
+                return position.Symbol.Name ?? position.Symbol.Id ?? position.Symbol.Description;
+            }
+
+            return null;
+        }
+
+        private string? GetAccountName(string baseId, Trade trade)
+        {
+            var accountName = trade?.Account?.Name ?? trade?.Account?.Id;
+            if (!string.IsNullOrWhiteSpace(accountName))
+            {
+                return accountName;
+            }
+
+            var position = FindPositionByBaseId(baseId);
+            if (position?.Account != null)
+            {
+                return position.Account.Name ?? position.Account.Id;
+            }
+
+            return null;
+        }
+
+        private void HandleOpeningTrade(Trade trade, string baseId, Position? position)
+        {
+            var contracts = GetContractsFromTrade(trade);
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Opening trade {trade.Id} for {baseId}: qty={trade.Quantity:F2}, contracts={contracts}, impact={trade.PositionImpactType}");
+            if (contracts <= 0)
+            {
+                return;
+            }
+
+            AccumulateOpenQuantity(baseId, trade.Side, contracts);
+
+            if (position != null)
+            {
+                UpdateTrackingFromPosition(baseId, position, allowDecrease: false);
+            }
+        }
+
+        private void HandleClosingTrade(Trade trade, string baseId, Position? position)
+        {
+            var trackedCurrent = _baseIdToCurrentQuantity.TryGetValue(baseId, out var currentQty) ? currentQty : 0;
+            var trackedInitial = _baseIdToInitialQuantity.TryGetValue(baseId, out var initialQty) ? initialQty : 0;
+            var lastKnown = _baseIdToLastKnownQuantity.TryGetValue(baseId, out var lastQty) ? lastQty : 0;
+
+            var tradeContracts = GetContractsFromTrade(trade);
+            var contractsToClose = tradeContracts;
+
+            var remainingContracts = position != null
+                ? (int)Math.Round(Math.Abs(position.Quantity))
+                : -1;
+
+            if (trackedCurrent > 0)
+            {
+                if (remainingContracts >= 0)
+                {
+                    var delta = trackedCurrent - remainingContracts;
+                    if (delta > 0)
+                    {
+                        contractsToClose = delta;
+                    }
+                }
+
+                if (trade.PositionImpactType == PositionImpactType.Close)
+                {
+                    contractsToClose = Math.Max(contractsToClose, trackedCurrent);
+                }
+            }
+
+            if (contractsToClose <= 0)
+            {
+                contractsToClose = tradeContracts > 0 ? tradeContracts : Math.Max(Math.Max(trackedCurrent, Math.Max(initialQty, lastQty)), 1);
+            }
+
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug,
+                $"Closing trade {trade.Id} for {baseId}: qty={trade.Quantity:F2}, impact={trade.PositionImpactType}, trackedCurrent={trackedCurrent}, trackedInitial={trackedInitial}, lastKnown={lastKnown}, positionRemaining={remainingContracts}, closing={contractsToClose}");
+
+            if (contractsToClose <= 0)
+            {
+                return;
+            }
+
+            var remaining = ReduceTrackedQuantity(baseId, contractsToClose);
+            SendPartialCloseRequest(baseId, trade, position, contractsToClose);
+
+            if (remaining <= 0 || position == null || Math.Abs(position.Quantity) < 0.0001)
+            {
+                StopTracking(baseId);
+            }
+            else if (position != null)
+            {
+                UpdateTrackingFromPosition(baseId, position, allowDecrease: true);
+            }
+        }
+
+        private void UpdateTrackingFromPosition(string baseId, Position position, bool allowDecrease)
+        {
+            if (string.IsNullOrWhiteSpace(baseId) || position == null)
+            {
+                return;
+            }
+
+            var quantity = (int)Math.Round(Math.Abs(position.Quantity));
+            if (quantity > 0)
+            {
+                var currentTracked = _baseIdToCurrentQuantity.TryGetValue(baseId, out var existingCurrent) ? existingCurrent : 0;
+
+                // Quantower trade callbacks can arrive before the aggregated Position has updated. When
+                // that happens `position.Quantity` may reflect the *previous* size, which would wrongly
+                // downshift our hedge count. Unless we explicitly allow decreases (closing path
+                // synchronisation), honour the larger of the two so multi-leg opens stay intact.
+                var effectiveQuantity = (!allowDecrease && existingCurrent > 0 && quantity < existingCurrent)
+                    ? existingCurrent
+                    : quantity;
+
+                _baseIdToCurrentQuantity[baseId] = effectiveQuantity;
+                RememberQuantity(baseId, effectiveQuantity);
+                _baseIdToInitialQuantity.AddOrUpdate(baseId, effectiveQuantity, (_, existing) => Math.Max(existing, effectiveQuantity));
+                _baseIdToSide[baseId] = position.Side;
+                _baseIdToPositionId[baseId] = position.Id;
+            }
+            else
+            {
+                _baseIdToCurrentQuantity.TryRemove(baseId, out _);
+                _baseIdToSide.TryRemove(baseId, out _);
+            }
+        }
+
+        private static int GetContractsFromTrade(Trade? trade)
+        {
+            if (trade == null)
+            {
+                return 0;
+            }
+
+            var abs = Math.Abs(trade.Quantity);
+            if (abs < double.Epsilon)
+            {
+                return 0;
+            }
+
+            var contracts = (int)Math.Round(abs);
+            return Math.Max(contracts, 1);
+        }
+
+        private void SynchronizeTrackedQuantity(string baseId)
+        {
+            if (string.IsNullOrWhiteSpace(baseId))
+            {
+                return;
+            }
+
+            var position = FindPositionByBaseId(baseId);
+            if (position == null)
+            {
+                return;
+            }
+            UpdateTrackingFromPosition(baseId, position, allowDecrease: true);
         }
 
         private bool IsClosingTrade(Trade trade, string baseId)
@@ -1061,6 +1590,14 @@ namespace Quantower.MultiStrat
             // 1. We're tracking this position
             // 2. The trade side is OPPOSITE to the position side
             // 3. The position quantity is decreasing
+
+            switch (trade.PositionImpactType)
+            {
+                case PositionImpactType.Close:
+                    return true;
+                case PositionImpactType.Open:
+                    return false;
+            }
 
             if (!_baseIdToSide.TryGetValue(baseId, out var positionSide))
             {
@@ -1088,67 +1625,379 @@ namespace Quantower.MultiStrat
             return true;
         }
 
-        private void HandlePartialClosure(Trade trade, string baseId)
+        private string? ResolveBaseIdFromTrade(Trade trade)
         {
-            var tradeQty = (int)Math.Abs(trade.Quantity);
-
-            if (!_baseIdToCurrentQuantity.TryGetValue(baseId, out var currentQty))
+            if (trade == null)
             {
-                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Partial closure detected for {baseId} but no current quantity tracked - skipping");
+                return null;
+            }
+
+            string? candidate = Normalize(trade.PositionId);
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate;
+            }
+
+            candidate = ResolveFromPositionProperty(trade);
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate;
+            }
+
+            candidate = ResolveFromAdditionalInfo(trade);
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate;
+            }
+
+            if (!string.IsNullOrWhiteSpace(trade.Id) && _tradeIdToBaseId.TryGetValue(trade.Id, out var mappedBaseId))
+            {
+                return mappedBaseId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(trade.OrderId) && _orderIdToBaseId.TryGetValue(trade.OrderId, out var mappedOrderBaseId))
+            {
+                return mappedOrderBaseId;
+            }
+
+            var accountId = GetAccountId(trade.Account);
+            var symbolName = trade.Symbol?.Name;
+
+            List<string> matches;
+            lock (_trackingLock)
+            {
+                matches = _trackingStates
+                    .Where(pair => MatchesTracking(pair.Value, accountId, symbolName))
+                    .Select(pair => pair.Key)
+                    .ToList();
+            }
+
+            if (matches.Count == 1)
+            {
+                return matches[0];
+            }
+
+            if (matches.Count > 1)
+            {
+                var activeMatches = matches.Where(id => _baseIdToCurrentQuantity.TryGetValue(id, out var qty) && qty > 0).ToList();
+                if (activeMatches.Count == 1)
+                {
+                    return activeMatches[0];
+                }
+
+                if (activeMatches.Count > 0)
+                {
+                    matches = activeMatches;
+                }
+
+                var tradeSide = trade.Side;
+                if (tradeSide == Side.Buy || tradeSide == Side.Sell)
+                {
+                    var opposite = matches.Where(id => _baseIdToSide.TryGetValue(id, out var positionSide) && IsOppositeSide(positionSide, tradeSide)).ToList();
+                    if (opposite.Count == 1)
+                    {
+                        return opposite[0];
+                    }
+
+                    if (opposite.Count > 0)
+                    {
+                        matches = opposite;
+                    }
+                    else
+                    {
+                        var sameSide = matches.Where(id => _baseIdToSide.TryGetValue(id, out var positionSide) && positionSide == tradeSide).ToList();
+                        if (sameSide.Count == 1)
+                        {
+                            return sameSide[0];
+                        }
+
+                        if (sameSide.Count > 0)
+                        {
+                            matches = sameSide;
+                        }
+                    }
+                }
+            }
+
+            return matches.Count > 0 ? matches[0] : null;
+
+            static bool MatchesTracking(TrackingState state, string? accountId, string? symbolName)
+            {
+                if (!string.IsNullOrWhiteSpace(accountId) && !string.IsNullOrWhiteSpace(state.AccountId) &&
+                    !string.Equals(state.AccountId, accountId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(symbolName) && !string.IsNullOrWhiteSpace(state.SymbolName) &&
+                    !string.Equals(state.SymbolName, symbolName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            static bool IsOppositeSide(Side positionSide, Side tradeSide)
+            {
+                return (positionSide == Side.Buy && tradeSide == Side.Sell) ||
+                       (positionSide == Side.Sell && tradeSide == Side.Buy);
+            }
+
+            static string? Normalize(string? value)
+            {
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+
+            string? ResolveFromPositionProperty(Trade sourceTrade)
+            {
+                try
+                {
+                    var tradeType = sourceTrade.GetType();
+                    var positionProperty = tradeType.GetProperty("Position", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                    if (positionProperty == null)
+                    {
+                        return null;
+                    }
+
+                    var positionValue = positionProperty.GetValue(sourceTrade);
+                    return ExtractPositionId(positionValue);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            string? ResolveFromAdditionalInfo(Trade sourceTrade)
+            {
+                if (sourceTrade.AdditionalInfo == null)
+                {
+                    return null;
+                }
+
+                if (sourceTrade.AdditionalInfo.TryGetItem("base_id", out var item) && item != null)
+                {
+                    var fromAdditional = item.Value as string ?? item.Value?.ToString();
+                    if (!string.IsNullOrWhiteSpace(fromAdditional))
+                    {
+                        return fromAdditional;
+                    }
+                }
+
+                if (sourceTrade.AdditionalInfo.TryGetItem("BaseId", out var altItem) && altItem != null)
+                {
+                    var fromAdditional = altItem.Value as string ?? altItem.Value?.ToString();
+                    if (!string.IsNullOrWhiteSpace(fromAdditional))
+                    {
+                        return fromAdditional;
+                    }
+                }
+
+                return null;
+            }
+
+            static string? ExtractPositionId(object? value)
+            {
+                if (value == null)
+                {
+                    return null;
+                }
+
+                if (value is Position qtPosition && !string.IsNullOrWhiteSpace(qtPosition.Id))
+                {
+                    return qtPosition.Id;
+                }
+
+                var type = value.GetType();
+                var idProperty = type.GetProperty("Id", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase) ??
+                                 type.GetProperty("PositionId", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+                var raw = idProperty?.GetValue(value);
+                var resolved = raw?.ToString();
+                return string.IsNullOrWhiteSpace(resolved) ? null : resolved;
+            }
+        }
+
+        private void AccumulateOpenQuantity(string baseId, Side tradeSide, int tradeQty)
+        {
+            if (string.IsNullOrWhiteSpace(baseId) || tradeQty <= 0)
+            {
                 return;
             }
 
-            var newQty = currentQty - tradeQty;
-            if (newQty < 0)
-            {
-                newQty = 0;
-            }
+            var newQuantity = _baseIdToCurrentQuantity.AddOrUpdate(baseId, tradeQty, (_, current) => current + tradeQty);
+            RememberQuantity(baseId, newQuantity);
 
-            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Partial closure detected: {baseId} closing {tradeQty} contract(s), {currentQty} → {newQty}");
-
-            // Update current quantity
-            if (newQty > 0)
-            {
-                _baseIdToCurrentQuantity[baseId] = newQty;
-            }
-            else
-            {
-                // Position fully closed via trades
-                _baseIdToCurrentQuantity.TryRemove(baseId, out _);
-            }
-
-            // Send partial close request to bridge
-            // The bridge will close the specified number of hedges
-            SendPartialCloseRequest(baseId, tradeQty);
+            _baseIdToInitialQuantity.AddOrUpdate(baseId, newQuantity, (_, existing) => Math.Max(existing, newQuantity));
+            _baseIdToSide[baseId] = tradeSide;
         }
 
-        private void SendPartialCloseRequest(string baseId, int closedQuantity)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void RememberQuantity(string? baseId, int quantity)
+        {
+            if (string.IsNullOrWhiteSpace(baseId) || quantity <= 0)
+            {
+                return;
+            }
+
+            _baseIdToLastKnownQuantity[baseId] = quantity;
+        }
+
+        private int ReduceTrackedQuantity(string baseId, int closedContracts)
+        {
+            if (string.IsNullOrWhiteSpace(baseId) || closedContracts <= 0)
+            {
+                return -1;
+            }
+
+            int currentQuantity;
+            lock (_trackingLock)
+            {
+                if (!_baseIdToCurrentQuantity.TryGetValue(baseId, out currentQuantity) || currentQuantity <= 0)
+                {
+                    if (!_baseIdToInitialQuantity.TryGetValue(baseId, out currentQuantity) || currentQuantity <= 0)
+                    {
+                        currentQuantity = 0;
+                    }
+                }
+
+                RememberQuantity(baseId, currentQuantity);
+
+                var newQuantity = currentQuantity - closedContracts;
+                if (newQuantity > 0)
+                {
+                    _baseIdToCurrentQuantity[baseId] = newQuantity;
+                    RememberQuantity(baseId, newQuantity);
+                    return newQuantity;
+                }
+
+                _baseIdToCurrentQuantity.TryRemove(baseId, out _);
+                return 0;
+            }
+        }
+
+        private void SendPartialCloseRequest(string baseId, Trade? trade, Position? position, int closedQuantity)
         {
             try
             {
-                // Find the position to get details
-                var position = FindPositionByBaseId(baseId);
-                if (position == null)
+                var targetPosition = position ?? FindPositionByBaseId(baseId);
+                if (targetPosition == null)
                 {
-                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Cannot send partial close for {baseId} - position not found");
+                    if (!TryBuildFallbackClosurePayload(trade, baseId, closedQuantity, out var fallbackJson))
+                    {
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Cannot send partial close for {baseId} - position not found and no tracked metadata available");
+                        return;
+                    }
+
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Sending partial close request (fallback): {baseId} closing {closedQuantity} hedge(s)");
+                    _pendingContractCloseAcks[baseId] = 0;
+                    _ = _bridgeService.SubmitCloseHedgeAsync(fallbackJson, baseId);
                     return;
                 }
 
                 // Build closure message with the specific quantity
-                if (!Infrastructure.QuantowerTradeMapper.TryBuildPositionClosure(position, baseId, closedQuantity, out var json, out var positionId))
+                if (!Infrastructure.QuantowerTradeMapper.TryBuildPositionClosure(targetPosition, baseId, closedQuantity, out var json, out var positionId))
                 {
                     EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to build partial closure message for {baseId}");
                     return;
                 }
 
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Sending partial close request: {baseId} closing {closedQuantity} hedge(s)");
-                // Use the bridge service's method to submit the close request
-                _ = _bridgeService.NotifyHedgeCloseAsync(json, baseId);
+                // Use the CLOSE endpoint so the bridge issues targeted CLOSE_HEDGE trades
+                _pendingContractCloseAcks[baseId] = 0;
+                _ = _bridgeService.SubmitCloseHedgeAsync(json, baseId);
             }
             catch (Exception ex)
             {
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"Error sending partial close request for {baseId}: {ex.Message}");
             }
+        }
+
+        private bool TryBuildFallbackClosurePayload(Trade? trade, string baseId, int closedQuantity, out string json)
+        {
+            json = string.Empty;
+
+            if (closedQuantity <= 0)
+            {
+                return false;
+            }
+
+            TrackingState? state;
+            lock (_trackingLock)
+            {
+                _trackingStates.TryGetValue(baseId, out state);
+            }
+
+            var accountName = trade?.Account?.Name;
+            if (string.IsNullOrWhiteSpace(accountName))
+            {
+                accountName = trade?.Account?.Id;
+            }
+            if (string.IsNullOrWhiteSpace(accountName))
+            {
+                accountName = state?.AccountId;
+            }
+
+            var symbolName = trade?.Symbol?.Name;
+            if (string.IsNullOrWhiteSpace(symbolName))
+            {
+                symbolName = state?.SymbolName;
+            }
+
+            if (string.IsNullOrWhiteSpace(symbolName) || string.IsNullOrWhiteSpace(accountName))
+            {
+                return false;
+            }
+
+            var action = ResolveCloseAction(trade, baseId);
+            var timestamp = DateTime.UtcNow;
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["event_type"] = "quantower_position_closed",
+                ["origin_platform"] = "quantower",
+                ["closure_reason"] = "qt_position_removed",
+                ["id"] = baseId,
+                ["base_id"] = baseId,
+                ["qt_position_id"] = state?.PositionId ?? baseId,
+                ["nt_instrument_symbol"] = symbolName,
+                ["instrument"] = symbolName,
+                ["instrument_name"] = symbolName,
+                ["nt_account_name"] = accountName,
+                ["account_name"] = accountName,
+                ["closed_hedge_quantity"] = (double)closedQuantity,
+                ["closed_hedge_action"] = action,
+                ["timestamp"] = timestamp.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture),
+                ["mt5_ticket"] = 0,
+                ["qt_trade_id"] = trade?.Id ?? string.Empty
+            };
+
+            json = SimpleJson.SerializeObject(payload);
+            return true;
+        }
+
+        private string ResolveCloseAction(Trade? trade, string baseId)
+        {
+            if (trade != null && (trade.Side == Side.Buy || trade.Side == Side.Sell))
+            {
+                return trade.Side == Side.Buy ? "buy" : "sell";
+            }
+
+            if (_baseIdToSide.TryGetValue(baseId, out var trackedSide))
+            {
+                if (trackedSide == Side.Buy)
+                {
+                    return "buy";
+                }
+
+                if (trackedSide == Side.Sell)
+                {
+                    return "sell";
+                }
+            }
+
+            return "buy";
         }
 
         private void OnBridgeStreamEnvelopeReceived(QuantowerBridgeService.BridgeStreamEnvelope envelope)
@@ -1171,110 +2020,15 @@ namespace Quantower.MultiStrat
                     action.Equals("NT_CLOSE_ACK", StringComparison.OrdinalIgnoreCase) ||
                     action.Equals("CLOSE_HEDGE", StringComparison.OrdinalIgnoreCase))
                 {
-                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Bridge confirmed hedge close for {baseId}. Stopping local trackers.");
-                    StopTracking(baseId);
-                    _trailingService.RemoveTracker(baseId);
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Bridge confirmed hedge close for {baseId}");
+                    SynchronizeTrackedQuantity(baseId);
+                    CleanupIfPositionFlat(baseId);
                     return;
                 }
 
-                // Handle MT5 closure notifications - close corresponding Quantower position
                 if (action.Equals("MT5_CLOSE_NOTIFICATION", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Parse the raw JSON to determine if this is a full close or partial close
-                    bool isFullClose = false;
-                    string tradeResult = string.Empty;
-                    double totalQuantity = -1;
-
-                    if (!string.IsNullOrWhiteSpace(envelope.RawJson))
-                    {
-                        try
-                        {
-                            var json = System.Text.Json.JsonDocument.Parse(envelope.RawJson);
-                            if (json.RootElement.TryGetProperty("nt_trade_result", out var tradeResultElement))
-                            {
-                                tradeResult = tradeResultElement.GetString() ?? string.Empty;
-                            }
-                            if (json.RootElement.TryGetProperty("total_quantity", out var totalQtyElement))
-                            {
-                                totalQuantity = totalQtyElement.GetDouble();
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to parse MT5_CLOSE_NOTIFICATION JSON: {ex.Message}");
-                        }
-                    }
-
-                    // Determine if this is a full close
-                    // PRIORITY 1: Check nt_trade_result first (most reliable indicator)
-                    // Full close indicators:
-                    // - "MT5_position_closed" - MT5 closed the position
-                    // - "already_closed" - Position was already closed when close was attempted
-                    // - "mt5_closed" - Generic MT5 closure
-                    // - "success" - Close operation succeeded
-                    // - Contains "position_closed" - Any variant of position closed
-                    //
-                    // Partial close indicators:
-                    // - "elastic_partial_close" - Elastic hedge partial close
-                    // - Contains "partial" - Any partial close variant
-
-                    // Check for partial close first (explicit indicator)
-                    if (tradeResult.Contains("partial", StringComparison.OrdinalIgnoreCase))
-                    {
-                        isFullClose = false;
-                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"MT5 close notification for {baseId}: tradeResult='{tradeResult}' indicates PARTIAL close");
-                    }
-                    // Check for full close indicators
-                    else if (tradeResult.Contains("position_closed", StringComparison.OrdinalIgnoreCase) ||
-                             tradeResult.Contains("already_closed", StringComparison.OrdinalIgnoreCase) ||
-                             tradeResult.Contains("mt5_closed", StringComparison.OrdinalIgnoreCase) ||
-                             tradeResult.Equals("success", StringComparison.OrdinalIgnoreCase))
-                    {
-                        isFullClose = true;
-                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"MT5 close notification for {baseId}: tradeResult='{tradeResult}' indicates FULL close");
-                    }
-                    // PRIORITY 2: If nt_trade_result is ambiguous, check total_quantity
-                    else if (totalQuantity == 0)
-                    {
-                        isFullClose = true;
-                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"MT5 close notification for {baseId}: totalQty={totalQuantity} indicates FULL close");
-                    }
-                    else
-                    {
-                        // Default to partial close if unclear
-                        isFullClose = false;
-                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"MT5 close notification for {baseId}: tradeResult='{tradeResult}', totalQty={totalQuantity} - UNCLEAR, defaulting to partial close");
-                    }
-
-                    if (isFullClose)
-                    {
-                        // Find and close the Quantower position
-                        var position = FindPositionByBaseId(baseId);
-                        if (position != null)
-                        {
-                            try
-                            {
-                                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Closing Quantower position {position.Id} (base_id={baseId}) due to MT5 full closure");
-                                _ = Task.Run(() => position.Close());
-                                StopTracking(baseId);
-                                _trailingService.RemoveTracker(baseId);
-                            }
-                            catch (Exception ex)
-                            {
-                                EmitLog(QuantowerBridgeService.BridgeLogLevel.Error, $"Failed to close Quantower position for {baseId}: {ex.Message}");
-                            }
-                        }
-                        else
-                        {
-                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"MT5 full closure notification for {baseId} but no matching Quantower position found");
-                            StopTracking(baseId);
-                            _trailingService.RemoveTracker(baseId);
-                        }
-                    }
-                    else
-                    {
-                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"MT5 partial close for {baseId} - ignoring (Quantower position remains open)");
-                    }
+                    HandleMt5CloseNotification(baseId, envelope);
                     return;
                 }
             }
@@ -1284,8 +2038,199 @@ namespace Quantower.MultiStrat
             {
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Bridge acknowledged Quantower position closure for {baseId}");
                 StopTracking(baseId);
-                _trailingService.RemoveTracker(baseId);
             }
+        }
+
+        private void HandleMt5CloseNotification(string baseId, QuantowerBridgeService.BridgeStreamEnvelope envelope)
+        {
+            var contractBaseId = baseId;
+            var positionBaseId = ResolvePositionBaseId(contractBaseId);
+
+            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info,
+                $"MT5 close notification received for contract {contractBaseId} (position {positionBaseId})");
+
+            var (isFullClose, closedQuantity, tradeResult, orderType) = ParseMt5CloseEnvelope(envelope.RawJson);
+
+            if (orderType.Equals("NT_CLOSE_ACK", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_pendingContractCloseAcks.AddOrUpdate(contractBaseId, _ => (byte)1, (_, __) => (byte)1) == 0)
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug,
+                        $"Recorded NT_CLOSE_ACK for {contractBaseId}; awaiting MT5 close confirmation");
+                }
+                return;
+            }
+
+            var wasQtInitiated = _pendingContractCloseAcks.TryRemove(contractBaseId, out _);
+
+            var contractsFromPayload = closedQuantity > 0
+                ? Math.Max(1, (int)Math.Round(Math.Abs(closedQuantity)))
+                : 0;
+
+            if (contractsFromPayload <= 0)
+            {
+                if (_baseIdToCurrentQuantity.TryGetValue(positionBaseId, out var currentQty) && currentQty > 0)
+                {
+                    contractsFromPayload = currentQty;
+                }
+                else if (_baseIdToInitialQuantity.TryGetValue(positionBaseId, out var initialQty) && initialQty > 0)
+                {
+                    contractsFromPayload = initialQty;
+                }
+            }
+
+            var consumed = ConsumeContractsFromQueue(positionBaseId, contractBaseId, contractsFromPayload);
+            if (consumed == 0 && contractsFromPayload > 1)
+            {
+                // Fallback: consume the requested number of contracts in FIFO order if MT5 did not echo the exact contract id
+                consumed = ConsumeContractsFromQueue(positionBaseId, null, contractsFromPayload);
+            }
+
+            if (!string.Equals(contractBaseId, positionBaseId, StringComparison.OrdinalIgnoreCase))
+            {
+                _baseIdToPositionId.TryRemove(contractBaseId, out _);
+            }
+
+            var contractsClosed = consumed > 0 ? consumed : Math.Max(contractsFromPayload, 1);
+
+            if (contractsClosed > 0)
+            {
+                SubtractContractCount(positionBaseId, contractsClosed);
+                ReduceTrackedQuantity(positionBaseId, contractsClosed);
+            }
+
+            var position = FindPositionByBaseId(positionBaseId);
+
+            if (position != null)
+            {
+                if (!wasQtInitiated)
+                {
+                    try
+                    {
+                        if (isFullClose || Math.Abs(position.Quantity) <= contractsClosed)
+                        {
+                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info,
+                                $"Applying MT5-driven full close for position {position.Id} (contractsClosed={contractsClosed}, reason={tradeResult})");
+                            _ = Task.Run(() => position.Close());
+                        }
+                        else if (contractsClosed > 0)
+                        {
+                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info,
+                                $"Applying MT5-driven partial close for position {position.Id}: closing {contractsClosed} contract(s)");
+                            _ = Task.Run(() => position.Close(contractsClosed));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        EmitLog(QuantowerBridgeService.BridgeLogLevel.Error,
+                            $"Failed to apply MT5 close notification for {contractBaseId}: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug,
+                        $"MT5 close ack for {contractBaseId} matches Quantower-submitted close; skipping additional position.Close()");
+                }
+            }
+            else if (!wasQtInitiated)
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn,
+                    $"MT5 close notification for {contractBaseId} but Quantower position {positionBaseId} not found (tradeResult={tradeResult}, orderType={orderType})");
+            }
+
+            SynchronizeTrackedQuantity(positionBaseId);
+            CleanupIfPositionFlat(positionBaseId);
+        }
+
+        private (bool isFullClose, double closedQuantity, string tradeResult, string orderType) ParseMt5CloseEnvelope(string? rawJson)
+        {
+            bool isFullClose = false;
+            double closedQuantity = -1;
+            string tradeResult = string.Empty;
+            string orderType = string.Empty;
+            double totalQuantity = double.NaN;
+
+            if (!string.IsNullOrWhiteSpace(rawJson))
+            {
+                try
+                {
+                    using var json = System.Text.Json.JsonDocument.Parse(rawJson);
+                    var root = json.RootElement;
+
+                    if (root.TryGetProperty("nt_trade_result", out var tradeResultElement))
+                    {
+                        tradeResult = tradeResultElement.GetString() ?? string.Empty;
+                    }
+
+                    if (root.TryGetProperty("order_type", out var orderTypeElement))
+                    {
+                        orderType = orderTypeElement.GetString() ?? string.Empty;
+                    }
+
+                    if (root.TryGetProperty("closed_hedge_quantity", out var closedQtyElement))
+                    {
+                        closedQuantity = closedQtyElement.GetDouble();
+                    }
+
+                    if (root.TryGetProperty("total_quantity", out var totalQtyElement))
+                    {
+                        totalQuantity = totalQtyElement.GetDouble();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn, $"Failed to parse MT5 close payload: {ex.Message}");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(tradeResult))
+            {
+                if (tradeResult.Contains("partial", StringComparison.OrdinalIgnoreCase))
+                {
+                    isFullClose = false;
+                }
+                else if (tradeResult.Contains("position_closed", StringComparison.OrdinalIgnoreCase) ||
+                         tradeResult.Contains("already_closed", StringComparison.OrdinalIgnoreCase) ||
+                         tradeResult.Contains("mt5_closed", StringComparison.OrdinalIgnoreCase) ||
+                         tradeResult.Equals("success", StringComparison.OrdinalIgnoreCase))
+                {
+                    isFullClose = true;
+                }
+            }
+
+            if (!isFullClose && !double.IsNaN(totalQuantity) && Math.Abs(totalQuantity) < double.Epsilon)
+            {
+                isFullClose = true;
+            }
+
+            return (isFullClose, closedQuantity, tradeResult, orderType);
+        }
+
+        private void CleanupIfPositionFlat(string baseId)
+        {
+            if (string.IsNullOrWhiteSpace(baseId))
+            {
+                return;
+            }
+
+            // If we still believe contracts remain, do not tear down tracking yet.
+            if (_positionContractCounts.TryGetValue(baseId, out var queuedContracts) && queuedContracts > 0)
+            {
+                return;
+            }
+
+            if (_baseIdToCurrentQuantity.TryGetValue(baseId, out var currentQuantity) && currentQuantity > 0)
+            {
+                return;
+            }
+
+            var position = FindPositionByBaseId(baseId);
+            if (position != null && Math.Abs(position.Quantity) > double.Epsilon)
+            {
+                return;
+            }
+
+            StopTracking(baseId);
         }
 
         private Position? FindPositionByBaseId(string baseId)
@@ -1351,6 +2296,8 @@ namespace Quantower.MultiStrat
             var positionDetails = $"baseId={baseId}, Position.Id={position.Id}, Symbol={position.Symbol?.Name}, Qty={position.Quantity:F2}";
             EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"HandlePositionAdded called: {positionDetails}");
 
+            _positionOpenContracts.GetOrAdd(baseId, _ => new ConcurrentQueue<string>());
+
             // Prevent concurrent processing of the same position
             // Try to add to processing set - if already processing, skip
             if (!_processingPositions.TryAdd(baseId, true))
@@ -1377,19 +2324,37 @@ namespace Quantower.MultiStrat
                 // CRITICAL: Quantower can reuse Position.Id for different positions (e.g., after closing and reopening)
                 // Check if we're already tracking this position, and if so, check if quantity changed
                 var newQuantity = (int)Math.Abs(position.Quantity);
+                var wasTracked = false;
+                var hadInitialQuantity = _baseIdToInitialQuantity.TryGetValue(baseId, out var trackedQty);
                 lock (_trackingLock)
                 {
-                    if (_trackingStates.ContainsKey(baseId))
+                    wasTracked = _trackingStates.ContainsKey(baseId);
+                    if (wasTracked)
                     {
                         // Position already tracked - check if quantity changed
-                        if (_baseIdToInitialQuantity.TryGetValue(baseId, out var trackedQty) && trackedQty != newQuantity)
+                        if (hadInitialQuantity && trackedQty != newQuantity)
                         {
-                            // Quantity changed - this is a NEW position with same ID (Quantower reused the ID)
-                            // Update ONLY the current quantity, NOT the initial quantity
-                            // Initial quantity should remain unchanged for proper hedge closure
+                            // Quantity changed on an existing tracked position (partial fill/scale event).
+                            // Update the current quantity but preserve the original initial quantity so the
+                            // hedge tracker still knows the full contract count for close syncing.
                             _baseIdToCurrentQuantity[baseId] = newQuantity;
+                            RememberQuantity(baseId, newQuantity);
                             EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Position {baseId} quantity changed from {trackedQty} to {newQuantity} - updating current quantity and reprocessing");
-                            // Remove from tracking states to allow reprocessing
+
+                            if (newQuantity > trackedQty)
+                            {
+                                _baseIdToInitialQuantity[baseId] = newQuantity;
+                                RememberQuantity(baseId, newQuantity);
+                                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Position {baseId} scaled in - bumped initial hedge count from {trackedQty} to {newQuantity}");
+                            }
+                            // Remove from tracking states to allow downstream processing to refresh trailing/elastic state
+                            _trackingStates.Remove(baseId);
+                        }
+                        else if (!hadInitialQuantity)
+                        {
+                            _baseIdToInitialQuantity[baseId] = newQuantity;
+                            _baseIdToCurrentQuantity[baseId] = newQuantity;
+                            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Position {baseId} quantity changed to {newQuantity} with no prior initial tracking - initializing state");
                             _trackingStates.Remove(baseId);
                         }
                         else
@@ -1409,12 +2374,35 @@ namespace Quantower.MultiStrat
                     EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Mapped baseId {baseId} -> Position.Id {position.Id}");
                 }
 
-                // Track initial position quantity for proper hedge closure (n trades = n hedges)
-                // Store the absolute quantity (number of contracts) when position is first opened
-                _baseIdToInitialQuantity[baseId] = newQuantity;
+                // Track initial position quantity for proper hedge closure (n trades = n hedges).
+                // Only update the initial quantity for genuinely new tracking scenarios; partial closes or
+                // intra-position scale events should preserve the original contract count so we know how many
+                // hedges were spawned from the opening leg.
+                int existingInitial;
+                var hasInitial = _baseIdToInitialQuantity.TryGetValue(baseId, out existingInitial);
+                if (!wasTracked || !hasInitial)
+                {
+                    _baseIdToInitialQuantity[baseId] = newQuantity;
+                }
+                else if (newQuantity > existingInitial)
+                {
+                    _baseIdToInitialQuantity[baseId] = newQuantity;
+                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Position {baseId} initial hedge count increased from {existingInitial} to {newQuantity}");
+                }
+
                 _baseIdToCurrentQuantity[baseId] = newQuantity;
+                RememberQuantity(baseId, newQuantity);
                 _baseIdToSide[baseId] = position.Side;
-                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Stored initial quantity {newQuantity}, current quantity {newQuantity}, side {position.Side} for baseId {baseId}");
+                if (newQuantity > 0)
+                {
+                    _positionContractCounts[baseId] = newQuantity;
+                }
+                else
+                {
+                    _positionContractCounts.TryRemove(baseId, out _);
+                }
+                var initialQty = _baseIdToInitialQuantity.TryGetValue(baseId, out var initQty) ? initQty : newQuantity;
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"Stored initial quantity {initialQty}, current quantity {newQuantity}, side {position.Side} for baseId {baseId}");
 
                 EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Starting tracking for position {baseId}");
                 _trailingService.RegisterPosition(baseId, position);
@@ -1435,55 +2423,42 @@ namespace Quantower.MultiStrat
                 return;
             }
 
-            // Log position details for debugging
             var positionDetails = $"Position.Id={position.Id}, Symbol={position.Symbol?.Name}, Qty={position.Quantity:F2}";
             EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"HandlePositionRemoved called: {positionDetails}");
 
-            var existingBaseId = TryResolveTrackedBaseId(position);
-            if (!string.IsNullOrWhiteSpace(existingBaseId))
+            var resolvedBaseId = TryResolveTrackedBaseId(position);
+            var fallbackBaseId = GetBaseId(position);
+            var baseIdToUse = !string.IsNullOrWhiteSpace(resolvedBaseId) ? resolvedBaseId : fallbackBaseId;
+
+            if (string.IsNullOrWhiteSpace(baseIdToUse))
             {
-                EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Quantower position removed ({existingBaseId}) - stopping tracking and cleaning up mappings");
-
-                // Remove baseId → Position.Id mapping
-                _baseIdToPositionId.TryRemove(existingBaseId, out _);
-
-                // Remove quantity tracking (initial and current)
-                _baseIdToInitialQuantity.TryRemove(existingBaseId, out _);
-                _baseIdToCurrentQuantity.TryRemove(existingBaseId, out _);
-                _baseIdToSide.TryRemove(existingBaseId, out _);
-
-                // Remove stop loss order tracking
-                if (_stopLossOrders.TryRemove(existingBaseId, out _))
-                {
-                    EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"🗑️ Removed stop loss order tracking for {existingBaseId}");
-                }
-
-                // Stop tracking and remove from trailing service
-                StopTracking(existingBaseId);
-                _trailingService.RemoveTracker(existingBaseId);
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn,
+                    $"Quantower position removed ({position.Id}) but no tracked baseId could be resolved; deferring cleanup");
                 return;
             }
 
-            var baseId = GetBaseId(position);
-            EmitLog(QuantowerBridgeService.BridgeLogLevel.Info, $"Quantower position removed ({baseId}) - stopping tracking and cleaning up mappings");
-
-            // Remove baseId → Position.Id mapping
-            _baseIdToPositionId.TryRemove(baseId, out _);
-
-            // Remove quantity tracking (initial and current)
-            _baseIdToInitialQuantity.TryRemove(baseId, out _);
-            _baseIdToCurrentQuantity.TryRemove(baseId, out _);
-            _baseIdToSide.TryRemove(baseId, out _);
-
-            // Remove stop loss order tracking
-            if (_stopLossOrders.TryRemove(baseId, out _))
+            var remainingContracts = (int)Math.Round(Math.Abs(position.Quantity));
+            if (remainingContracts > 0)
             {
-                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug, $"🗑️ Removed stop loss order tracking for {baseId}");
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Warn,
+                    $"Quantower position removal for {baseIdToUse} still reports {remainingContracts} contract(s); retaining hedge tracking until closes settle");
+                _baseIdToCurrentQuantity[baseIdToUse] = remainingContracts;
+                RememberQuantity(baseIdToUse, remainingContracts);
+            }
+            else
+            {
+                EmitLog(QuantowerBridgeService.BridgeLogLevel.Debug,
+                    $"Quantower position removal for {baseIdToUse} indicates flat position; waiting for bridge confirmation before cleanup");
+                RememberQuantity(baseIdToUse, 0);
+                _baseIdToCurrentQuantity.TryRemove(baseIdToUse, out _);
             }
 
-            // Stop tracking and remove from trailing service
-            StopTracking(baseId);
-            _trailingService.RemoveTracker(baseId);
+            if (!string.IsNullOrWhiteSpace(position.Id))
+            {
+                _baseIdToPositionId[baseIdToUse] = position.Id;
+            }
+
+            // Do not call StopTracking here; MT5/bridge notifications will trigger CleanupIfPositionFlat once hedge closures finish.
         }
 
         private void SendElasticAndTrailing(Position position, string? cachedBaseId = null)
@@ -1678,8 +2653,40 @@ namespace Quantower.MultiStrat
             _baseIdToInitialQuantity.TryRemove(baseId, out _);
             _baseIdToCurrentQuantity.TryRemove(baseId, out _);
             _baseIdToSide.TryRemove(baseId, out _);
+            _baseIdToLastKnownQuantity.TryRemove(baseId, out _);
+            _positionContractCounts.TryRemove(baseId, out _);
+            _positionOpenContracts.TryRemove(baseId, out _);
+            RemoveTradeOrderMappings(baseId);
+            RemovePendingCloseEntries(baseId);
+            RemoveContractBaseMappings(baseId);
 
             _trailingService.RemoveTracker(baseId);
+        }
+
+
+        private void RemoveTradeOrderMappings(string baseId)
+        {
+            if (string.IsNullOrWhiteSpace(baseId))
+            {
+                return;
+            }
+
+            foreach (var pair in _tradeIdToBaseId.ToArray())
+            {
+                if (string.Equals(pair.Value, baseId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _tradeIdToBaseId.TryRemove(pair.Key, out _);
+                    _processedTradeIds.TryRemove(pair.Key, out _);
+                }
+            }
+
+            foreach (var pair in _orderIdToBaseId.ToArray())
+            {
+                if (string.Equals(pair.Value, baseId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _orderIdToBaseId.TryRemove(pair.Key, out _);
+                }
+            }
         }
 
         private void StopTrackingByAccount(string? accountId)
@@ -2224,9 +3231,20 @@ namespace Quantower.MultiStrat
                 return null;
             }
 
-            if (_baseIdToInitialQuantity.TryGetValue(baseId, out var quantity))
+            // Prefer the actively tracked quantity; this reflects the number of hedges that remain open.
+            if (_baseIdToCurrentQuantity.TryGetValue(baseId, out var current) && current > 0)
             {
-                return quantity;
+                return current;
+            }
+
+            if (_baseIdToInitialQuantity.TryGetValue(baseId, out var initial))
+            {
+                return initial;
+            }
+
+            if (_baseIdToLastKnownQuantity.TryGetValue(baseId, out var lastKnown) && lastKnown > 0)
+            {
+                return lastKnown;
             }
 
             return null;

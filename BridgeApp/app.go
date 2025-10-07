@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"reflect"
 	"strconv"
@@ -23,6 +24,7 @@ type App struct {
 	queueMux             sync.Mutex
 	netPosition          int
 	hedgeLot             float64
+	hedgeLotMux          sync.RWMutex
 	bridgeActive         bool
 	platformConnected    bool
 	tradeHistory         []Trade
@@ -589,7 +591,7 @@ func (a *App) startServer() {
 	log.Printf("=== Bridge Server Starting (alignment+pclose enabled) ===")
 	log.Printf("Initial state:")
 	log.Printf("Net position: %d", a.netPosition)
-	log.Printf("Hedge size: %.2f", a.hedgeLot)
+	log.Printf("Hedge size: %.2f", a.GetHedgeSize())
 	log.Printf("Queue size: %d", len(a.tradeQueue))
 	log.Printf("gRPC enabled: true")
 
@@ -662,7 +664,7 @@ func (a *App) GetStatus() map[string]interface{} {
 		"hedgebotActive":       eaActive,
 		"tradeLogSenderActive": a.tradeLogSenderActive,
 		"netPosition":          a.netPosition,
-		"hedgeSize":            a.hedgeLot,
+		"hedgeSize":            a.GetHedgeSize(),
 		"queueSize":            len(a.tradeQueue),
 	}
 }
@@ -674,12 +676,58 @@ func (a *App) GetNetPosition() int {
 
 // GetHedgeSize returns the current hedge size
 func (a *App) GetHedgeSize() float64 {
+	a.hedgeLotMux.RLock()
+	defer a.hedgeLotMux.RUnlock()
 	return a.hedgeLot
 }
 
 // GetQueueSize returns the current queue size
 func (a *App) GetQueueSize() int {
 	return len(a.tradeQueue)
+}
+
+func (a *App) calibrateHedgeLot(volume float64) {
+	v := math.Abs(volume)
+	if v <= 0 {
+		return
+	}
+	a.hedgeLotMux.Lock()
+	defer a.hedgeLotMux.Unlock()
+	if a.hedgeLot <= 0 {
+		a.hedgeLot = v
+		log.Printf("Calibrated hedge lot size from MT5 fill: %.4f", a.hedgeLot)
+		return
+	}
+	if math.Abs(a.hedgeLot-v) > 1e-6 {
+		log.Printf("Adjusting hedge lot size from %.4f to %.4f based on MT5 fill", a.hedgeLot, v)
+		a.hedgeLot = v
+	}
+}
+
+func (a *App) normalizeContractCount(raw float64) int {
+	qtyAbs := math.Abs(raw)
+	if qtyAbs <= 0 {
+		return 0
+	}
+
+	// Quantower close notifications report contract counts (1 per QT trade). When users
+	// flatten multiple contracts at once we want to honor that integer directly so every
+	// MT5 hedge gets a matching close request. Minor floating point noise (e.g. 1.00001)
+	// is tolerated via a small epsilon.
+	if rounded := math.Round(qtyAbs); math.Abs(qtyAbs-rounded) <= 0.05 {
+		count := int(rounded)
+		if count < 1 {
+			return 1
+		}
+		return count
+	}
+
+	// Ultimate fallback – round to nearest whole number and ensure at least one contract.
+	count := int(math.Round(qtyAbs))
+	if count < 1 {
+		return 1
+	}
+	return count
 }
 
 // IsAddonConnected returns whether the addon is connected
@@ -916,6 +964,61 @@ func (a *App) HandleHedgeCloseNotification(notification interface{}) error {
 		a.markElasticClose(baseID, mt5Ticket, closureReason, quantity)
 	}
 
+	ackInst, ackAcct := a.bestInstAcctFor(baseID)
+	if ackInst == "" {
+		ackInst = inst
+	}
+	if ackAcct == "" {
+		ackAcct = acct
+	}
+
+	shouldSendAck := mt5Ticket != 0 && !strings.HasPrefix(lowerReason, "elastic_")
+	if shouldSendAck {
+		ack := struct {
+			ID              string    `json:"id"`
+			BaseID          string    `json:"base_id"`
+			Time            time.Time `json:"time"`
+			Action          string    `json:"action"`
+			Quantity        float64   `json:"quantity"`
+			Price           float64   `json:"price"`
+			TotalQuantity   float64   `json:"total_quantity"`
+			ContractNum     int       `json:"contract_num"`
+			OrderType       string    `json:"order_type"`
+			MeasurementPips float64   `json:"measurement_pips"`
+			RawMeasurement  float64   `json:"raw_measurement"`
+			Instrument      string    `json:"instrument"`
+			AccountName     string    `json:"account_name"`
+			NTBalance       float64   `json:"nt_balance"`
+			NTDailyPnL      float64   `json:"nt_daily_pnl"`
+			NTTradeResult   string    `json:"nt_trade_result"`
+			NTSessionTrades int       `json:"nt_session_trades"`
+			MT5Ticket       uint64    `json:"mt5_ticket"`
+			ClosureReason   string    `json:"closure_reason"`
+		}{
+			ID:              fmt.Sprintf("mt5close_result_%d", time.Now().UnixNano()),
+			BaseID:          baseID,
+			Time:            time.Now(),
+			Action:          "MT5_CLOSE_NOTIFICATION",
+			Quantity:        quantity,
+			Price:           0,
+			TotalQuantity:   quantity,
+			ContractNum:     1,
+			OrderType:       "NT_CLOSE_ACK",
+			MeasurementPips: 0,
+			RawMeasurement:  0,
+			Instrument:      ackInst,
+			AccountName:     ackAcct,
+			NTBalance:       0,
+			NTDailyPnL:      0,
+			NTTradeResult:   "success",
+			NTSessionTrades: 0,
+			MT5Ticket:       mt5Ticket,
+			ClosureReason:   closureReason,
+		}
+
+		a.grpcServer.BroadcastMT5CloseToAddonStreams(ack)
+	}
+
 	closeNotification := struct {
 		ID              string    `json:"id"`
 		BaseID          string    `json:"base_id"`
@@ -1012,6 +1115,10 @@ func (a *App) handleInternalMT5TradeResult(res *grpcserver.InternalMT5TradeResul
 	if baseID == "" && ticket == 0 {
 		log.Printf("gRPC: Ignoring MT5 trade result with no identifiers: %+v", res)
 		return nil
+	}
+
+	if !res.IsClose && res.Volume > 0 {
+		a.calibrateHedgeLot(res.Volume)
 	}
 
 	if res.IsClose {
@@ -1233,9 +1340,18 @@ func (a *App) HandleCloseHedgeRequest(request interface{}) error {
 	// CRITICAL: Read closed_hedge_quantity from request to close the correct number of hedges
 	// This supports n QT trades = n MT5 hedges (each contract gets its own hedge)
 	closedQty := getQuantityFromRequest(request)
-	qty := int(closedQty)
+	qty := a.normalizeContractCount(closedQty)
 	if qty < 1 {
 		qty = 1 // Safety fallback
+	}
+
+	trackedTickets := a.openTicketCount(baseID)
+	if trackedTickets == 0 {
+		log.Printf("gRPC: Close request for BaseID %s reports %d but no MT5 tickets remain; treating as idempotent", baseID, qty)
+	}
+	if trackedTickets > 0 && qty > trackedTickets {
+		log.Printf("gRPC: Adjusting close request for BaseID %s from %d to available %d MT5 ticket(s)", baseID, qty, trackedTickets)
+		qty = trackedTickets
 	}
 
 	providedTicket := getMT5TicketFromRequest(request)
